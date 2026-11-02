@@ -1,24 +1,16 @@
-// swift-tools-version: 6.1
-// The swift-tools-version declares the minimum version of Swift required to build this package.
+// swift-tools-version:5.9
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 BetterFocusIDE
 
 import PackageDescription
 
 let package = Package(
-    name: "better-focus-ide",
-    products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
-        .library(
-            name: "better-focus-ide",
-            targets: ["better-focus-ide"]),
-    ],
+    name: "BetterFocusIDE",
+    platforms: [.macOS(.v14)],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
-        .target(
-            name: "better-focus-ide"),
-        .testTarget(
-            name: "better-focus-ideTests",
-            dependencies: ["better-focus-ide"]
-        ),
+        .executableTarget(
+            name: "BetterFocusIDE",
+            path: "Sources/BetterFocusIDE"
+        )
     ]
 )
