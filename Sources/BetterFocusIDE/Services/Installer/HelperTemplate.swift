@@ -153,9 +153,20 @@ enum HelperTemplate {
             return questions
 
 
+        # 只认这些 IDE：Qoder / OpenCode / JetBrains 系。其他（如 Xcode）是开发调试
+        # 时的父进程，不是真正的宿主，必须跳过。
+        KNOWN_IDE_BUNDLES = (
+            "com.qoder.ide", "com.aliyun.lingma.ide",  # Qoder
+            "ai.opencode.desktop",                       # OpenCode
+        )
+        KNOWN_IDE_BUNDLE_PREFIXES = ("com.jetbrains.",)  # JetBrains 系
+
+
         def host_app():
             # Walk the parent-process chain, skipping shells, to the outermost
             # .app so a turn-finished notice knows which IDE to jump back to.
+            # 只返回已知 IDE（Qoder / OpenCode / JetBrains）；遇到 Xcode 等未知
+            # 应用继续向上找，直到找到已知 IDE 或耗尽层级。
             pid = os.getpid()
             bundle, name, path = "", "", ""
             for _ in range(16):
@@ -168,9 +179,11 @@ enum HelperTemplate {
                     break
                 app_path = _app_path(comm)
                 if app_path:
-                    bundle, name = _bundle_identity(app_path)
-                    path = app_path
-                    break
+                    b, n = _bundle_identity(app_path)
+                    # 只接受已知 IDE；未知应用（如 Xcode）跳过，继续向上找。
+                    if b in KNOWN_IDE_BUNDLES or any(b.startswith(p) for p in KNOWN_IDE_BUNDLE_PREFIXES):
+                        bundle, name, path = b, n, app_path
+                        break
                 if not ppid or ppid == "1" or ppid == str(pid):
                     break
                 pid = ppid
@@ -299,6 +312,22 @@ enum HelperTemplate {
                 return
 
             if event == "PermissionRequest":
+                # PermissionRequest 是阻塞事件：Qoder 会等待 hook 响应。
+                # AskUserQuestion 也通过此事件触发（而非 PreToolUse），
+                # 因为 PreToolUse 是 fire-and-forget，平台不等待响应。
+                tool_name = payload.get("tool_name") or ""
+                if tool_name == "AskUserQuestion":
+                    # 提问：走灵动岛问答流程
+                    if not alerts_enabled("question") or not os.path.exists(SOCKET_PATH):
+                        emit("allow", "BetterFocusIDE question cards are off; ask in Qoder's own dialog.")
+                        return
+                    questions = normalise(payload.get("tool_input") or {})
+                    if questions:
+                        run_question(payload, session_id, questions)
+                    else:
+                        emit("allow", "Nothing to ask; continue.")
+                    return
+                # 权限申请：走灵动岛审批流程
                 if not alerts_enabled("permission"):
                     return  # fall back to platform dialog silently
                 mode = str(payload.get("permission_mode") or payload.get("permissionMode") or "")
@@ -310,13 +339,8 @@ enum HelperTemplate {
                 return
 
             if event == "PreToolUse":
-                if (payload.get("tool_name") or "") != "AskUserQuestion":
-                    return  # fire-and-forget: never raise a card nobody waits on
-                if not alerts_enabled("question") or not os.path.exists(SOCKET_PATH):
-                    return
-                questions = normalise(payload.get("tool_input") or {})
-                if questions:
-                    run_question(payload, session_id, questions)
+                # PreToolUse 是 fire-and-forget：平台不等待响应，
+                # 所以不能在这里处理需要用户交互的请求。
                 return
 
 

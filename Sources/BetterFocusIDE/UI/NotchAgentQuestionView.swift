@@ -68,7 +68,7 @@ struct NotchAgentQuestionView: View {
                 HStack(spacing: 4) {
                     Button { controller.navigate(to: prompt.index - 1) } label: {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: 12, weight: .bold))
                     }
                     .buttonStyle(.plain)
                     .disabled(prompt.index <= 0)
@@ -78,7 +78,7 @@ struct NotchAgentQuestionView: View {
                         .monospacedDigit()
                     Button { controller.navigate(to: prompt.index + 1) } label: {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: 12, weight: .bold))
                     }
                     .buttonStyle(.plain)
                     .disabled(prompt.index >= prompt.questions.count - 1)
@@ -89,7 +89,7 @@ struct NotchAgentQuestionView: View {
             // 钉住图标（固定模式）：点击或 ⌘⇧P 在 固定 ⇄ 按需 间切换。
             Button(action: onTogglePin) {
                 Image(systemName: pinned ? "pin.fill" : "pin")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .rotationEffect(.degrees(pinned ? 0 : 45))
                     .foregroundStyle(pinned ? AnyShapeStyle(prompt.provider.tint)
                                      : AnyShapeStyle(.secondary))

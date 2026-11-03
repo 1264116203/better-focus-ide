@@ -6,11 +6,48 @@ import Combine
 
 /// 保留最近若干条通知（提问、权限、轮次完成），
 /// 让用户点击空闲灵动岛时能回顾"哪些应用找过自己"。
+///
+/// 持久化到 `~/Library/Application Support/BetterFocusIDE/history.json`，
+/// 启动时加载，每次变更后原子写盘。
 final class HistoryController: ObservableObject {
     /// 最多保留的条目数。
     static let limit = 5
 
     @Published private(set) var entries: [HistoryEntry] = []
+
+    /// 历史文件路径。
+    private static var historyURL: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return dir.appendingPathComponent("BetterFocusIDE/history.json", isDirectory: false)
+    }
+
+    init() {
+        load()
+    }
+
+    // MARK: - 持久化
+
+    /// 从 history.json 加载；文件缺失或解码失败时保留空列表。
+    private func load() {
+        guard let data = try? Data(contentsOf: Self.historyURL),
+              let stored = try? JSONDecoder().decode([HistoryEntry].self, from: data) else {
+            entries = []
+            return
+        }
+        // 只保留最近 limit 条（文件可能包含旧版本的更多条目）。
+        entries = Array(stored.prefix(Self.limit))
+    }
+
+    /// 原子写盘；失败时静默忽略（历史记录非关键数据）。
+    private func save() {
+        let dir = Self.historyURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(entries) {
+            try? data.write(to: Self.historyURL, options: .atomic)
+        }
+    }
+
+    // MARK: - 公开接口
 
     /// 记录一条新通知：新条目插到最前，超出 `limit` 时裁掉最旧的。
     func remember(_ entry: HistoryEntry) {
@@ -18,11 +55,13 @@ final class HistoryController: ObservableObject {
         if entries.count > Self.limit {
             entries.removeLast(entries.count - Self.limit)
         }
+        save()
     }
 
-    /// 清空全部历史。
+    /// 清空全部历史（同时删除文件）。
     func clear() {
         entries.removeAll()
+        try? FileManager.default.removeItem(at: Self.historyURL)
     }
 
     /// 点击某行：跳回该条目的来源应用。
