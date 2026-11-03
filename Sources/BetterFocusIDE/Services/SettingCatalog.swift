@@ -156,7 +156,7 @@ enum SettingCatalog {
         SettingDefinition(key: "cardMinHeight", label: "卡片最小高度", kind: .slider, group: "尺寸", section: "卡片",
             min: 0, max: 360, step: 10, unit: "pt", digits: 0,
             note: "0 = 完全按内容自适应；调大可减少卡片忽高忽低", advanced: true,
-            defaultValue: .double(200), get: getD(\.cardMinHeight), set: setD(\.cardMinHeight)),
+            defaultValue: .double(0), get: getD(\.cardMinHeight), set: setD(\.cardMinHeight)),
         SettingDefinition(key: "cardInset", label: "卡片内边距", kind: .slider, group: "尺寸", section: "卡片",
             min: 8, max: 40, step: 1, unit: "pt", digits: 0, advanced: true,
             defaultValue: .double(18), get: getD(\.cardInset), set: setD(\.cardInset)),
