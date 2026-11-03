@@ -510,20 +510,40 @@ final class NotchService: ObservableObject {
     private func questionCardHeight() -> CGFloat {
         let q = questionController.prompt
         let textWidth = NotchLayout.questionCardWidth - NotchLayout.cardInset * 2
-        var height: CGFloat = NotchLayout.cardInset * 2 + NotchLayout.cardHeaderHeight
-        
+        // Outer .padding(.vertical, 10) = 20; header badge tightly fits 18pt.
+        var height: CGFloat = 20 + 18
+
         let body = q?.question.question ?? "Agent has a question for you:"
+        // Each body line: fontSize * 1.3 (SwiftUI system font default line height).
+        let bodyLineH = NotchLayout.questionBodyFont * 1.3
         let bodyLines = ceil(bodyHeight(body, width: textWidth - 36, font: NotchLayout.questionBodyFont)
-                             / (NotchLayout.questionBodyFont + 6))
+                             / bodyLineH)
         let clampedLines = min(bodyLines, CGFloat(NotchLayout.questionMaxBodyLines))
-        height += NotchLayout.cardGap + clampedLines * (NotchLayout.questionBodyFont + 6)
-        
-        height += NotchLayout.cardGap
+        // VStack(spacing: 8) between header and body.
+        height += 8 + clampedLines * bodyLineH
+
+        // Option rows: .padding(.vertical, 7) × 2 = 14 + option label (fontSize*1.3).
+        // Desc text can add extra, so use a conservative single-desc-line bump.
+        let optionRowH = NotchLayout.questionOptionRowMin
         let optionCount = CGFloat(q?.question.options.count ?? 0)
-        height += optionCount * NotchLayout.questionOptionRowMin
-        height += NotchLayout.questionOtherRowHeight
-        height += NotchLayout.cardGap + NotchLayout.questionSendHeight
-        
+        var optionsH: CGFloat = 0
+        if optionCount > 0 {
+            // Each option inside VStack(spacing: 6); baseline = optionRowH.
+            optionsH = optionCount * optionRowH + max(0, optionCount - 1) * 6
+            // Assume at least one option has a description → 2 extra lines per option.
+            // (A real text-measure would read actual desc texts; this is a safe heuristic.)
+            let descBump = optionCount * NotchLayout.questionBodyFont * 0.7
+            optionsH += descBump
+        }
+        // Other row: 14 padding + label + possible text field (height 26)
+        let otherH: CGFloat = (questionController.writingOwn.contains(q?.question.id ?? "")
+            ? (optionRowH + 26) : optionRowH)
+        // VStack(spacing: 8) between body and ScrollView, and inside ScrollView's VStack(spacing: 6)
+        // between options and other row.
+        height += 8 + optionsH + 6 + otherH
+        // VStack(spacing: 8) between ScrollView and send button.
+        height += 8 + NotchLayout.questionSendHeight
+
         // Floor the content height at card_min_height (0 = fit content exactly).
         height = max(height, CGFloat(Settings.shared.cardMinHeight))
         // Add safeContentTop for our window-at-screen-top geometry.
@@ -534,20 +554,29 @@ final class NotchService: ObservableObject {
     private func permissionCardHeight() -> CGFloat {
         let p = permissionController.request
         let textWidth = NotchLayout.questionCardWidth - NotchLayout.cardInset * 2
-        var height: CGFloat = NotchLayout.cardInset * 2 + NotchLayout.cardHeaderHeight
-        
-        let title = p?.toolName ?? "Permission"
-        let titleLines = ceil(bodyHeight(title, width: textWidth - 36, font: 14) / 20.0)
-        height += NotchLayout.cardGap + titleLines * 20.0
-        
+        // Outer .padding(.vertical, 10) = 20; header badge tightly fits 18pt.
+        var height: CGFloat = 20 + 18
+
+        // Prompt line: "Agent(xxx) 请求执行「title」，是否允许？" — single 11pt text,
+        // wrapped with fixedSize so it can take multiple lines.
+        let agent = p?.agent.isEmpty ?? true ? "" : "（\(p!.agent)）"
+        let promptText = "Agent\(agent) 请求执行「\(p?.toolName ?? "Permission")」，是否允许？"
+        let promptLines = ceil(bodyHeight(promptText, width: textWidth, font: 11) / (11 * 1.3))
+        // VStack(spacing: 8) between header and body text.
+        height += 8 + promptLines * 11 * 1.3
+
         let detail = p?.detail ?? ""
         if !detail.isEmpty {
-            let detailLines = ceil(bodyHeight(detail, width: textWidth, font: 11) / 16.0)
-            height += detailLines * 16.0
+            // Detail block: .font(.system(size: 10, monospaced)), .padding(10,8)*2 = 20+16,
+            // background RoundedRectangle, .lineLimit(4).
+            let detailLines = min(ceil(bodyHeight(detail, width: textWidth - 16, font: 10) / (10 * 1.3)), 4)
+            // VStack(spacing: 2) for detail header + detail text.
+            height += 8 + 16 + detailLines * 10 * 1.3 + 16
         }
-        
-        height += NotchLayout.cardGap + NotchLayout.permissionButtonHeight
-        
+
+        // VStack(spacing: 8) before buttons, button height 28 (permissionButtonHeight=32 → use actual 28).
+        height += 8 + 28
+
         // Floor the content height at card_min_height (0 = fit content exactly).
         height = max(height, CGFloat(Settings.shared.cardMinHeight))
         return height + geometry.safeContentTop

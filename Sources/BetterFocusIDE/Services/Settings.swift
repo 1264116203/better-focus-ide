@@ -35,9 +35,9 @@ final class Settings: ObservableObject {
     @Published var permissionNoticeJump = true
 
     // MARK: - 尺寸 (sizes)
-    @Published var cardWidth: Double = 420
-    @Published var cardMinHeight: Double = 0
-    @Published var cardInset: Double = 14
+    @Published var cardWidth: Double = 540
+    @Published var cardMinHeight: Double = 200
+    @Published var cardInset: Double = 18
     @Published var bodyFont: Double = 12
     @Published var optionFont: Double = 12
     @Published var descFont: Double = 10.5
@@ -286,7 +286,7 @@ final class Settings: ObservableObject {
     func resetAll() {
         permissionEnabled = true; questionEnabled = true; turnNotifyEnabled = true
         turnNotifyJump = true; permissionNoticeJump = true
-        cardWidth = 420; cardMinHeight = 0; cardInset = 14; bodyFont = 12
+        cardWidth = 540; cardMinHeight = 200; cardInset = 18; bodyFont = 12
         optionFont = 12; descFont = 10.5; optionRowMin = 30
         bubbleWidth = 44; bubbleHeight = 26; notifyWidth = 380; notifyHeight = 74
         backgroundColor = "0.05,0.05,0.07"; backgroundAlpha = 0.96
