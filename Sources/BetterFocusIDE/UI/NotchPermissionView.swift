@@ -11,6 +11,8 @@ struct NotchPermissionView: View {
 
     private var request: PermissionRequest? { controller.request }
 
+    private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
+
     var body: some View {
         if let req = request {
             VStack(alignment: .leading, spacing: 8) {
@@ -21,7 +23,7 @@ struct NotchPermissionView: View {
                 }
                 buttonsView(req)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, inset)
             .padding(.vertical, 10)
         }
     }

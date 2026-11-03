@@ -18,6 +18,7 @@ struct NotchAgentQuestionView: View {
     private var bodyFontSize: CGFloat { CGFloat(Settings.shared.bodyFont) }
     private var optionFontSize: CGFloat { CGFloat(Settings.shared.optionFont) }
     private var descFontSize: CGFloat { CGFloat(Settings.shared.descFont) }
+    private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
     var body: some View {
         if let prompt = prompt, let question = currentQuestion {
@@ -37,7 +38,7 @@ struct NotchAgentQuestionView: View {
                 }
                 sendButton(prompt: prompt)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, inset)
             .padding(.vertical, 10)
         }
     }
