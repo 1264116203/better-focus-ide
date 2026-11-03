@@ -91,6 +91,8 @@ struct AgentQuestionPrompt: Equatable, Identifiable {
     let arrivedAt: Date
     /// 请求标识；为空时回退到首个问题 id 组合。
     var requestID: String = ""
+    /// 宿主应用身份（hook 上报的 IDE 信息），用于历史来源展示与跳转。
+    var host: HostInfo?
 
     /// 当前问题（对 index 做越界钳制）。
     var question: AgentQuestion { questions[min(index, questions.count - 1)] }

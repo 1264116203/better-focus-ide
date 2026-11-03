@@ -846,6 +846,11 @@ final class NotchService: ObservableObject {
             permissionController.handleEvent(event, message: message)
         case .permissionResolved, .permissionTimeout:
             permissionController.handleEvent(event, message: message)
+        case .permissionNotice:
+            // 权限通知（只提醒，不拦截）：以横幅形式展示，让 Qoder 原生窗做决策。
+            Log.debug("routeSocketMessage: permission_notice received, permissionEnabled=\(Settings.shared.permissionEnabled)", topic: "permission")
+            guard Settings.shared.permissionEnabled else { return }
+            noticeController.handlePermissionNotice(message: message)
         case .sessionEnded:
             questionController.handleEvent(.sessionEnded, message: message)
             permissionController.handleEvent(.sessionEnded, message: message)

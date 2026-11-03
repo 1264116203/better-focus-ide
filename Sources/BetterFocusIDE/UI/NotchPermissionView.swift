@@ -14,6 +14,12 @@ struct NotchPermissionView: View {
     /// 卡片内边距（实时取自 Settings）。
     private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
+    /// 来源展示名：优先使用 hook 上报的真实 IDE 名称，否则回退到提供方名。
+    private var sourceName: String {
+        if let hostName = request?.host?.name, !hostName.isEmpty { return hostName }
+        return request?.provider.displayName ?? ""
+    }
+
     var body: some View {
         if let req = request {
             VStack(alignment: .leading, spacing: 8) {
@@ -31,17 +37,17 @@ struct NotchPermissionView: View {
 
     // MARK: - 头部
 
-    /// 头部：提供方徽章 + "提供方 · 动作标题" + 待处理数徽标 + 钉住按钮。
+    /// 头部：来源徽章 + "来源 · 动作标题" + 待处理数徽标 + 钉住按钮。
     private func header(_ req: PermissionRequest) -> some View {
         HStack(spacing: 8) {
-            Text(String(req.provider.displayName.prefix(1)))
+            Text(String(sourceName.prefix(1)))
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 18, height: 18)
                 .background(req.provider.tint.opacity(0.9),
                             in: RoundedRectangle(cornerRadius: 4))
                 .layoutPriority(1)
-            Text("\(req.provider.displayName) · \(req.title)")
+            Text("\(sourceName) · \(req.title)")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.9))
                 .lineLimit(1)

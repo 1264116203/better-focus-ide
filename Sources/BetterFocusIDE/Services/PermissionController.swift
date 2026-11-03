@@ -36,9 +36,12 @@ final class PermissionController: ObservableObject {
         switch event {
         case .permissionRequested:
             guard let provider = AgentProvider(rawValue: message.provider),
-                  let req = PermissionRequest.parse(
+                  var req = PermissionRequest.parse(
                     payload: message.payload, provider: provider,
                     sessionID: message.sessionID) else { return }
+            let host = HostInfo(from: message.host,
+                                cwd: message.payload?["cwd"]?.stringValue)
+            req.host = host.isEmpty ? nil : host
             present(req)
 
         case .permissionResolved, .permissionTimeout:

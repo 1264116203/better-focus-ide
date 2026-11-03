@@ -153,39 +153,64 @@ enum HelperTemplate {
             return questions
 
 
+        # 渠道识别：这条通知是谁弹的
+        # Qoder 有四种跑法（JetBrains 插件 / Qoder IDE / 终端里的 CLI / OpenCode），
+        # turn_finished 只带 provider 时，岛无法知道该跳回哪个窗口 —— 在 IDEA 里用
+        # 插件写的代码，点通知却弹出了 Qoder IDE。这里沿父进程链向上找到宿主 .app，
+        # 把它的身份一并上报，由岛侧的 launcher 决定唤起谁。
+        #
+        # 为什么要跳过 shell：hook 通常经一层 sh 启动（python ← sh ← IDE）。不跳过的
+        # 话看见的永远是 /bin/sh，认不出宿主；跳过之后，IDE 内终端里跑的 CLI 也会
+        # 正确落到 IDE 上，与「人就在 IDE 里干活」的预期一致。
+        SKIP_COMM = frozenset(("sh", "bash", "zsh", "fish", "dash", "ksh", "csh",
+                               "tcsh", "nu", "xonsh", "env", "python", "python3"))
+
+
         def host_app():
             # Walk the parent-process chain, skipping shells, to the outermost
             # .app so a turn-finished notice knows which IDE to jump back to.
-            # 与 vorssaint 保持一致：返回父进程链中第一个 .app（真实宿主），不做过滤。
+            # 与 vorssaint 保持一致：跳过 shell 进程，用 .app/Contents/MacOS/ 标记
+            # 定位真正的宿主 IDE；找不到时回退到 __CFBundleIdentifier 环境变量。
             pid = os.getpid()
-            bundle, name, path = "", "", ""
-            for _ in range(16):
+            for _hop in range(16):
+                try:
+                    ppid_raw = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)],
+                                              capture_output=True, timeout=2).stdout.decode().strip()
+                except Exception:
+                    break
+                if not ppid_raw or not ppid_raw.isdigit():
+                    break
+                pid = int(ppid_raw)
+                if pid <= 1:
+                    break
                 try:
                     comm = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)],
                                           capture_output=True, timeout=2).stdout.decode().strip()
-                    ppid = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)],
-                                          capture_output=True, timeout=2).stdout.decode().strip()
                 except Exception:
                     break
+                if not comm:
+                    break
+                if os.path.basename(comm) in SKIP_COMM:
+                    continue
                 app_path = _app_path(comm)
                 if app_path:
                     bundle, name = _bundle_identity(app_path)
-                    path = app_path
-                    break
-                if not ppid or ppid == "1" or ppid == str(pid):
-                    break
-                pid = ppid
-            return {"bundle": bundle, "name": name, "path": path}
+                    return {"bundle": bundle, "name": name, "path": app_path}
+            # 父进程链没找到：回退到 __CFBundleIdentifier（IDE 启动的进程会继承它）
+            bundle = os.environ.get("__CFBundleIdentifier") or ""
+            if bundle:
+                return {"bundle": bundle, "name": "", "path": ""}
+            return {"bundle": "", "name": "", "path": ""}
 
 
         def _app_path(comm):
             if not comm or "/" not in comm:
                 return ""
-            marker = ".app/"
+            marker = ".app/Contents/MacOS/"
             idx = comm.find(marker)
             if idx == -1:
                 return ""
-            return comm[:idx + len(marker) - 1]
+            return comm[:idx + len(".app")]
 
 
         def _bundle_identity(app_path):
@@ -203,6 +228,9 @@ enum HelperTemplate {
             request_id = safe_id(payload.get("request_id") or ("q" + str(int(time.time()))))
             send({"provider": "qoder", "event": "question_requested",
                   "session_id": session_id, "request_id": request_id,
+                  # 宿主身份：岛侧历史列表要写出「是哪个渠道找过我」（在 IDEA 里跑的
+                  # Qoder 写 IntelliJ IDEA），点那一行也按它决定跳回哪个窗口。
+                  "host": host_app(),
                   "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                   "payload": {"questions": questions, "request_id": request_id}})
             since = time.time()
@@ -231,40 +259,46 @@ enum HelperTemplate {
 
 
         def run_permission(payload, session_id):
-            request_id = safe_id(payload.get("tool_use_id") or payload.get("request_id")
-                                 or ("p" + str(int(time.time()))))
-            tool_input = payload.get("tool_input") or {}
+            # 岛不接管 Qoder 的权限决策：递个信就立刻回 `ask`。
+            #
+            # 为什么不接管（vorssaint 2026-10-29 实测）：以前弹三按钮卡、等用户点完
+            # 再回 allow / deny —— 但 Qoder 不认 hook 返回的决策：同一会话第二次
+            # 照问、新会话也照问。结果比不接管更糟：用户以为"以后不再问了"。
+            # 现在只发一条 `permission_notice` 让岛弹个提醒，拍板交给 Qoder 原生窗。
+            #
+            # 不等、不回 allow 也不回 deny：那都是替人拍板。`ask` = "平台你接着问"。
+            # 顺带的好处：不再有人没点时把工具挂到 600 秒才交回 IDE。
+            tool_name = payload.get("tool_name") or ""
+            tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+            request_id = safe_id(payload.get("tool_use_id")
+                                 or payload.get("toolUseId")
+                                 or payload.get("request_id")
+                                 or (tool_name + "-" + str(int(time.time() * 1000))))
             host = host_app()
-            send({"provider": "qoder", "event": "permission_requested", "session_id": session_id,
-                  "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+
+            # tool_input 里挑一个最能说明问题的字段作为详情
+            detail = ""
+            for key in ("command", "file_path", "path", "url", "query", "pattern"):
+                value = tool_input.get(key)
+                if isinstance(value, str) and value:
+                    detail = value
+                    break
+            if not detail and tool_input:
+                detail = json.dumps(tool_input, ensure_ascii=False)[:400]
+
+            # 只递信不等回答：发完就收工
+            send({"provider": "qoder", "event": "permission_notice",
+                  "session_id": session_id,
                   "host": host,
-                  "payload": {"request_id": request_id,
-                              "tool_name": payload.get("tool_name") or "",
-                              "tool_input": tool_input, "flavor": "permission"}})
-            since = time.time()
-            deadline = since + PERMISSION_TIMEOUT
-            perm_name = "%s_perm-%s.json" % (session_id, request_id)
-            perm_path = os.path.join(ANSWER_DIR, perm_name)
-            while time.time() < deadline:
-                try:
-                    if os.path.getmtime(perm_path) >= since - 1:
-                        with open(perm_path) as f:
-                            data = json.load(f)
-                        os.remove(perm_path)
-                        decision = data.get("decision", "reject")
-                        if decision == "once":
-                            emit("allow", "Allowed once from the BetterFocusIDE island.")
-                        elif decision == "always":
-                            emit("allow", "Always allowed from the BetterFocusIDE island.")
-                        else:
-                            emit("deny", "Rejected from the BetterFocusIDE island: "
-                                 + (data.get("message") or ""))
-                        return
-                except Exception:
-                    pass
-                time.sleep(0.5)
-            # Island never answered: fall back to Qoder's own dialog.
-            emit("ask", "BetterFocusIDE did not answer in time; ask in the Qoder dialog.")
+                  "cwd": payload.get("cwd") or "",
+                  "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                  "payload": {
+                      "request_id": request_id,
+                      "tool_name": tool_name,
+                      "tool_input": tool_input,
+                      "resources": [detail] if detail else [],
+                      "flavor": "permission"}})
+            emit("ask", "BetterFocusIDE only notifies about permissions; decide in Qoder's own dialog.")
 
 
         def emit_turn_finished(session_id, payload):
@@ -315,13 +349,17 @@ enum HelperTemplate {
                     else:
                         emit("allow", "Nothing to ask; continue.")
                     return
-                # 权限申请：走灵动岛审批流程
-                if not alerts_enabled("permission"):
-                    return  # fall back to platform dialog silently
+                # 权限申请：只通知不等回答（vorssaint 模式），
+                # 必须 emit("ask") 让 Qoder 弹自己的原生对话框。
                 mode = str(payload.get("permission_mode") or payload.get("permissionMode") or "")
                 if mode in AUTO_MODES:
+                    emit("ask", "Auto-approved by permission mode.")
+                    return
+                if not alerts_enabled("permission"):
+                    emit("ask", "BetterFocusIDE permission notices are off; decide in Qoder's own dialog.")
                     return
                 if not os.path.exists(SOCKET_PATH):
+                    emit("ask", "BetterFocusIDE is not running; decide in Qoder's own dialog.")
                     return
                 run_permission(payload, session_id)
                 return

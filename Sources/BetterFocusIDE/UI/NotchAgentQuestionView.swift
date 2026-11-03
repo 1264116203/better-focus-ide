@@ -20,6 +20,12 @@ struct NotchAgentQuestionView: View {
     private var descFontSize: CGFloat { CGFloat(Settings.shared.descFont) }
     private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
+    /// 来源展示名：优先使用 hook 上报的真实 IDE 名称，否则回退到提供方名。
+    private var sourceName: String {
+        if let hostName = prompt?.host?.name, !hostName.isEmpty { return hostName }
+        return prompt?.provider.displayName ?? ""
+    }
+
     var body: some View {
         if let prompt = prompt, let question = currentQuestion {
             VStack(alignment: .leading, spacing: 8) {
@@ -45,18 +51,18 @@ struct NotchAgentQuestionView: View {
 
     // MARK: - 头部
 
-    /// 头部：提供方徽章 + "提供方 · 问题标题" + 多问翻页步进器 + 钉住按钮。
+    /// 头部：提供方徽章 + "来源 · 问题标题" + 多问翻页步进器 + 钉住按钮。
     private func header(prompt: AgentQuestionPrompt, question: AgentQuestion) -> some View {
         HStack(spacing: 8) {
-            // 提供方徽章
-            Text(String(prompt.provider.displayName.prefix(1)))
+            // 提供方徽章（首字母取自来源名）
+            Text(String(sourceName.prefix(1)))
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: 18, height: 18)
                 .background(prompt.provider.tint.opacity(0.9),
                             in: RoundedRectangle(cornerRadius: 4))
                 .layoutPriority(1)
-            Text("\(prompt.provider.displayName) · \(question.header)")
+            Text("\(sourceName) · \(question.header)")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.9))
                 .lineLimit(1)
