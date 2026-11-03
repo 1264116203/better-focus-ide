@@ -67,8 +67,6 @@ final class NotchCanvas: NSView {
     private let dim = NSView()
     /// 岛正在趋向 / 静止于的尺寸（内容尺寸）。
     private var contentSize: CGSize
-    /// 当前几何信息（用于获取 cameraHeight 定位气泡到刘海内）。
-    private var currentGeometry: NotchGeometry
     private var trackingArea: NSTrackingArea?
 
     // MARK: - 鼠标回调（由 NotchWindowHost → NotchService 接线）
@@ -81,9 +79,8 @@ final class NotchCanvas: NSView {
     override var isOpaque: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    init(content: AnyView, size: CGSize, geometry: NotchGeometry) {
+    init(content: AnyView, size: CGSize) {
         contentSize = size
-        currentGeometry = geometry
         host = NotchHostingView(rootView: content)
         host.sizingOptions = []
         host.wantsLayer = true
@@ -126,14 +123,9 @@ final class NotchCanvas: NSView {
 
     // MARK: 几何辅助
 
-    /// `size` 对应的岛矩形：在当前画布宽度内水平居中。
-    ///
-    /// 收起态（画布矮于刘海）时气泡贴合刘海物理区域；展开态（画布向下延伸）时
-    /// 气泡仍锚定在刘海内，内容从气泡下缘开始向下铺开。
+    /// `size` 对应的岛矩形：在当前画布宽度内水平居中、顶部对齐画布顶边。
     func islandRect(for size: CGSize) -> CGRect {
-        let notchH = max(size.height, currentGeometry.cameraHeight)
-        let bubbleY = max(0, notchH - currentGeometry.cameraHeight)
-        return CGRect(x: (bounds.width - size.width) / 2, y: bubbleY,
+        return CGRect(x: (bounds.width - size.width) / 2, y: 0,
                       width: size.width, height: size.height)
     }
 
@@ -156,9 +148,8 @@ final class NotchCanvas: NSView {
 
     // MARK: 静止布局
 
-    func setContentSize(_ size: CGSize, geometry: NotchGeometry? = nil) {
+    func setContentSize(_ size: CGSize) {
         contentSize = size
-        if let g = geometry { currentGeometry = g }
         needsLayout = true
     }
 
@@ -177,8 +168,6 @@ final class NotchCanvas: NSView {
         edge.path = path
         applyBaseColor()
         updateContrast()
-        // 调试日志：输出遮罩与内容的实际尺寸，用于诊断对齐问题。
-        Log.debug("Canvas.layout: contentSize=\(contentSize), islandRect=\(rect), canvas.bounds=\(bounds)", topic: "layout")
         CATransaction.commit()
     }
 
@@ -359,7 +348,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     /// 岛是否正在展示内容卡片（相对于收起胶囊）。
     private var showsContent = false
 
-    /// 岛四周的透明留白，让窗口投影有空间在窗口边界内绘制（顶部与屏幕边缘齐平）。
+    /// 岛四周的透明留白，让窗口投影有空间在窗口边界内绘制。
     private let shadowPad: CGFloat = 26
 
     /// 把鼠标追踪回调接到画布上。
@@ -379,7 +368,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         panel = NotchPanel(contentRect: geometry.frame(for: size, showsContent: false),
                            styleMask: [.borderless, .nonactivatingPanel],
                            backing: .buffered, defer: false)
-        canvas = NotchCanvas(content: content, size: size, geometry: geometry)
+        canvas = NotchCanvas(content: content, size: size)
         super.init()
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -396,9 +385,9 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         appliedFrame = panel.frame
     }
 
-    /// 容纳顶部居中岛的带留白窗口 frame：四周与底部各留 `shadowPad`，顶部不留（与
-    /// 屏幕边缘齐平，投影本就会掉到屏幕外）。`showsContent` 为 false 时 frame 落在
-    /// 刘海切口正下方，使收起胶囊不压到摄像头外壳。
+    /// 容纳顶部居中岛的带留白窗口 frame：四周各留 `shadowPad`，底部额外留 `shadowPad`
+    /// 供投影消散。`showsContent` 为 false 时 frame 落在刘海底沿，使收起胶囊悬挂于
+    /// 摄像头下方。
     private func panelFrame(for islandSize: CGSize, showsContent: Bool = true) -> CGRect {
         let base = currentGeometry.frame(for: islandSize, showsContent: showsContent)
         return CGRect(x: base.minX - shadowPad,
@@ -429,7 +418,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             CATransaction.setDisableActions(true)
             panel.setFrame(pixelAligned(panelFrame(for: size, showsContent: showsContent)), display: true)
             appliedFrame = panelFrame(for: size, showsContent: showsContent)
-            canvas.setContentSize(size, geometry: geometry)
+            canvas.setContentSize(size)
             canvas.layoutSubtreeIfNeeded()
             CATransaction.commit()
         }
@@ -465,7 +454,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         CATransaction.setDisableActions(true)
         panel.setFrame(pixelAligned(panelFrame(for: envelope, showsContent: showsContent)), display: true)
         appliedFrame = panelFrame(for: envelope, showsContent: showsContent)
-        canvas.setContentSize(envelope, geometry: geometry)
+        canvas.setContentSize(envelope)
         canvas.layoutSubtreeIfNeeded()
         CATransaction.commit()
 

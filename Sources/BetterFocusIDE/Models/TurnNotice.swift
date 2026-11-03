@@ -35,18 +35,18 @@ struct TurnNotice: Equatable, Identifiable {
     /// 标题与正文读取自 hook 上报的 transcript jsonl（见 `Transcript.sessionSummary`）；
     /// 文件缺失/不可读时坍缩为空并回退到通用文案。
     static func parse(message: AgentSocketMessage) -> TurnNotice? {
-        let provider = (message.provider).lowercased()
+        let providerEnum = message.resolvedProvider
+        let provider = providerEnum.rawValue
         let sessionID = message.sessionID
         let host = HostInfo(from: message.host,
-                            cwd: message.payload?["cwd"]?.stringValue)
+                            cwd: message.cwd)
         let project = projectLeaf(from: host)
         // 来源展示名：优先使用 hook 上报的真实 IDE 名称（如 "IntelliJ IDEA"），
-        // 否则回退到提供方名（"Qoder" / "OpenCode"）。
-        let name = host.name.isEmpty == false ? host.name :
-            (AgentProvider(rawValue: provider)?.displayName ?? provider.capitalized)
+        // 否则回退到产品名（"Qoder" / "JetBrains" / "Qoder CLI" 等）。
+        let name = host.name.isEmpty == false ? host.name : providerEnum.displayName
         // 从 hook 上报的 transcript jsonl 读取真实会话标题。
         let transcriptPath = message.payload?["transcript_path"]?.stringValue
-        let summary = Transcript.sessionSummary(path: transcriptPath, provider: provider)
+        let summary = Transcript.sessionSummary(path: transcriptPath, provider: providerEnum.providerGroup)
 
         return TurnNotice(
             provider: provider,

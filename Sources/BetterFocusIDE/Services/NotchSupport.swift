@@ -152,11 +152,12 @@ struct NotchGeometry: Equatable {
         return CGSize(width: min(cameraWidth, cameraWidth + shoulders), height: cameraHeight)
     }
     
-    /// 给定尺寸在屏幕坐标系中的 frame（水平居中、贴屏幕顶边）。
+    /// 给定尺寸在屏幕坐标系中的 frame（水平居中）。
+    ///
+    /// `showsContent` 为 false 且为刘海屏时，frame 顶边贴刘海底沿（收起胶囊悬挂于
+    /// 摄像头下方）；否则 frame 顶边对齐屏幕顶边。
     func frame(for size: CGSize, showsContent: Bool = true) -> CGRect {
         let x = screen.midX - size.width / 2
-        /// 收起（无内容）的胶囊略微滑到刘海切口下方，避免压住摄像头外壳；
-        /// 内容卡片仍从顶边展开（safeContentTop 已计入摄像头高度）。
         let y: CGFloat
         if !showsContent && isNotched {
             y = screen.maxY - cameraHeight - size.height

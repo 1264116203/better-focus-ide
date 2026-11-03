@@ -34,7 +34,8 @@ struct HostInfo: Codable, Equatable {
 enum IDELauncher {
     // 提供方 → bundle id / 应用名，按尝试顺序排列。
     static let ideBundles: [String: [String]] = [
-        "qoder": ["com.qoder.ide", "com.aliyun.lingma.ide"],
+        // Qoder 家族：独立应用 + VS Code 系 IDE（英文/中文）
+        "qoder": ["com.qoder.app", "com.qoder.ide", "com.aliyun.lingma.ide"],
         "opencode": ["ai.opencode.desktop"],
     ]
     static let ideNames: [String: [String]] = [
@@ -42,6 +43,8 @@ enum IDELauncher {
         "opencode": ["OpenCode"],
     ]
     static let jetbrainsPrefix = "com.jetbrains."
+    /// VS Code 系 Qoder 变体：支持 `code -r <cwd>` 聚焦窗口。
+    static let qoderVSCodeBundles: Set<String> = ["com.qoder.ide", "com.aliyun.lingma.ide"]
     /// 表示"跑在终端里、没有可跳回的 GUI 窗口"的 bundle 集合。
     static let terminalBundles: Set<String> = [
         "com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty",
@@ -51,7 +54,10 @@ enum IDELauncher {
 
     /// 决定该为这条通知唤起哪个应用；返回 nil 表示没有可跳转的目标。
     static func target(for provider: String, host: HostInfo?) -> (bundles: [String], names: [String])? {
-        let key = ideBundles[provider] != nil ? provider : "qoder"
+        // provider 可能是产品值（jetbrains_plugin / qoder_cli 等）或组值（qoder / opencode），
+        // 用 AgentProvider 统一解析后取 providerGroup 作为索引键。
+        let resolved = AgentProvider(rawValue: provider)
+        let key = resolved?.providerGroup ?? (ideBundles[provider] != nil ? provider : "qoder")
         let bundles = ideBundles[key] ?? []
         let names = ideNames[key] ?? []
         let bundle = host?.bundle ?? ""
@@ -63,33 +69,75 @@ enum IDELauncher {
         }
         if bundles.contains(bundle) { return (bundles, names) }
         // Qoder 跑在终端里：无窗口可跳，返回 nil。
-        if terminalBundles.contains(bundle) && provider == "qoder" { return nil }
+        if terminalBundles.contains(bundle) && key == "qoder" { return nil }
         return (bundles, names)
     }
 
     /// 为该通知唤起 IDE。返回是否成功。
+    ///
+    /// 二级定位策略（知道 `cwd` 时先尝试精确聚焦到具体项目窗口）：
+    /// - JetBrains：CLI 直达 → AXRaise 同 Space → Window 菜单跨 Space/合并 tab
+    /// - Qoder IDE：`code -r <cwd>` 复用窗口
+    /// - 其他/失败：回退 App 级激活
     @discardableResult
     static func activate(provider: String, host: HostInfo?) -> Bool {
         guard let targets = target(for: provider, host: host) else {
             Log.info("\(provider) 跑在终端里，没有可跳转的窗口", topic: "launcher")
             return false
         }
+        let bundles = targets.bundles
+        let names = targets.names
+        let hostBundle = host?.bundle ?? ""
+        let cwd = host?.cwd ?? ""
+
+        // ── 窗口级二级定位：知道项目目录时先尝试精确聚焦 ──
+        if !cwd.isEmpty {
+            // JetBrains 系：三层回退
+            if hostBundle.hasPrefix(jetbrainsPrefix) {
+                // ① CLI 直达：让运行中的 IDE 自己聚焦目标工程窗/tab（跨 Space、无闪烁）
+                if focusJetBrainsViaCLI(bundle: hostBundle, cwd: cwd) {
+                    Log.info("已用 JetBrains CLI 定位窗口 \(provider)（\(cwd)）", topic: "launcher")
+                    return true
+                }
+                // ② AXRaise：同 Space 时直达（无闪烁）
+                if isRunning(bundle: hostBundle), activateByAppleScript(bundle: hostBundle) {
+                    if raiseJetBrainsWindow(bundle: hostBundle, cwd: cwd) {
+                        Log.info("AXRaise 定位 JetBrains 窗口 \(provider)（\(cwd)）", topic: "launcher")
+                        return true
+                    }
+                    // ③ Window 菜单点击：跨 Space/合并 tab（有闪烁但可靠）
+                    let focusOk = focusJetBrainsWindowViaMenu(bundle: hostBundle, cwd: cwd)
+                    Log.info("已定位 JetBrains 窗口 \(provider)（\(cwd)）菜单定位: \(focusOk)", topic: "launcher")
+                    return true
+                }
+            }
+            // Qoder IDE（VS Code 系）：code -r 复用窗口
+            // 注意：Qoder.app (com.qoder.app) 是独立应用，不支持 code -r，直接跳过
+            if qoderVSCodeBundles.contains(hostBundle) {
+                if focusCodeWindow(hostPath: host?.path ?? "", cwd: cwd) {
+                    Log.info("已用 code -r 定位 Qoder 窗口 \(cwd)", topic: "launcher")
+                    return true
+                }
+            }
+        }
+
+        // ── App 级回退 ──
         // 1. 优先按运行中应用的 bundle id 激活。
-        for bundle in targets.bundles {
+        for bundle in bundles {
             if isRunning(bundle: bundle), activateByAppleScript(bundle: bundle) {
                 Log.info("已激活 \(provider)（\(bundle)）", topic: "launcher")
                 return true
             }
         }
         // 2. 回退到应用名（中文区 bundle id 常常对不上）。
-        for name in runningNames(matching: targets.names) {
+        for name in runningNames(matching: names) {
             if activateByAppName(name: name) {
                 Log.info("已按应用名激活 \(name)", topic: "launcher")
                 return true
             }
         }
         // 3. 没在运行：直接启动它。
-        for bundle in targets.bundles {
+        for bundle in bundles {
             if launch(bundle: bundle) {
                 Log.info("已启动 \(provider)（\(bundle)）", topic: "launcher")
                 return true
@@ -165,5 +213,138 @@ enum IDELauncher {
             Log.warning("启动 \(bundle) 失败：\(error)", topic: "launcher")
             return false
         }
+    }
+
+    // MARK: - 二级定位：JetBrains
+
+    /// 取项目目录的末段名（JetBrains 窗口标题里的项目名就是它）。
+    private static func projectLeaf(from cwd: String) -> String {
+        let url = URL(fileURLWithPath: cwd)
+        return url.lastPathComponent
+    }
+
+    /// 用 JetBrains App 自带可执行文件聚焦工程窗（无菜单闪烁，首选）。
+    ///
+    /// `<binary> <项目路径>`：运行中的实例会把请求转发给对应工程窗/合并 tab 并聚焦
+    /// （含跨全屏 Space，由 IDE 自己切桌面）。二进制路径从 `NSRunningApplication.executableURL`
+    /// 现取，不依赖 hook 上报的 path 字段；仅在实例已运行时尝试。
+    private static func focusJetBrainsViaCLI(bundle: String, cwd: String) -> Bool {
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+        guard let app = apps.first else { return false }
+        guard let exe = app.executableURL?.path, FileManager.default.isExecutableFile(atPath: exe) else {
+            Log.debug("未找到 \(bundle) 的可执行文件，不用 CLI 定位", topic: "launcher")
+            return false
+        }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: exe)
+        task.arguments = [cwd]
+        do {
+            try task.run()
+            task.waitUntilExit()
+            guard task.terminationStatus == 0 else {
+                Log.debug("JetBrains CLI 返回非零 (\(task.terminationStatus))", topic: "launcher")
+                return false
+            }
+            return true
+        } catch {
+            Log.debug("JetBrains CLI 定位失败：\(error)", topic: "launcher")
+            return false
+        }
+    }
+
+    /// 同 Space 独立窗的无闪烁定位：用 AXRaise 直接提目标窗口。
+    ///
+    /// 按窗口标题前缀匹配工程名（IDEA 窗口标题形如 `<project> – <file>`）。
+    /// 局限：跨全屏 Space 时 System Events 看不到其他 Space 的窗口，会 miss。
+    private static func raiseJetBrainsWindow(bundle: String, cwd: String) -> Bool {
+        let leaf = projectLeaf(from: cwd)
+        guard !leaf.isEmpty else { return false }
+        let safeLeaf = leaf.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let source = """
+        tell application "System Events" to tell (first process whose bundle identifier is "\(bundle)")
+          set frontmost to true
+          try
+            tell (first window whose name starts with "\(safeLeaf)") to perform action "AXRaise"
+          on error
+            return "miss"
+          end try
+        end tell
+        """
+        guard let (ok, result) = runAppleScriptWithResult(source), ok else { return false }
+        // 成功时 result 可能是 "miss" 或 nil
+        if let str = result as? String, str.trimmingCharacters(in: .whitespaces) == "miss" {
+            return false
+        }
+        return true
+    }
+
+    /// 靠 IDEA 自己的 Window 菜单切到目标工程窗（实测可跨 Space / 合并 tab）。
+    ///
+    /// 一个工程一个窗，Window 菜单里那一项的名字就是工程目录名。作为 AXRaise miss 时的兜底。
+    /// 已知 trade-off：菜单点击会短暂展开 Window 菜单（约 100-200ms 视觉闪烁）。
+    private static func focusJetBrainsWindowViaMenu(bundle: String, cwd: String) -> Bool {
+        let leaf = projectLeaf(from: cwd)
+        guard !leaf.isEmpty else { return false }
+        let safeLeaf = leaf.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let source = """
+        tell application "System Events" to tell (first process whose bundle identifier is "\(bundle)")
+          set frontmost to true
+          click menu bar item "Window" of menu bar 1
+          click menu item "\(safeLeaf)" of menu 1 of menu bar item "Window" of menu bar 1
+        end tell
+        """
+        let ok = runAppleScript(source)
+        if !ok {
+            Log.debug("点 Window 菜单未命中工程窗 bundle=\(bundle) leaf=\(leaf)", topic: "launcher")
+        } else {
+            Log.debug("Window 菜单点击成功 leaf=\(leaf)", topic: "launcher")
+        }
+        return ok
+    }
+
+    // MARK: - 二级定位：Qoder / VS Code 系
+
+    /// 用 IDE 自带的 `code` 启动器 `-r`（reuse-window）聚焦该 workspace 窗口。
+    ///
+    /// Qoder 是 VS Code 系 fork，窗口标题不含项目路径；但 IDE 自己知道哪个窗口开着哪个
+    /// folder，`code -r <folder>` 会把它复用/聚焦到那个窗口——不需要辅助功能授权，最准。
+    private static func focusCodeWindow(hostPath: String, cwd: String) -> Bool {
+        guard !hostPath.isEmpty else { return false }
+        let codeBin = (hostPath as NSString).appendingPathComponent("Contents/Resources/app/bin/code")
+        guard FileManager.default.isExecutableFile(atPath: codeBin) else {
+            Log.debug("未找到 \(hostPath) 的 code 启动器，回退 App 级唤起", topic: "launcher")
+            return false
+        }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: codeBin)
+        task.arguments = ["-r", cwd]
+        do {
+            try task.run()
+            task.waitUntilExit()
+            guard task.terminationStatus == 0 else {
+                Log.debug("code -r 返回非零 (\(task.terminationStatus))", topic: "launcher")
+                return false
+            }
+            return true
+        } catch {
+            Log.debug("code -r 唤起失败：\(error)", topic: "launcher")
+            return false
+        }
+    }
+
+    // MARK: - AppleScript 辅助
+
+    /// 执行 AppleScript 并返回 (成功, 结果值)。
+    private static func runAppleScriptWithResult(_ source: String) -> (Bool, Any?)? {
+        guard let script = NSAppleScript(source: source) else { return nil }
+        var errorInfo: NSDictionary?
+        let result = script.executeAndReturnError(&errorInfo)
+        if let errorInfo {
+            Log.warning("AppleScript 失败：\(errorInfo)", topic: "launcher")
+            return (false, nil)
+        }
+        return (true, result)
     }
 }
