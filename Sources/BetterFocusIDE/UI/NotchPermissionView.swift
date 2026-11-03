@@ -3,7 +3,7 @@
 
 import SwiftUI
 
-/// Permission card shown on the island when a tool call requires approval.
+/// 工具调用需要审批时，在灵动岛上展示的权限卡片。
 struct NotchPermissionView: View {
     @ObservedObject var controller: PermissionController
     var pinned = false
@@ -11,6 +11,7 @@ struct NotchPermissionView: View {
 
     private var request: PermissionRequest? { controller.request }
 
+    /// 卡片内边距（实时取自 Settings）。
     private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
     var body: some View {
@@ -28,8 +29,9 @@ struct NotchPermissionView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - 头部
 
+    /// 头部：提供方徽章 + "提供方 · 动作标题" + 待处理数徽标 + 钉住按钮。
     private func header(_ req: PermissionRequest) -> some View {
         HStack(spacing: 8) {
             Text(String(req.provider.displayName.prefix(1)))
@@ -69,8 +71,9 @@ struct NotchPermissionView: View {
         }
     }
 
-    // MARK: - Body
+    // MARK: - 正文
 
+    /// 正文提示行："Agent（xxx）请求执行「标题」，是否允许？"，可多行换行。
     private func bodyText(_ req: PermissionRequest) -> some View {
         let agent = req.agent.isEmpty ? "" : "（\(req.agent)）"
         return Text("Agent\(agent) 请求执行「\(req.title)」，是否允许？")
@@ -79,8 +82,9 @@ struct NotchPermissionView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    // MARK: - Detail
+    // MARK: - 详情
 
+    /// 详情块：等宽字体展示命令/路径，最多 4 行，带半透明圆角底。
     private func detailBlock(_ req: PermissionRequest) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(req.detail)
@@ -96,8 +100,9 @@ struct NotchPermissionView: View {
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    // MARK: - Buttons
+    // MARK: - 按钮
 
+    /// 三个决策按钮：允许 / 始终允许 / 拒绝。
     private func buttonsView(_ req: PermissionRequest) -> some View {
         HStack(spacing: 8) {
             permissionButton("允许", decision: .allowOnce,
@@ -109,6 +114,7 @@ struct NotchPermissionView: View {
         }
     }
 
+    /// 单个决策按钮；已做出任一选择后全部禁用，选中项用实色、其余降透明度。
     private func permissionButton(_ label: String, decision: PermissionDecisionValue,
                                    color: Color, req: PermissionRequest) -> some View {
         let chosen = controller.choice == decision
@@ -127,3 +133,28 @@ struct NotchPermissionView: View {
         .disabled(controller.choice != nil)
     }
 }
+
+#if DEBUG
+/// Xcode Canvas 预览：构造一个 PermissionController 并注入模拟的权限请求。
+struct NotchPermissionView_Previews: PreviewProvider {
+    static var previews: some View {
+        let ctrl = PermissionController()
+        let mock = PermissionRequest(
+            requestID: "preview-req-1",
+            provider: .qoder,
+            sessionID: "preview-session",
+            action: "shell",
+            resources: ["swift build -c debug"],
+            agent: "CodeAssistant",
+            toolName: "bash",
+            toolInput: nil,
+            arrivedAt: Date()
+        )
+        ctrl.present(mock)
+        return NotchPermissionView(controller: ctrl)
+            .frame(width: 420)
+            .padding()
+            .preferredColorScheme(.dark)
+    }
+}
+#endif

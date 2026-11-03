@@ -5,93 +5,96 @@ import AppKit
 import SwiftUI
 import Combine
 
+/// 灵动岛中央编排服务（单例、`ObservableObject`）。
+///
+/// 汇聚四类卡片控制器（提问 / 权限 / 通知 / 历史）、socket 事件路由、悬停状态机、
+/// 键盘应答、窗口呈现与设置实时生效。视图通过订阅其 `@Published` 属性驱动刷新。
 final class NotchService: ObservableObject {
     static let shared = NotchService()
     
-    // MARK: - Published State
+    // MARK: - 对外发布状态
     @Published private(set) var geometry: NotchGeometry
     @Published private(set) var expanded = false
     @Published private(set) var surfaceSize: CGSize
     @Published private(set) var surfaceShift: CGFloat = 0
 
-    // MARK: - Phase 2: Cards
+    // MARK: - 阶段 2：卡片
     let questionController = QuestionController()
     let permissionController = PermissionController()
-    // MARK: - Phase 3: Notice
+    // MARK: - 阶段 3：通知
     let noticeController = NoticeController()
-    // MARK: - Phase 4: History
+    // MARK: - 阶段 4：历史
     let historyController = HistoryController()
-    /// Which card is currently active (question takes priority).
+    /// 当前活动卡片（提问优先）。
     @Published private(set) var activeCard: ActiveCard = .none
-    /// Total pending items across all controllers (drives the collapsed dot).
+    /// 所有控制器的待处理总数（驱动收起态圆点）。
     @Published private(set) var pendingTotal: Int = 0
-    /// Provider tint for the collapsed pending dot.
+    /// 收起态待处理圆点的提供方主题色。
     @Published private(set) var pendingTint: (r: Double, g: Double, b: Double) = NotchLayout.accentColor
-    /// Timestamp when the bell swing animation should start (notification arrival).
+    /// 铃铛摆动动画应开始的时刻（通知到达时）。
     @Published var bellSwingStart: Date?
-    /// Card being withdrawn (visible during the collapse animation, then cleared).
+    /// 正在撤下的卡片（收起动画期间可见，随后清空）。
     @Published private(set) var closingCard: ActiveCard?
 
     enum ActiveCard {
         case none, question, permission, notice, history
     }
     
-    // MARK: - Private
+    // MARK: - 私有依赖
     private var windowHost: NotchWindowHost?
     private var cancellables = Set<AnyCancellable>()
     private var screenObserver: NSObjectProtocol?
     private let socketServer = AgentEventSocketServer.shared
 
-    // MARK: - Keyboard / pin state
-    /// When the island last expanded — drives the anti-mistouch guard window.
+    // MARK: - 键盘 / 钉住状态
+    /// 岛上次展开的时刻——驱动防误触窗口。
     private var expandedAt = Date.distantPast
-    /// True while a card is fading out; keys are ignored so an answer can't change.
+    /// 卡片正在淡出时为 true；按键被忽略，应答不会中途被改。
     private var isClosing = false
-    /// Pinned cards stay expanded instead of auto-collapsing ("固定 ⇄ 按需").
+    /// 钉住的卡片保持展开而非自动收起（"固定 ⇄ 按需"）。
     @Published private(set) var pinned = false
     private var keyMonitor: Any?
-    /// Wired by AppDelegate so ⌘, opens the settings window.
+    /// 由 AppDelegate 接线，使 ⌘, 打开设置窗口。
     var onOpenSettings: (() -> Void)?
 
-    /// Anti-mistouch window (seconds) after a card appears, matching Python's
-    /// `CARD_CLICK_GUARD`. A hand resting where "allow" will land can't approve.
-    /// Live from Settings (click_guard); 0 disables the guard.
+    /// 卡片出现后的防误触窗口（秒），对齐 Python `CARD_CLICK_GUARD`。手正搭在
+    /// "允许"将落下的位置时无法误批。实时取自 Settings（click_guard）；0 关闭守卫。
     static var cardClickGuard: TimeInterval { Settings.shared.clickGuard }
     
-    /// True while the anti-mistouch guard is active (card just appeared).
+    /// 防误触守卫是否处于激活期（卡片刚出现）。
     var isClickGuarded: Bool {
         Date().timeIntervalSince(expandedAt) < Self.cardClickGuard
     }
     
-    // MARK: - Hover state machine (Python HOVER_EXPAND_DELAY / HOVER_COLLAPSE_DELAY)
+    // MARK: - 悬停状态机（Python HOVER_EXPAND_DELAY / HOVER_COLLAPSE_DELAY）
     
-    /// Delay before hover expands the island (seconds, live from Settings).
+    /// 悬停多久后展开岛（秒，实时取自 Settings）。
     static var hoverExpandDelay: TimeInterval { Settings.shared.hoverExpandDelay }
-    /// Delay after mouse exits before auto-collapse (seconds, live from Settings).
+    /// 鼠标移出后多久自动收起（秒，实时取自 Settings）。
     static var hoverCollapseDelay: TimeInterval { Settings.shared.hoverCollapseDelay }
-    /// Hold-off after manual collapse in pinned mode (seconds, live from Settings).
+    /// 固定模式下手动收起后的让位时长（秒，实时取自 Settings）。
     static var manualCollapseHold: TimeInterval { Settings.shared.manualCollapseHold }
-    /// History panel auto-close duration (seconds, live from Settings).
+    /// 历史面板自动关闭时长（秒，实时取自 Settings）。
     static var historyDuration: TimeInterval { Settings.shared.historyDuration }
     
     private var hovering = false
     private var hoverSince: Date?
     private var hoverExpanded = false
-    /// On-demand mode: scheduled collapse time after mouse exit.
+    /// 按需模式：鼠标移出后安排的收起时刻。
     private var collapseAt: Date?
-    /// Auto-collapse deadline for transient content (notice/history).
+    /// 瞬态内容（通知/历史）的自动收起截止时间。
     private var autoCollapseAt: Date?
-    /// Saved deadline when hover pauses auto-collapse.
+    /// 悬停暂停自动收起时保存的截止时间。
     private var autoCollapseHeld: Date?
-    /// Pinned mode: manual collapse hold-off (no re-expand until this passes).
+    /// 固定模式：手动收起的让位期（在此之前不再自动展开）。
     private var manualCollapseUntil: Date?
     private var hoverTimer: Timer?
-    /// Periodic stale-card sweep (Python CARD_SWEEP_INTERVAL / CARD_SWEEP_GRACE).
+    /// 周期性陈旧卡片清扫（Python CARD_SWEEP_INTERVAL / CARD_SWEEP_GRACE）。
     private var sweepTimer: Timer?
     private var lastSweepInterval = 0
 
     private init() {
-        // Pin to the notch display, not whatever currently has focus.
+        // 钉在刘海屏，而非当前有焦点的那块屏。
         let screen = Self.preferredScreen() ?? NSScreen.screens.first!
         let safeAreaTop = screen.safeAreaInsets.top
         let cameraWidth = Self.detectCameraWidth(screen: screen)
@@ -104,18 +107,17 @@ final class NotchService: ObservableObject {
         
         self.geometry = initialGeometry
         
-        // Start with collapsed size
+        // 以收起尺寸启动
         self.surfaceSize = initialGeometry.restingSize(showsContent: false)
         
-        // Observe screen changes
+        // 观察屏幕变化
         observeScreenChanges()
 
-        // Wire up controllers
+        // 接线各控制器
         setupControllers()
 
-        // Live config: re-layout the island whenever a setting changes so edits
-        // apply at once (Python settings.on_change), and keep the stale-card
-        // sweep running on the configured interval.
+        // 实时配置：任一设置变更都重排岛，使改动即时生效（Python settings.on_change），
+        // 并按配置的周期让陈旧卡片清扫持续运行。
         Settings.shared.changes
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.handleSettingsChanged() }
@@ -123,8 +125,9 @@ final class NotchService: ObservableObject {
         startSweepTimer()
     }
     
-    // MARK: - Public Methods
-    
+    // MARK: - 公开方法
+
+    /// 首次显示岛：惰性创建窗口宿主后无动画呈现。
     func show() {
         if windowHost == nil {
             createWindowHost()
@@ -137,22 +140,25 @@ final class NotchService: ObservableObject {
         )
     }
     
+    /// 带动画隐藏岛。
     func hide() {
         windowHost?.hide(animated: true)
     }
     
+    /// 点击表面的三分支：已展开则收起；有卡片但收起（按需模式）则展开；空闲岛则回顾历史。
     func toggle() {
         if expanded {
             collapse()
         } else if activeCard != .none {
-            // Card showing but collapsed (on-demand mode): expand it.
+            // 有卡片但处于收起态（按需模式）：展开它。
             expand()
         } else {
-            // Idle island: clicking reviews recent notifications.
+            // 空闲岛：点击回顾最近通知。
             showHistory()
         }
     }
     
+    /// 展开到当前卡片的目标尺寸。
     func expand() {
         guard !expanded else { return }
         expanded = true
@@ -163,18 +169,21 @@ final class NotchService: ObservableObject {
         syncKeyFocus()
     }
     
+    /// 收起岛。
+    ///
+    /// 固定模式下记录让位期，避免自动展开立刻重开。历史与通知是瞬态的，收起即消失；
+    /// 提问与权限持续存在（卡片仍在等用户）。
     func collapse() {
         guard expanded else { return }
         expanded = false
         isClosing = true
-        // Pinned mode: record hold-off so auto-expand doesn't immediately re-open.
+        // 固定模式：记录让位期，使自动展开不会立即重开。
         if pinned {
             manualCollapseUntil = Date().addingTimeInterval(Self.manualCollapseHold)
         }
         cancelAutoCollapse()
         collapseAt = nil
-        // History and notice are transient: collapsing dismisses them.
-        // Question and permission persist (card still awaits the user).
+        // 历史与通知是瞬态的：收起即消失。提问与权限持续（卡片仍等用户）。
         if activeCard == .history {
             activeCard = .none
         } else if activeCard == .notice {
@@ -185,16 +194,15 @@ final class NotchService: ObservableObject {
         animateTo(size: newSize)
         syncKeyFocus()
         updatePendingTotal()
-        // Clear the closing flag once the fade settles so keys resume next time.
+        // 淡出落定后清掉 closing 标志，使下次按键恢复。
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             guard let self, !self.expanded else { return }
             self.isClosing = false
         }
     }
 
-    /// The panel may take keyboard focus only while a card is on screen, so a
-    /// click can make it key and the shortcuts come alive — without ever stealing
-    /// focus from the user's editor/terminal on its own.
+    /// 面板只在有卡片上屏时才接管键盘焦点，这样点击能使其成为 key、快捷键随之生效——
+    /// 而绝不主动从用户的编辑器/终端抢走焦点。
     private func syncKeyFocus() {
         let cardShowing = expanded && (activeCard == .question || activeCard == .permission)
         windowHost?.panel.acceptsKeyFocus = cardShowing
@@ -236,6 +244,7 @@ final class NotchService: ObservableObject {
     
     private func animateTo(size: CGSize) {
         surfaceSize = size
+        Log.debug("NotchService.animateTo: surfaceSize=\(size), expanded=\(expanded), activeCard=\(activeCard)", topic: "layout")
         windowHost?.present(
             size: size,
             geometry: geometry,
@@ -370,27 +379,48 @@ final class NotchService: ObservableObject {
         OpenCodePluginInstaller.uninstall()
     }
 
-    /// Show the recent-notifications panel (from an idle island).
+    /// 显示最近通知历史面板（从空闲状态的灵动岛触发）
+    ///
+    /// ## 布局公式
+    /// ```
+    /// contentHeight = 垂直内边距×2 + 标题栏高度 + 标题栏下间距
+    ///               + 行数×行高 + (行数-1)×行间距
+    ///             = 12×2 + 20 + 4 + rows×40 + (rows-1)×4
+    /// ```
+    ///
+    /// ## 前置条件
+    /// - 不抢占交互式卡片（问题/权限请求优先）
+    /// - 自动折叠计时器：8 秒后自动收起（Python HISTORY_DURATION）
     func showHistory() {
-        // Don't preempt an interactive card for history.
+        // 不抢占交互式卡片
         if activeCard == .question || activeCard == .permission { return }
         activeCard = .history
         pinned = false
+
         let rows = max(1, historyController.entries.count)
-        // Metrics mirror the Python reference (config.HISTORY_*): 12pt inset,
-        // 20pt header, 40pt rows with 4pt gaps, 380pt wide. On top we still
-        // clear the camera cutout the way our window-at-screen-top needs.
+
+        // 内容高度计算（对齐 Python 参考实现 config.HISTORY_*）
+        // - 12pt 垂直内边距 × 2（上下）
+        // - 20pt 标题栏高度
+        // - 4pt 标题栏与首行间距
+        // - 40pt 单行高度 × 行数
+        // - 4pt 行间距 × (行数-1)
         let content = 12.0 * 2 + 20.0 + 4.0
             + Double(rows) * 40.0 + Double(max(0, rows - 1)) * 4.0
+
+        // 加上刘海安全区域高度（窗口贴屏幕顶部时需要避开摄像头）
         let height = geometry.safeContentTop + content
+
         if !expanded {
             expanded = true
             expandedAt = Date()
             isClosing = false
         }
+
         animateTo(size: CGSize(width: NotchLayout.historyWidth, height: height))
         syncKeyFocus()
-        // History auto-closes after 8s (Python HISTORY_DURATION).
+
+        // 8 秒后自动收起（Python HISTORY_DURATION = 8s）
         scheduleAutoCollapse(after: Self.historyDuration)
     }
 
@@ -481,7 +511,14 @@ final class NotchService: ObservableObject {
     
     // MARK: - Card size computation
     
-    /// Compute the target size for the currently active card (aligned with Python).
+    /// 计算当前活动卡片的目标尺寸（对齐 Python 实现）
+    ///
+    /// 根据卡片类型返回对应的宽高：
+    /// - 问题卡片：固定宽度 + 动态高度（基于文本行数）
+    /// - 权限卡片：固定宽度 + 动态高度（基于文本行数）
+    /// - 通知横幅：固定宽高
+    /// - 历史面板：固定宽度 + 动态高度（基于条目数）
+    /// - 无卡片：返回最小尺寸（空闲状态）
     private func targetSizeForCurrentCard() -> CGSize {
         switch activeCard {
         case .question:
@@ -494,13 +531,14 @@ final class NotchService: ObservableObject {
             return CGSize(width: NotchLayout.expandedWidth,
                           height: NotchLayout.expandedHeight)
         case .history:
+            // 历史面板高度计算（与 showHistory() 保持一致）
             let rows = max(1, historyController.entries.count)
             let content = 12.0 * 2 + 20.0 + 4.0
                 + Double(rows) * 40.0 + Double(max(0, rows - 1)) * 4.0
             let height = geometry.safeContentTop + content
             return CGSize(width: NotchLayout.historyWidth, height: height)
         case .none:
-            // Idle: shouldn't be expanded; return minimal size.
+            // 空闲状态：不应展开，返回最小尺寸
             return CGSize(width: NotchLayout.expandedWidth,
                           height: NotchLayout.expandedHeight)
         }
@@ -582,24 +620,24 @@ final class NotchService: ObservableObject {
         return height + geometry.safeContentTop
     }
     
-    /// Approximate text height given a width and font size (single-line height = fontSize * 1.3).
+    /// 近似文本高度：给定宽度与字号（单行高 = fontSize × 1.3）。
     private func bodyHeight(_ text: String, width: CGFloat, font: CGFloat) -> CGFloat {
         guard !text.isEmpty, width > 0 else { return font * 1.3 }
         let lineHeight = font * 1.3
-        // Rough char-width estimate for mixed CJK/Latin.
+        // 中英混排的粗略字符宽估计。
         let avgCharWidth = font * 0.6
         let charsPerLine = max(1, Int(width / avgCharWidth))
         let lines = max(1, CGFloat(text.count) / CGFloat(charsPerLine))
         return ceil(lines) * lineHeight
     }
     
-    // MARK: - Pending total
+    // MARK: - 待处理总数
     
-    /// Recompute the total pending items (drives collapsed dot appearance).
+    /// 重算待处理总数（驱动收起态圆点外观），并按最高优先级提供方取色。
     private func updatePendingTotal() {
         let total = questionController.count + permissionController.count + noticeController.count
         pendingTotal = total
-        // Tint from the highest-priority pending provider.
+        // 主题色取优先级最高的待处理项：提问 > 权限 > 通知。
         if questionController.count > 0 {
             pendingTint = questionController.pendingTint ?? NotchLayout.accentColor
         } else if permissionController.count > 0 {
@@ -611,33 +649,35 @@ final class NotchService: ObservableObject {
         }
     }
     
-    // MARK: - Hover state machine
-    
+    // MARK: - 悬停状态机
+
+    /// 鼠标进入：置悬停态、暂停自动收起（保存截止时间待鼠标移出后恢复），并确保计时器运行。
     private func mouseEntered() {
         hovering = true
         hoverSince = Date()
-        // Pause auto-collapse while hovering.
+        // 悬停期间暂停自动收起。
         if let deadline = autoCollapseAt {
             autoCollapseHeld = deadline
             autoCollapseAt = nil
         }
-        // On-demand mode: schedule delayed expand if collapsed with pending content.
+        // 按需模式：收起态且有待处理内容时，安排延迟展开。
         if !pinned && !expanded && activeCard != .none {
-            // hoverExpandDelay checked in tickHoverTimer
+            // hoverExpandDelay 在 tickHoverTimer 中检查
         }
         ensureHoverTimer()
     }
     
+    /// 鼠标移出：清悬停态、恢复自动收起截止、按需模式下安排延迟收起。
     private func mouseExited() {
         hovering = false
         hoverSince = nil
         hoverExpanded = false
-        // Restore auto-collapse deadline.
+        // 恢复自动收起截止时刻。
         if let held = autoCollapseHeld {
             autoCollapseAt = held
             autoCollapseHeld = nil
         }
-        // On-demand: schedule delayed collapse if expanded by hover.
+        // 按需模式：若因悬停而展开，则安排延迟收起。
         if !pinned && expanded && activeCard != .question && activeCard != .permission {
             collapseAt = Date().addingTimeInterval(Self.hoverCollapseDelay)
         }
@@ -645,37 +685,39 @@ final class NotchService: ObservableObject {
     }
     
     private func mouseMoved(_ point: NSPoint) {
-        // Reserved for future: cursor proximity effects, hit testing, etc.
+        // 预留给未来：光标邻近效果、命中测试等。
     }
     
-    // MARK: - Hover timer
+    // MARK: - 悬停计时器
     
     private func startHoverTimer() {
         ensureHoverTimer()
     }
     
+    /// 惰性创建 60Hz 悬停计时器（加入 .common runloop 模式，滚动时不阻塞主线程）。
     private func ensureHoverTimer() {
         guard hoverTimer == nil else { return }
         hoverTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             self?.tickHoverTimer()
         }
-        // Don't block the main thread during scrolling.
+        // 滚动时不阻塞主线程。
         if let timer = hoverTimer {
             RunLoop.main.add(timer, forMode: .common)
         }
     }
     
+    /// 每 tick 推进四类判定：悬停展开、悬停收起、自动收起、空闲停表。
     private func tickHoverTimer() {
         let now = Date()
         var needsTimer = false
         
-        // 1. Hover-expand: on-demand mode, mouse on island, collapsed with content.
+        // 1. 悬停展开：按需模式，鼠标在岛上，收起态且有内容。
         if hovering && !pinned && !expanded && activeCard != .none,
            let since = hoverSince,
            now.timeIntervalSince(since) >= Self.hoverExpandDelay {
-            // Respect manual-collapse hold-off.
+            // 尊重手动收起让位期。
             if let holdUntil = manualCollapseUntil, now < holdUntil {
-                // Still in hold-off period; skip.
+                // 仍在让位期内：跳过。
             } else if !hoverExpanded {
                 hoverExpanded = true
                 expand()
@@ -683,10 +725,10 @@ final class NotchService: ObservableObject {
         }
         if hovering { needsTimer = true }
         
-        // 2. Hover-collapse: on-demand mode, mouse left, expanded.
+        // 2. 悬停收起：按需模式，鼠标已移开，处于展开。
         if let deadline = collapseAt, now >= deadline {
             collapseAt = nil
-            // Don't collapse if user is typing in a text field.
+            // 用户正在文本框输入时不收起。
             let editing = windowHost?.panel.firstResponder is NSTextView
             if editing != true {
                 collapse()
@@ -694,7 +736,7 @@ final class NotchService: ObservableObject {
         }
         if collapseAt != nil { needsTimer = true }
         
-        // 3. Auto-collapse: notice/history timed dismissal.
+        // 3. 自动收起：通知/历史到时消失。
         if let deadline = autoCollapseAt, now >= deadline {
             autoCollapseAt = nil
             if activeCard == .notice || activeCard == .history {
@@ -703,20 +745,22 @@ final class NotchService: ObservableObject {
         }
         if autoCollapseAt != nil { needsTimer = true }
         
-        // 4. Stop timer when idle (no hover, no pending deadlines).
+        // 4. 空闲时停表（无悬停、无待处理截止）。
         if !needsTimer {
             hoverTimer?.invalidate()
             hoverTimer = nil
         }
     }
     
-    // MARK: - Auto-collapse scheduling
-    
-    /// Schedule auto-collapse for transient content (notice, history).
+    // MARK: - 自动收起调度
+
+    /// 为瞬态内容（通知、历史）安排自动收起。
+    ///
+    /// 钉住时不调度；正在悬停则保存截止（待鼠标移出后生效），否则立即设截止。
     func scheduleAutoCollapse(after duration: TimeInterval) {
         guard !pinned else { return }
         if hovering {
-            // Paused: save for when mouse exits.
+            // 暂停：留待鼠标移出时用。
             autoCollapseHeld = Date().addingTimeInterval(duration)
         } else {
             autoCollapseAt = Date().addingTimeInterval(duration)
@@ -724,35 +768,36 @@ final class NotchService: ObservableObject {
         ensureHoverTimer()
     }
     
-    /// Cancel any pending auto-collapse.
+    /// 取消所有待执行的自动收起。
     func cancelAutoCollapse() {
         autoCollapseAt = nil
         autoCollapseHeld = nil
     }
     
-    // MARK: - Context menu (right-click)
-    
+    // MARK: - 上下文菜单（右键）
+
+    /// 在给定画布局标点弹出右键菜单。
     private func showContextMenu(at point: NSPoint) {
         let menu = buildContextMenu()
         guard let panel = windowHost?.panel else { return }
-        // Convert canvas-local point to screen coordinates for the menu.
+        // 把画布局部点转成窗口坐标供菜单定位。
         let windowPoint = NSPoint(x: point.x, y: point.y)
         menu.popUp(positioning: nil, at: windowPoint, in: windowHost?.panel.contentView)
-        _ = panel // suppress unused warning
+        _ = panel // 抑制未使用警告
     }
     
-    /// Build the right-click context menu (Python parity: pin toggle, collapse, settings, quit).
+    /// 构建右键上下文菜单（对齐 Python：钉住切换、立即收起、设置、退出）。
     private func buildContextMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
         
-        // Pin toggle
+        // 钉住切换
         let pinItem = NSMenuItem(title: pinned ? "切换为按需模式" : "切换为固定模式",
                                  action: #selector(contextMenuTogglePin), keyEquivalent: "")
         pinItem.target = self
         menu.addItem(pinItem)
         
-        // Collapse
+        // 立即收起
         let collapseItem = NSMenuItem(title: "立即收起",
                                       action: #selector(contextMenuCollapse), keyEquivalent: "")
         collapseItem.target = self
@@ -761,7 +806,7 @@ final class NotchService: ObservableObject {
         
         menu.addItem(.separator())
         
-        // Settings
+        // 设置
         let settingsItem = NSMenuItem(title: "设置…",
                                       action: #selector(contextMenuSettings), keyEquivalent: ",")
         settingsItem.target = self
@@ -769,7 +814,7 @@ final class NotchService: ObservableObject {
         
         menu.addItem(.separator())
         
-        // Quit
+        // 退出
         let quitItem = NSMenuItem(title: "退出 BetterFocusIDE",
                                   action: #selector(contextMenuQuit), keyEquivalent: "q")
         quitItem.target = self
@@ -783,17 +828,20 @@ final class NotchService: ObservableObject {
     @objc private func contextMenuSettings() { onOpenSettings?() }
     @objc private func contextMenuQuit() { NSApplication.shared.terminate(nil) }
 
+    /// 把一条 socket 消息路由到对应控制器。
+    ///
+    /// 提问/权限请求受各自开关门控：关掉即忽略，请求回落到 IDE 自己的弹窗。
     private func routeSocketMessage(_ message: AgentSocketMessage) {
         guard let event = SocketEvent(rawValue: message.event) else { return }
         switch event {
         case .questionRequested:
-            // Gate: question_enabled off → ignore, the request falls back to the IDE.
+            // 门控：question_enabled 关 → 忽略，请求回落到 IDE。
             guard Settings.shared.questionEnabled else { return }
             questionController.handleEvent(event, message: message)
         case .questionAnswered, .questionTimeout:
             questionController.handleEvent(event, message: message)
         case .permissionRequested:
-            // Gate: permission_enabled off → ignore, the request falls back to the IDE.
+            // 门控：permission_enabled 关 → 忽略，请求回落到 IDE。
             guard Settings.shared.permissionEnabled else { return }
             permissionController.handleEvent(event, message: message)
         case .permissionResolved, .permissionTimeout:
@@ -804,10 +852,11 @@ final class NotchService: ObservableObject {
         case .turnFinished:
             noticeController.handleTurnFinished(message: message)
         case .activity:
-            showHistory()  // TEMP: debug trigger to open history from a script
+            showHistory()  // 临时：供脚本触发打开历史，便于调试
         }
     }
 
+    /// 释放：移除屏幕观察与键盘监听、停掉悬停与清扫计时器。
     deinit {
         if let observer = screenObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -817,11 +866,10 @@ final class NotchService: ObservableObject {
         sweepTimer?.invalidate()
     }
 
-    // MARK: - Keyboard answering
+    // MARK: - 键盘应答
 
-    /// Install a local key monitor. It fires only while one of our windows is key
-    /// (the island, after the user clicks it), so shortcuts never steal typing from
-    /// another app. Unclaimed keys are returned to the system untouched.
+    /// 安装本地按键监听器。它只在我们某个窗口为 key 时（用户点击岛之后）触发，
+    /// 因此快捷键绝不会从别的应用抢走打字。未认领的按键原样交还系统。
     func startKeyboard() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -830,7 +878,7 @@ final class NotchService: ObservableObject {
         }
     }
 
-    /// Returns true when the island claimed the key.
+    /// 岛认领了该按键时返回 true。
     private func handleKeyDown(_ event: NSEvent) -> Bool {
         guard let panel = windowHost?.panel, panel.isKeyWindow else { return false }
         let action = Keymap.resolve(key: Keymap.key(from: event),
@@ -841,6 +889,7 @@ final class NotchService: ObservableObject {
         return true
     }
 
+    /// 依据当前活动卡片组装 Keymap 上下文快照（可见性、守卫、是否已应答等）。
     private func keyContext(editing: Bool) -> Keymap.Context {
         let visible = expanded
         let guarded = Date().timeIntervalSince(expandedAt) < Self.cardClickGuard
@@ -864,6 +913,7 @@ final class NotchService: ObservableObject {
         }
     }
 
+    /// 把 Keymap 解析出的动作分发到对应控制器。
     private func dispatch(_ action: Keymap.Action) {
         switch action {
         case .option(let index):
@@ -887,15 +937,15 @@ final class NotchService: ObservableObject {
         }
     }
 
-    /// Flip hold mode: a pinned card stays expanded instead of auto-collapsing.
+    /// 翻转固定模式：钉住的卡片保持展开而非自动收起。
     func togglePin() {
         pinned.toggle()
         Log.info("图钉切换 pinned=\(pinned)", topic: "pin")
         if pinned {
-            // Pinning cancels any pending auto-collapse.
+            // 钉住：取消任何待执行的自动收起。
             cancelAutoCollapse()
         } else {
-            // Unpinning re-arms auto-collapse for transient content.
+            // 取消钉住：为瞬态内容重新装载自动收起。
             if activeCard == .notice {
                 scheduleAutoCollapse(after: Settings.shared.notifyBannerDuration)
             } else if activeCard == .history {
@@ -905,24 +955,23 @@ final class NotchService: ObservableObject {
         noticeController.applyPinChange()
     }
 
-    // MARK: - Live settings
+    // MARK: - 实时设置
 
-    /// A setting changed: re-present the island at its recomputed size so edits
-    /// (card width, fonts, colors, timings) apply immediately without a restart.
+    /// 某设置已变更：按重算尺寸重新呈现岛，使改动（卡片宽度、字号、颜色、时长）
+    /// 无需重启即刻生效。
     private func handleSettingsChanged() {
         updatePendingTotal()
         restartSweepTimerIfNeeded()
         guard windowHost != nil else { return }
         let size = expanded ? targetSizeForCurrentCard()
                             : geometry.restingSize(showsContent: false)
-        // Assigning surfaceSize (even to the same value) republishes, so the
-        // SwiftUI content re-renders and picks up new fonts / colors.
+        // 给 surfaceSize 赋值（哪怕是相同值）会重新发布，使 SwiftUI 内容重渲染、
+        // 采纳新的字号 / 颜色。
         surfaceSize = size
         windowHost?.present(size: size, geometry: geometry, animated: false, showsContent: expanded)
     }
 
-    /// The island body was tapped. For a permission reminder, optionally jump to
-    /// the IDE first (permission_notice_jump), then run the normal toggle.
+    /// 岛表面被点击。权限提醒可先按需跳回 IDE（permission_notice_jump），再走常规 toggle。
     func handleSurfaceTap() {
         if activeCard == .permission, Settings.shared.permissionNoticeJump,
            let req = permissionController.request {
@@ -931,7 +980,7 @@ final class NotchService: ObservableObject {
         toggle()
     }
 
-    // MARK: - Stale-card sweep
+    // MARK: - 陈旧卡片清扫
 
     private func startSweepTimer() {
         sweepTimer?.invalidate()

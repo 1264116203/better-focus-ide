@@ -3,15 +3,15 @@
 
 import AppKit
 
-/// Plays notification sounds and trackpad haptics. Reads Settings at call
-/// time so a change takes effect immediately. Failures are logged, never
-/// silent, so "I turned it on but nothing happens" has a paper trail.
+/// 播放提示音与触控板触感反馈。
+///
+/// 在调用时读取 Settings，因此改动立即生效。失败一律记录日志、绝不静默，
+/// 让"我明明开了却没反应"留下可追查的线索。
 enum FeedbackService {
-    /// The currently playing sound; stopped before the next one so two
-    /// chimes never overlap.
+    /// 当前正在播放的声音；播放下一个前先停掉它，避免两声提示重叠。
     private static var current: NSSound?
 
-    /// Play a system sound; empty name = no sound. Returns whether it played.
+    /// 播放一个系统提示音；名字为空表示不出声。返回是否实际播放。
     @discardableResult
     static func playSound(_ nameOverride: String? = nil) -> Bool {
         let settings = Settings.shared
@@ -21,9 +21,8 @@ enum FeedbackService {
             return false
         }
         let volume = max(0.0, min(1.0, settings.notifyVolume))
-        // Deliberately not caching the NSSound instance: stopping then playing
-        // the same instance is dropped by the system (first chime sounds, the
-        // rest are silent). The .aiff file itself is cached by macOS.
+        // 故意不缓存 NSSound 实例：对同一实例先 stop 再 play 会被系统丢弃
+        // （第一声有、后续都哑）。.aiff 文件本身由 macOS 缓存，无需我们操心。
         guard let sound = NSSound(named: name) else {
             Log.warning("系统里没有提示音 \(name)", topic: "feedback")
             return false
@@ -36,12 +35,13 @@ enum FeedbackService {
         return false
     }
 
+    /// 停止当前声音并释放引用。
     static func stopSound() {
         current?.stop()
         current = nil
     }
 
-    /// Give one trackpad haptic. Returns whether the API was invoked.
+    /// 给一次触控板触感反馈。返回 API 是否被调用。
     @discardableResult
     static func buzz() -> Bool {
         let performer = NSHapticFeedbackManager.defaultPerformer
@@ -54,14 +54,14 @@ enum FeedbackService {
         return true
     }
 
-    /// A new card appeared on screen.
+    /// 新卡片上屏时的反馈。
     static func onArrive() {
         let s = Settings.shared
         if s.soundOnArrive { playSound() }
         if s.hapticOnArrive { buzz() }
     }
 
-    /// The user finished answering / decided.
+    /// 用户完成作答 / 做出决策时的反馈。
     static func onAnswer() {
         let s = Settings.shared
         if s.soundOnAnswer { playSound() }

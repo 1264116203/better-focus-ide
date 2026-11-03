@@ -6,25 +6,31 @@ import CoreGraphics
 
 // MARK: - NotchLayout
 
+/// 灵动岛布局常量。
+///
+/// 大部分尺寸在调用时实时读取 Settings，使改动立即生效；固定几何量（肩部、
+/// 头部高度等）作为常量。所有可配置项均对齐 Python 参考实现。
 enum NotchLayout {
+    /// 肩部宽度：灵动岛轮廓两侧的内收量。
     static let shoulder: CGFloat = 14
     static let horizontalInset: CGFloat = 28
     static let headerHeight: CGFloat = 36
     static let spacing: CGFloat = 12
     static let bottomInset: CGFloat = 16
+    /// 头部 + 间距 + 底部内收构成的"边框"总高。
     static var chromeHeight: CGFloat { headerHeight + spacing + bottomInset }
     
-    // MARK: - Python-aligned sizes (read live from Settings so edits apply at once)
+    // MARK: - 对齐 Python 的尺寸（实时读 Settings，改动即时生效）
     
-    /// Notification banner (Python EXPANDED_WIDTH × EXPANDED_HEIGHT).
+    /// 通知横幅宽高（Python EXPANDED_WIDTH × EXPANDED_HEIGHT）。
     static var expandedWidth: CGFloat { CGFloat(Settings.shared.notifyWidth) }
     static var expandedHeight: CGFloat { CGFloat(Settings.shared.notifyHeight) }
-    /// Question / permission card width (Python QUESTION_CARD_WIDTH).
+    /// 问题 / 权限卡片宽度（Python QUESTION_CARD_WIDTH）。
     static var questionCardWidth: CGFloat { CGFloat(Settings.shared.cardWidth) }
-    /// History panel width (Python HISTORY_WIDTH = EXPANDED_WIDTH).
+    /// 历史面板宽度（Python HISTORY_WIDTH = EXPANDED_WIDTH）。
     static var historyWidth: CGFloat { CGFloat(Settings.shared.notifyWidth) }
     
-    // Card layout metrics (Python config.py)
+    // 卡片布局度量（Python config.py）
     static var cardInset: CGFloat { CGFloat(Settings.shared.cardInset) }
     static let cardHeaderHeight: CGFloat = 26
     static let cardGap: CGFloat = 8
@@ -36,37 +42,40 @@ enum NotchLayout {
     static let permissionButtonHeight: CGFloat = 32
     static let permissionButtonGap: CGFloat = 8
     
-    // Idle dot (Python IDLE_DOT_RADIUS / IDLE_DOT_PULSE)
+    // 空闲小圆点（Python IDLE_DOT_RADIUS / IDLE_DOT_PULSE）
     static let idleDotRadius: CGFloat = 3.0
     static let idleDotPulse: CGFloat = 1.2
     static var idlePulsePeriod: TimeInterval { Settings.shared.idlePulsePeriod }
     
-    // Accent color (Python ACCENT_COLOR)
+    // 强调色（Python ACCENT_COLOR）
     static var accentColor: (r: Double, g: Double, b: Double) {
         let c = Settings.shared.accentRGB
         return (r: c.r, g: c.g, b: c.b)
     }
     
-    /// Corners of a surface of this height (cap = radius_expanded).
+    /// 该高度表面的圆角半径（上限 = radius_expanded）。
     static func surfaceRadius(height: CGFloat) -> CGFloat {
         min(CGFloat(Settings.shared.radiusExpanded), height * 0.34)
     }
+    /// 该高度下的实际肩部（不超过高度 19%）。
     static func shoulder(height: CGFloat) -> CGFloat { min(shoulder, height * 0.19) }
     
-    /// The optional outline's stroke.
+    /// 可选描边的线宽。
     static let outlineWidth: CGFloat = 2
     
-    // MARK: Capsule
+    // MARK: 胶囊
     
-    /// The menu bar a capsule leaves above and below itself.
+    /// 胶囊上下各留出的菜单栏边距。
     static let capsuleMargin: CGFloat = 2
     
-    /// A closed capsule is round at its ends (cap = radius_bubble).
+    /// 闭合胶囊两端是圆的（端帽半径 = radius_bubble）。
     static func capsuleRadius(height: CGFloat) -> CGFloat {
         min(max(0, height) / 2, CGFloat(Settings.shared.radiusBubble))
     }
     
-    /// The capsule outline path.
+    /// 胶囊轮廓路径。
+    ///
+    /// 用贝塞尔近似圆角（handle 系数 1 − 0.55228475），在 rect 内按 gap 内收后绘制。
     static func capsulePath(in rect: CGRect, gap: CGFloat) -> CGPath {
         let body = capsuleBody(in: rect, gap: gap)
         let corner = min(capsuleRadius(height: body.height), body.width / 2)
@@ -90,7 +99,7 @@ enum NotchLayout {
         return path
     }
     
-    /// The capsule body within a rect.
+    /// rect 内按肩部与 gap 内收后的胶囊主体矩形。
     static func capsuleBody(in rect: CGRect, gap: CGFloat) -> CGRect {
         let width = max(0, rect.width), height = max(0, rect.height)
         let side = min(shoulder(height: height), width / 2)
@@ -102,6 +111,7 @@ enum NotchLayout {
 
 // MARK: - NotchGeometry
 
+/// 灵动岛相对屏幕的几何信息：是否刘海屏、摄像头尺寸、菜单栏高度、各状态尺寸与帧位置。
 struct NotchGeometry: Equatable {
     let screen: CGRect
     var surfaceShift: CGFloat = 0
@@ -121,16 +131,20 @@ struct NotchGeometry: Equatable {
         self.menuBarHeight = max(cameraHeight, menuBarHeight)
     }
     
+    /// 是否为"悬浮胶囊"形态（有 floatingGap）。
     var floats: Bool { floatingGap != nil }
     
+    /// 内容顶部安全区：悬浮形态用底部内收，刘海形态避开摄像头。
     var safeContentTop: CGFloat { floats ? NotchLayout.bottomInset : cameraHeight + 10 }
     
     var stripHeight: CGFloat { cameraHeight }
     
+    /// 收起态尺寸（宽度不超过摄像头宽度、且不挤占屏幕两侧）。
     var collapsed: CGSize {
         CGSize(width: min(screen.width - 24, cameraWidth), height: stripHeight)
     }
     
+    /// 静止尺寸：显示内容时取 collapsed，否则按是否悬浮分别计算。
     func restingSize(showsContent: Bool) -> CGSize {
         if showsContent { return collapsed }
         guard floats else { return CGSize(width: cameraWidth, height: cameraHeight) }
@@ -138,11 +152,11 @@ struct NotchGeometry: Equatable {
         return CGSize(width: min(cameraWidth, cameraWidth + shoulders), height: cameraHeight)
     }
     
+    /// 给定尺寸在屏幕坐标系中的 frame（水平居中、贴屏幕顶边）。
     func frame(for size: CGSize, showsContent: Bool = true) -> CGRect {
         let x = screen.midX - size.width / 2
-        /// Collapsed (no-content) capsule slides just below the notch cutout so it
-        /// doesn't overlap the camera housing. Content cards still expand from the
-        /// top edge (safeContentTop already accounts for the camera height).
+        /// 收起（无内容）的胶囊略微滑到刘海切口下方，避免压住摄像头外壳；
+        /// 内容卡片仍从顶边展开（safeContentTop 已计入摄像头高度）。
         let y: CGFloat
         if !showsContent && isNotched {
             y = screen.maxY - cameraHeight - size.height
@@ -155,11 +169,14 @@ struct NotchGeometry: Equatable {
 
 // MARK: - NotchMotion
 
+/// 弹性动画物理模型（对齐 Python `motion.spring_for`）。
 enum NotchMotion {
+    /// 弹簧参数：时长 + 回弹量。
     struct Spring: Equatable {
         var duration: TimeInterval
         var bounce: Double
         
+        /// 在给定时刻的进度（0→1，可因回弹短暂越过 1）。欠阻尼用衰减正弦，临界阻尼用单调式。
         func progress(at time: TimeInterval) -> Double {
             guard time > 0 else { return 0 }
             let natural = 2 * Double.pi / duration
@@ -170,12 +187,14 @@ enum NotchMotion {
                 * (cos(damped * time) + damping * natural / damped * sin(damped * time))
         }
         
+        /// 首个超调峰值比例（bounce=0 时为 0）。
         var overshoot: Double {
             guard bounce > 0 else { return 0 }
             let damping = 1 - bounce
             return exp(-Double.pi * damping / (1 - damping * damping).squareRoot())
         }
         
+        /// 当超调位移会超过 `limit` 时，反解出恰好满足上限的 bounce。
         func limited(travel: CGFloat, limit: CGFloat) -> Spring {
             guard bounce > 0, travel > 0, Double(travel) * overshoot > Double(limit) else { return self }
             let share = log(Double(max(limit, 0.01) / travel))
@@ -183,11 +202,10 @@ enum NotchMotion {
         }
     }
     
-    // Springs aligned with Python motion.spring_for: grow springs bounce by
-    // MOTION_GROW_BOUNCE, shrink springs are critically damped (no overshoot),
-    // OVERSHOOT_LIMIT=12. Durations scale by 1 / animation_speed (a higher
-    // speed finishes sooner). Reduce-motion forces grow bounce to 0 — the morph
-    // still runs, just monotonic with no rebound (Python spring_for reduce_motion).
+    // 弹簧与 Python motion.spring_for 对齐：生长弹簧按 MOTION_GROW_BOUNCE 回弹，
+    // 收缩弹簧临界阻尼（无超调），OVERSHOOT_LIMIT=12。时长按 1 / animation_speed
+    // 缩放（速度越高越早结束）。reduce-motion 把生长回弹强制为 0——形变照跑，
+    // 只是单调不回弹（Python spring_for reduce_motion）。
     private static var speedScale: Double {
         let s = Settings.shared.animationSpeed
         return s > 0.01 ? 1.0 / s : 1.0
@@ -199,14 +217,18 @@ enum NotchMotion {
     static var growingHeight: Spring { Spring(duration: 0.36 * speedScale, bounce: growBounce) }
     static var shrinkingWidth: Spring { Spring(duration: 0.30 * speedScale, bounce: 0.0) }
     static var shrinkingHeight: Spring { Spring(duration: 0.26 * speedScale, bounce: 0.0) }
+    /// 超调位移上限（像素）。
     static let overshootLimit: CGFloat = 12
+    /// 判定"已落定"的距离阈值。
     static let settledDistance: CGFloat = 0.5
     
+    /// 依据增长还是收缩、宽还是高，选出对应弹簧并按上限约束超调。
     static func spring(from: CGFloat, to: CGFloat, width: Bool) -> Spring {
         let spring = to > from ? (width ? growingWidth : growingHeight) : (width ? shrinkingWidth : shrinkingHeight)
         return spring.limited(travel: abs(to - from), limit: overshootLimit)
     }
     
+    /// 在给定时刻插值出的尺寸（宽高各按自己的弹簧独立推进）。
     static func size(at time: TimeInterval, from: CGSize, to: CGSize) -> CGSize {
         func side(_ start: CGFloat, _ end: CGFloat, width: Bool) -> CGFloat {
             guard start != end else { return end }
@@ -216,6 +238,7 @@ enum NotchMotion {
         return CGSize(width: side(from.width, to.width, width: true), height: side(from.height, to.height, width: false))
     }
     
+    /// 以 240Hz 步长扫描，找出宽高都落定到目标所需的时长。
     static func settlingTime(from: CGSize, to: CGSize) -> TimeInterval {
         let step = 1.0 / 240
         var settled = step
@@ -230,9 +253,10 @@ enum NotchMotion {
         return settled
     }
     
+    /// 生成逐帧尺寸与 keyTimes（供 CAKeyframeAnimation 驱动遮罩路径形变）。
     static func frames(from: CGSize, to: CGSize) -> (sizes: [CGSize], keyTimes: [Double], duration: TimeInterval) {
         let duration = settlingTime(from: from, to: to)
-        // Sample rate = animation_fps (0 = auto → 120Hz, matching ProMotion).
+        // 采样率 = animation_fps（0 = 自动 → 120Hz，匹配 ProMotion）。
         let fps = Settings.shared.animationFps > 0 ? Double(Settings.shared.animationFps) : 120
         let count = max(1, Int((duration * fps).rounded(.up)))
         let keyTimes = (0...count).map { Double($0) / Double(count) }
@@ -240,6 +264,7 @@ enum NotchMotion {
         return (sizes, keyTimes, duration)
     }
     
+    /// 动画期间尺寸可能达到的最大包络（含超调），供窗口预留足够空间避免裁切。
     static func envelope(from: CGSize, to: CGSize) -> CGSize {
         func side(_ start: CGFloat, _ end: CGFloat, width: Bool) -> CGFloat {
             let swing = end > start ? spring(from: start, to: end, width: width).overshoot : 0

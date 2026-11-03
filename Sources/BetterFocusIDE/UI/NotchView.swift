@@ -3,14 +3,14 @@
 
 import SwiftUI
 
+/// 灵动岛主容器视图：根据展开/收起状态路由到对应内容。
 struct NotchView: View {
     @ObservedObject var service: NotchService
     @State private var pulseScale: CGFloat = 1.0
     
     var body: some View {
-        // The black island surface and its morphing silhouette are drawn by the
-        // AppKit canvas (a masked layer); the SwiftUI layer only carries the
-        // content, so it stays transparent and never fights the shape morph.
+        // 黑色岛面及其形变轮廓由 AppKit 画布（一层遮罩层）绘制；SwiftUI 层只承载
+        // 内容，保持透明，绝不与形状形变争抢。
         ZStack(alignment: .top) {
             if service.expanded || service.closingCard != nil {
                 expandedContent
@@ -19,11 +19,11 @@ struct NotchView: View {
             }
         }
         .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
+        .clipped()  // 防止 SwiftUI 内容在 AppKit 壳布局完成前溢出
         .foregroundStyle(.white)
         .contentShape(Rectangle())
         .onTapGesture {
-            // Anti-mistouch: ignore clicks within the guard window after a card appears.
-            // Only applies to interactive cards (question/permission).
+            // 防误触：卡片出现后的守卫窗口内忽略点击。仅适用于交互式卡片（提问/权限）。
             if service.activeCard == .question || service.activeCard == .permission {
                 guard !service.isClickGuarded else { return }
             }
@@ -34,8 +34,7 @@ struct NotchView: View {
     }
     
     private var collapsedContent: some View {
-        // Pure black capsule with a centered dot (aligned with Python idle state).
-        // When pending items exist, the dot uses the provider tint and shows count.
+        // 纯黑胶囊 + 居中圆点（对齐 Python 空闲态）。有待处理项时圆点用提供方主题色并显示计数。
         HStack(spacing: 4) {
             if service.pendingTotal > 0 {
                 Circle()
@@ -52,7 +51,7 @@ struct NotchView: View {
                                                blue: service.pendingTint.b))
                 }
             } else {
-                // Idle accent dot with breathing pulse (Python IDLE_PULSE_PERIOD=2.4s).
+                // 空闲强调圆点 + 呼吸脉冲（Python IDLE_PULSE_PERIOD=2.4s）。
                 Circle()
                     .fill(Color(red: NotchLayout.accentColor.r,
                                 green: NotchLayout.accentColor.g,
@@ -74,7 +73,7 @@ struct NotchView: View {
     
     private var expandedContent: some View {
         VStack(spacing: 12) {
-            // Show closingCard content during withdrawal animation.
+            // 撤下动画期间展示 closingCard 的内容。
             let card = service.activeCard != .none ? service.activeCard : (service.closingCard ?? .none)
             switch card {
             case .question:
@@ -99,7 +98,7 @@ struct NotchView: View {
                     service.collapse()
                 }
             case .none:
-                // No card active — show nothing (toggle will not expand to .none).
+                // 无卡片活动——不显示任何东西（toggle 不会展开到 .none）。
                 EmptyView()
             }
         }
@@ -109,6 +108,11 @@ struct NotchView: View {
 
 // MARK: - NotchShape
 
+/// 灵动岛轮廓形状。
+///
+/// `attached` 为 true 时绘制贴合屏幕顶边的"液态岛"轮廓（顶部直角、底部圆肩）；
+/// 否则是普通圆角矩形。关键不变量：`path(in:)` 忽略 `rect.origin`，故末尾必须把
+/// 局部坐标描出的路径平移到 rect 原点，否则遮罩会与居中的 host 水平错位。
 struct NotchShape: Shape {
     var attached: Bool
     var radius: CGFloat
@@ -150,8 +154,18 @@ struct NotchShape: Shape {
                       control1: CGPoint(x: shoulder, y: shoulder * (1 - tangent)),
                       control2: CGPoint(x: shoulder * tangent, y: 0))
         path.closeSubpath()
-        // The silhouette is traced in local coordinates; translate it to the
-        // island rect's origin so the mask lines up with the centered host.
+        // 轮廓在局部坐标描出；平移到岛矩形的原点，使遮罩与居中的 host 对齐。
         return path.applying(CGAffineTransform(translationX: rect.minX, y: rect.minY))
     }
 }
+
+#if DEBUG
+/// Xcode Canvas 预览：展示灵动岛主容器的收起态（空闲岛面）。
+/// 使用 NotchService.shared 单例，预览构建时会自动初始化。
+struct NotchView_Previews: PreviewProvider {
+    static var previews: some View {
+        NotchView(service: NotchService.shared)
+            .preferredColorScheme(.dark)
+    }
+}
+#endif

@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 BetterFocusIDE
 
-import AppKit
+import BetterFocusIDE
 
-Log.setup()
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
+// 瘦入口：仅把控制权交给 library 的 `run()`。
+// 作为 LSUIElement 后台应用运行，无 Dock 图标。
+run()

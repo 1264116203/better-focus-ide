@@ -9,7 +9,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>BetterFocusIDE</string>
 	<key>CFBundleExecutable</key>
-	<string>BetterFocusIDE</string>
+	<string>BetterFocusIDEApp</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIconName</key>

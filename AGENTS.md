@@ -1,115 +1,125 @@
 # AGENTS.md — BetterFocusIDE
 
-## Project Overview
+## 项目概述
 
-BetterFocusIDE is a macOS 14+ accessory app (LSUIElement, no Dock icon) that turns the MacBook notch into a "Dynamic Island" notification assistant for AI coding agents. It receives events from **Qoder** (Python hook) and **OpenCode** (JavaScript plugin) over a Unix Domain Socket, displays interactive cards (questions, permission requests, turn-complete notices) in the notch area, and dispatches user answers back to the originating agent.
+BetterFocusIDE 是一款 macOS 14+ 的附属应用（accessory app，LSUIElement，无 Dock 图标），把 MacBook 的刘海变成面向 AI 编码智能体的"灵动岛"通知助手。它通过 Unix 域套接字接收来自 **Qoder**（Python hook）和 **OpenCode**（JavaScript 插件）的事件，在刘海区域展示可交互卡片（提问、权限请求、回合完成通知），并把用户的回答回传给发起请求的智能体。
 
-- **License**: GPL-3.0-or-later
-- **Origin**: Swift migration of the Python project `dynamic-Island-python-validate` (Vorssaint reference for animation/UI)
-- **Requirements**: macOS 14+, Apple Silicon (`arm64`)
-- **Tech stack**: Swift 5.9, SwiftPM executable, AppKit window shell + SwiftUI content
+- **许可证**：GPL-3.0-or-later
+- **来源**：由 Python 项目 `dynamic-Island-python-validate` 迁移为 Swift（动画 / UI 参考 Vorssaint 的实现）
+- **运行要求**：macOS 14+，Apple Silicon（`arm64`）
+- **技术栈**：Swift 5.9，SwiftPM 库 + 可执行目标，AppKit 窗口外壳 + SwiftUI 内容
 
-## Build & Run
+## 构建与运行
 
 ```bash
-# Compile (debug)
+# 编译（debug）
 swift build -c debug
 
-# Full build: compile + assemble .app bundle + ad-hoc sign
+# 完整构建：编译 + 组装 .app 包 + ad-hoc 签名
 ./build.sh
 # → .build/debug/BetterFocusIDE.app
 
-# Run
+# 运行
 open .build/debug/BetterFocusIDE.app
 
-# Install to /Applications
+# 安装到 /Applications
 cp -R .build/debug/BetterFocusIDE.app /Applications/
-xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # bypass Gatekeeper
+xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gatekeeper
 ```
 
-**No Xcode project** — this is a pure SwiftPM executable target. Do not generate `.xcodeproj` or `.xcworkspace`.
+**没有 Xcode 工程** —— 这是一个纯 SwiftPM 库 + 可执行目标。不要生成 `.xcodeproj` 或 `.xcworkspace`。Xcode 可直接打开 `Package.swift`，SwiftUI Preview 在库目标（`BetterFocusIDE`）下可用。
 
-## Directory Structure
+## 目录结构
 
 ```
-├── Package.swift                          # SPM manifest (single executable target)
-├── build.sh                               # Build + .app assembly + ad-hoc signing
+├── Package.swift                          # SPM 清单（库目标 + 瘦可执行目标）
+├── build.sh                               # 构建 + .app 组装 + ad-hoc 签名
 ├── Resources/
-│   ├── Info.plist                         # Bundle metadata (LSUIElement=true, zh-Hans)
-│   └── BetterFocusIDE.entitlements        # Sandbox: apple-events + process querying
+│   ├── Info.plist                         # 包元数据（LSUIElement=true, zh-Hans）
+│   └── BetterFocusIDE.entitlements        # 沙盒：apple-events + 进程查询
 ├── Sources/BetterFocusIDE/
+│   ├── Library.swift                      # 库入口：public func run()
+│   ├── AppDelegate.swift                  # 生命周期、状态栏菜单、单实例守卫
 │   ├── App/
-│   │   ├── main.swift                     # Entry point: Log.setup() → NSApplication.run()
-│   │   └── AppDelegate.swift              # Lifecycle, status bar menu, single-instance guard
-│   ├── Models/                            # Pure data types (no business logic)
-│   │   ├── AgentProvider.swift            # Qoder vs OpenCode identity + tint colors
-│   │   ├── AgentQuestion.swift            # Question card model (multi-select, options)
-│   │   ├── AgentSocketMessage.swift       # Wire protocol: JSON over Unix socket
-│   │   ├── HistoryEntry.swift             # Notification history record
-│   │   ├── PermissionRequest.swift        # Permission card model (allow/always/deny)
-│   │   └── TurnNotice.swift               # Turn-complete notice + transcript parsing
+│   │   └── main.swift                     # 瘦入口：import BetterFocusIDE; run()
+│   ├── Models/                            # 纯数据类型（不含业务逻辑）
+│   │   ├── AgentProvider.swift            # Qoder 与 OpenCode 的身份 + 主题色
+│   │   ├── AgentQuestion.swift            # 提问卡片模型（多选、选项）
+│   │   ├── AgentSocketMessage.swift       # 线协议：Unix socket 上的 JSON
+│   │   ├── HistoryEntry.swift             # 通知历史记录
+│   │   ├── PermissionRequest.swift        # 权限卡片模型（允许/总是/拒绝）
+│   │   └── TurnNotice.swift               # 回合完成通知 + transcript 解析
 │   ├── Services/
 │   │   ├── Socket/
-│   │   │   └── AgentEventSocketServer.swift   # Unix socket listener (DispatchSourceRead)
+│   │   │   └── AgentEventSocketServer.swift   # Unix socket 监听器（DispatchSourceRead）
 │   │   ├── Installer/
-│   │   │   ├── HelperTemplate.swift           # Embedded Python hook template
-│   │   │   ├── InstallerPaths.swift           # File paths for hook/plugin installation
-│   │   │   ├── OpenCodePluginInstaller.swift  # JS plugin install/uninstall
-│   │   │   └── QoderHookInstaller.swift       # Python hook install/uninstall
-│   │   ├── NotchService.swift             # ★ Central orchestrator (~960 lines)
-│   │   ├── NotchSupport.swift              # Layout constants + geometry + spring physics
-│   │   ├── NotchWindowHost.swift           # AppKit view hosting SwiftUI content
-│   │   ├── Settings.swift                  # Persistent config (UserDefaults + JSON file)
-│   │   ├── SettingCatalog.swift            # Declarative settings schema definition
-│   │   ├── AnswerDispatcher.swift          # Write answers back to agent files
-│   │   ├── QuestionController.swift        # Question card state machine
-│   │   ├── PermissionController.swift      # Permission card state machine
-│   │   ├── NoticeController.swift          # Notice banner + bell swing animation
-│   │   ├── HistoryController.swift         # Recent 5 notifications
-│   │   ├── Keymap.swift                    # Keyboard shortcut definitions
-│   │   ├── Logging.swift                   # Structured logger (file + stderr, 5MB×3 rotation)
-│   │   ├── Doctor.swift                    # Self-diagnostic checks
-│   │   ├── FeedbackService.swift           # Haptic + audio feedback
-│   │   ├── IDELauncher.swift               # Activate/focus IDE windows via AppleEvents
-│   │   └── Transcript.swift                # Read session titles from .jsonl files
-│   └── UI/                                # SwiftUI views (dark mode enforced)
-│       ├── NotchView.swift                 # Main container: collapsed/expanded routing
-│       ├── NotchAgentQuestionView.swift    # Question card UI
-│       ├── NotchPermissionView.swift       # Permission card UI
-│       ├── NotchNoticeView.swift           # Notice banner UI
-│       ├── NotchHistoryView.swift          # History panel UI
-│       ├── SettingsView.swift              # Settings panel (resizable window)
-│       └── DoctorView.swift                # Doctor diagnostic UI
-└── graphify-out/                           # Knowledge graph outputs (auto-generated)
+│   │   │   ├── HelperTemplate.swift           # 内嵌的 Python hook 模板
+│   │   │   ├── InstallerPaths.swift           # hook/插件安装所用的文件路径
+│   │   │   ├── OpenCodePluginInstaller.swift  # JS 插件安装/卸载
+│   │   │   └── QoderHookInstaller.swift       # Python hook 安装/卸载
+│   │   ├── NotchService.swift             # ★ 中央编排器（约 960 行）
+│   │   ├── NotchSupport.swift              # 布局常量 + 几何 + 弹簧物理
+│   │   ├── NotchWindowHost.swift           # 承载 SwiftUI 内容的 AppKit 视图
+│   │   ├── Settings.swift                  # 持久化配置（UserDefaults + JSON 文件）
+│   │   ├── SettingCatalog.swift            # 声明式设置模式定义
+│   │   ├── AnswerDispatcher.swift          # 将回答写回智能体文件
+│   │   ├── QuestionController.swift        # 提问卡片状态机
+│   │   ├── PermissionController.swift      # 权限卡片状态机
+│   │   ├── NoticeController.swift          # 通知横幅 + 铃铛摆动动画
+│   │   ├── HistoryController.swift         # 最近 5 条通知
+│   │   ├── Keymap.swift                    # 键盘快捷键定义
+│   │   ├── Logging.swift                   # 结构化日志（文件 + stderr，5MB×3 轮转）
+│   │   ├── Doctor.swift                    # 自诊断检查
+│   │   ├── FeedbackService.swift           # 触觉 + 声音反馈
+│   │   ├── IDELauncher.swift               # 通过 AppleEvents 激活/聚焦 IDE 窗口
+│   │   └── Transcript.swift                # 从 .jsonl 文件读取会话标题
+│   └── UI/                                # SwiftUI 视图（强制深色模式）
+│       ├── NotchView.swift                 # 主容器：收起/展开路由
+│       ├── NotchAgentQuestionView.swift    # 提问卡片 UI
+│       ├── NotchPermissionView.swift       # 权限卡片 UI
+│       ├── NotchNoticeView.swift           # 通知横幅 UI
+│       ├── NotchHistoryView.swift          # 历史面板 UI
+│       ├── SettingsView.swift              # 设置面板（可调整大小的窗口）
+│       └── DoctorView.swift                # 自检（Doctor）诊断 UI
+└── graphify-out/                           # 知识图谱产物（自动生成）
 ```
 
-## Architecture
+## 架构
 
-### Four-Layer Notch Stack
+### 库与可执行目标拆分
 
-The notch follows a strict layering inherited from the Python reference:
+源码拆分为两个 SwiftPM 目标：
 
-1. **Window Shell** — `NotchPanel` (NSPanel subclass): borderless, transparent, `level = statusBar + 1`, specific `collectionBehavior`. Must call `orderFrontRegardless()` to become visible (not just `setFrame`).
-2. **Animation Layer** — `NotchCanvas` (NSView): hosts `CALayer` shape keyframe animations (`CAKeyframeAnimation` driving mask paths for the liquid island silhouette).
-3. **Bridge Layer** — `NotchHostingView` (NSHostingView<AnyView> subclass): bridges AppKit ↔ SwiftUI.
-4. **Content Layer** — `NotchView` (SwiftUI): all card UI, state driven by `ObservableObject` `NotchService`.
+- **库目标 `BetterFocusIDE`**：包含除 `App/main.swift` 外的全部源码（Models / Services / UI / AppDelegate / Library.swift）。映射为 `.library` 产品类型，**支持 Xcode SwiftUI Preview**。
+- **可执行目标 `BetterFocusIDEApp`**：仅编译 `App/main.swift`，依赖库目标。映射为 `.tool` 产品类型（二进制名 `BetterFocusIDEApp`）。
 
-**Key constraint**: The toggle, custom hit-test, and frame-by-frame spring animation cannot be done in pure SwiftUI. AppKit thin shell + SwiftUI content is mandatory.
+`Library.swift` 暴露 `public func run()`，封装原 `main.swift` 的初始化流程（日志 → 创建 AppDelegate → 进入主事件循环）。`AppDelegate` 保持 internal 访问级别，仅库内部使用。
 
-### Card State Machine
+### 四层灵动岛栈
 
-Four card types, each with a dedicated controller:
+刘海遵循从 Python 参考实现继承而来的严格分层：
 
-| Card Type | Controller | Trigger Event | Answer Mechanism |
+1. **窗口外壳** —— `NotchPanel`（NSPanel 子类）：无边框、透明、`level = statusBar + 1`、特定的 `collectionBehavior`。必须调用 `orderFrontRegardless()` 才能真正显示（仅 `setFrame` 不够）。
+2. **动画层** —— `NotchCanvas`（NSView）：承载 `CALayer` 形状关键帧动画（用 `CAKeyframeAnimation` 驱动遮罩路径，形成液态岛屿轮廓）。
+3. **桥接层** —— `NotchHostingView`（NSHostingView<AnyView> 子类）：桥接 AppKit ↔ SwiftUI。
+4. **内容层** —— `NotchView`（SwiftUI）：所有卡片 UI，状态由 `ObservableObject` `NotchService` 驱动。
+
+**关键约束**：切换、自定义命中测试、逐帧弹簧动画都无法用纯 SwiftUI 完成。AppKit 薄外壳 + SwiftUI 内容是强制要求。
+
+### 卡片状态机
+
+四种卡片类型，各有一个专用控制器：
+
+| 卡片类型 | 控制器 | 触发事件 | 回答机制 |
 |-----------|-----------|---------------|-----------------|
-| Question | `QuestionController` | `question_requested` | Write JSON to `answers/<session>_<question>.json` |
-| Permission | `PermissionController` | `permission_requested` | Write JSON to `answers/<session>_<request>.json` |
-| Notice | `NoticeController` | `turn_finished` / `session_ended` | Auto-dismiss after `notifyBannerDuration` |
-| History | `HistoryController` | Internal | Read-only panel (recent 5 entries) |
+| 提问 | `QuestionController` | `question_requested` | 写 JSON 到 `answers/<session>_<question>.json` |
+| 权限 | `PermissionController` | `permission_requested` | 写 JSON 到 `answers/<session>_<request>.json` |
+| 通知 | `NoticeController` | `turn_finished` / `session_ended` | 在 `notifyBannerDuration` 后自动消失 |
+| 历史 | `HistoryController` | 内部 | 只读面板（最近 5 条） |
 
-Cards support **pin mode** (stay expanded) vs **auto-dismiss** (retract after timeout). A 0.5s click guard prevents accidental keyboard input during card transitions.
+卡片支持**钉住模式**（保持展开）与**自动消失**（超时后收拢）。0.5 秒的点击守卫可防止卡片切换过程中误触键盘输入。
 
-### Inter-Process Communication
+### 进程间通信
 
 ```
 Qoder Hook (Python) ──┐
@@ -118,147 +128,147 @@ OpenCode Plugin (JS) ─┘                          │                    │
                       ←── Answer Files ←── AnswerDispatcher ←────────┘
 ```
 
-- **Inbound**: Newline-delimited JSON over `~/Library/Application Support/BetterFocusIDE/agent-events.sock`
-- **Outbound**: Answer files written to `~/Library/Application Support/BetterFocusIDE/answers/`
-- **Protocol**: See `AgentSocketMessage` and `SocketEvent` for the wire format
+- **入站**：`~/Library/Application Support/BetterFocusIDE/agent-events.sock` 上的换行分隔 JSON
+- **出站**：应答文件写入 `~/Library/Application Support/BetterFocusIDE/answers/`
+- **协议**：线格式见 `AgentSocketMessage` 与 `SocketEvent`
 
-### Single-Instance Lock
+### 单实例锁
 
-The Unix socket file itself is the lock anchor:
-1. `AgentEventSocketServer.start()` attempts `flock(LOCK_EX|LOCK_NB)` on `<socket>.lock`
-2. A `connect()` probe checks if another instance is already listening
-3. Returns `StartOutcome`: `.started`, `.alreadyRunning`, `.failed`
-4. Duplicate launches must `NSApp.terminate(nil)` silently — **never** use `NSAlert().runModal()` (blocks main thread → zombie process)
+Unix socket 文件本身就是锁锚点：
+1. `AgentEventSocketServer.start()` 尝试对 `<socket>.lock` 加 `flock(LOCK_EX|LOCK_NB)`
+2. 用 `connect()` 探测检查是否已有另一个实例在监听
+3. 返回 `StartOutcome`：`.started`、`.alreadyRunning`、`.failed`
+4. 重复启动必须静默 `NSApp.terminate(nil)` —— **绝不**使用 `NSAlert().runModal()`（会阻塞主线程 → 僵尸进程）
 
-### Settings System
+### 设置系统
 
-- **Storage**: `~/Library/Application Support/BetterFocusIDE/settings.json`
-- **Live propagation**: `Settings.changes` (PassthroughSubject) → `NotchService.handleSettingsChanged()` → re-layout without animation
-- **Schema**: `SettingCatalog` defines all settings declaratively with `SettingDefinition` (key, kind, group, get/set closures)
-- **Color encoding**: RGB stored as `"r,g,b"` strings via `AnyCodableValue` (only supports string/int/double/bool)
-- **Backward compatibility**: `Settings.load()` uses `??` fallback for missing keys, so new fields work with old JSON
+- **存储**：`~/Library/Application Support/BetterFocusIDE/settings.json`
+- **实时生效**：`Settings.changes`（PassthroughSubject）→ `NotchService.handleSettingsChanged()` → 不做动画地重新布局
+- **模式**：`SettingCatalog` 用 `SettingDefinition`（key、kind、group、get/set 闭包）声明式地定义所有设置
+- **颜色编码**：RGB 以 `"r,g,b"` 字符串通过 `AnyCodableValue` 存储（仅支持 string/int/double/bool）
+- **向后兼容**：`Settings.load()` 对缺失键使用 `??` 回退，因此新字段可与旧 JSON 共存
 
-**Critical invariant**: `handleSettingsChanged()` must NEVER write back to any Settings field — that creates a feedback loop.
+**关键不变量**：`handleSettingsChanged()` 绝不能写回任何 Settings 字段 —— 那会形成反馈回路。
 
-### Installer System
+### 安装器系统
 
-`QoderHookInstaller` and `OpenCodePluginInstaller` are **idempotent**: they write files tagged with `betterfocus` markers and skip if content is unchanged. Settings with `needsReinstall: true` (e.g., `agentWaitLimit`) trigger re-installation, but the installers must actually read the current setting value or the write-back is a no-op.
+`QoderHookInstaller` 与 `OpenCodePluginInstaller` 是**幂等的**：它们写入带 `betterfocus` 标记的文件，若内容未变则跳过。设置了 `needsReinstall: true` 的项（如 `agentWaitLimit`）会触发重新安装，但安装器必须实际读取当前的设置值，否则写回将成为空操作。
 
-## Coding Conventions
+## 编码规范
 
-### Language & Style
+### 语言与风格
 
-- **Swift 5.9** with strict `set -euo pipefail` in shell scripts
-- All source files carry the SPDX header: `// SPDX-License-Identifier: GPL-3.0-or-later`
-- Chinese is used for user-facing strings (labels, menu items, settings groups)
-- Code comments are in English; commit messages in English
-- Follow existing naming: `Notch*` for window/geometry, `*Controller` for card state, `*View` for SwiftUI
+- **Swift 5.9**，shell 脚本中严格使用 `set -euo pipefail`
+- 所有源文件都带有 SPDX 头：`// SPDX-License-Identifier: GPL-3.0-or-later`
+- 面向用户的字符串使用中文（标签、菜单项、设置分组）
+- 代码注释使用中文（文档注释 `///` 与行内 `//`）；提交信息使用英文
+- 遵循现有命名：窗口/几何用 `Notch*`，卡片状态用 `*Controller`，SwiftUI 视图用 `*View`
 
-### UI Patterns
+### UI 模式
 
-- All UI is SwiftUI with dark mode enforced
-- `ObservableObject` for reactive state (NotchService, Settings)
-- `@Published` properties for automatic view updates
-- `PassthroughSubject` for one-shot event broadcasting
-- Settings panel uses `SettingCatalog` declarative schema — do not hardcode UI rows
+- 所有 UI 均为 SwiftUI，强制深色模式
+- 响应式状态用 `ObservableObject`（NotchService、Settings）
+- 视图自动更新用 `@Published` 属性
+- 一次性事件广播用 `PassthroughSubject`
+- 设置面板使用 `SettingCatalog` 声明式模式 —— 不要硬编码 UI 行
 
-### Animation
+### 动画
 
-- Spring physics in `NotchMotion.Spring` — aligned with Python `motion.spring_for`
-- `CAKeyframeAnimation` drives the mask path for the liquid island silhouette
-- `reduce_motion` is tri-state: `"system"` / `"on"` / `"off"` — when resolved to true, bounce is forced to 0 but animation still runs (monotonic, no overshoot)
-- Frame rate: `animationFps = 0` means auto (120Hz ProMotion)
+- 弹簧物理位于 `NotchMotion.Spring` —— 与 Python 的 `motion.spring_for` 对齐
+- `CAKeyframeAnimation` 驱动遮罩路径形成液态岛屿轮廓
+- `reduce_motion` 为三态：`"system"` / `"on"` / `"off"` —— 解析为 true 时强制把 bounce 设为 0，但动画仍运行（单调、不过冲）
+- 帧率：`animationFps = 0` 表示自动（120Hz ProMotion）
 
-### Error Handling
+### 错误处理
 
-- Use `try?` for non-critical operations (file I/O, JSON parsing)
-- Log errors via `Log.error()` with topic tags
-- Never crash on malformed socket messages — drop silently
+- 非关键操作（文件 I/O、JSON 解析）使用 `try?`
+- 通过带主题标签的 `Log.error()` 记录错误
+- 遇到畸形 socket 消息绝不崩溃 —— 静默丢弃
 
-## Key Invariants
+## 关键不变量
 
-These MUST be preserved across all changes:
+以下各项在所有改动中都必须保留：
 
-1. **Window visibility**: `present()` only sets frame; must call `panel.orderFrontRegardless()` to actually show
-2. **No modal alerts on duplicate launch**: accessory app re-entry must be silent (`NSLog` + `terminate`)
-3. **Settings feedback loop**: `handleSettingsChanged()` is read-only w.r.t. Settings
-4. **Socket lock**: `bindAndListen()` must NOT unconditionally delete the socket file (would steal from running instance)
-5. **Transcript titles**: `turn_finished` payload carries `transcript_path` only (no `session_title`); the island reads the .jsonl itself via `Transcript.sessionSummary()`
-6. **Click guard**: Cards ignore input for `clickGuard` seconds after appearance, during "other…" text entry, during fade-out, and when collapsed into the bubble
-7. **Notch screen pinning**: Always target the display with `safeAreaInsets.top > 0`, never `NSScreen.main`
-8. **Mask alignment**: `Shape.path(in:)` ignores `rect.origin` — the mask must be offset-aware or it drifts from the centered host
+1. **窗口可见性**：`present()` 只设置 frame；必须调用 `panel.orderFrontRegardless()` 才能真正显示
+2. **重复启动不弹模态框**：附属应用再入必须静默（`NSLog` + `terminate`）
+3. **设置反馈回路**：`handleSettingsChanged()` 对 Settings 而言是只读的
+4. **Socket 锁**：`bindAndListen()` 绝不能无条件删除 socket 文件（会从运行中的实例手里抢夺）
+5. **Transcript 标题**：`turn_finished` 载荷只携带 `transcript_path`（没有 `session_title`）；灵动岛自行通过 `Transcript.sessionSummary()` 读取 .jsonl
+6. **点击守卫**：卡片在出现后 `clickGuard` 秒内、"其他…"文本输入期间、淡出期间、以及收拢进气泡时都忽略输入
+7. **刘海屏幕锚定**：始终 targeting `safeAreaInsets.top > 0` 的显示器，绝不用 `NSScreen.main`
+8. **遮罩对齐**：`Shape.path(in:)` 忽略 `rect.origin` —— 遮罩必须感知偏移，否则会偏离居中的宿主
 
-## Data Files
+## 数据文件
 
-All under `~/Library/Application Support/BetterFocusIDE/`:
+均位于 `~/Library/Application Support/BetterFocusIDE/`：
 
-| File | Purpose |
+| 文件 | 用途 |
 |------|---------|
-| `agent-events.sock` | Unix socket for agent events |
-| `agent-events.sock.lock` | flock-based single-instance lock |
-| `settings.json` | User preferences (versioned, backward-compatible) |
-| `answers/*.json` | Answer files read by hooks/plugins |
-| `logs/betterfocus.log` | Rotating log (5MB × 3, sanitized) |
+| `agent-events.sock` | 智能体事件的 Unix socket |
+| `agent-events.sock.lock` | 基于 flock 的单实例锁 |
+| `settings.json` | 用户偏好（带版本、向后兼容） |
+| `answers/*.json` | hook/插件读取的应答文件 |
+| `logs/betterfocus.log` | 轮转日志（5MB × 3，已脱敏） |
 
-Hook/plugin files installed externally:
+外部安装的 hook/插件文件：
 
-| File | Purpose |
+| 文件 | 用途 |
 |------|---------|
-| `~/.qoder/hooks/betterfocus-notify.sh` | Qoder hook launcher |
-| `~/.qoder/hooks/betterfocus-hook.py` | Qoder hook body |
-| `~/.qoder/settings.json` | Qoder hook registration (with `betterfocus` marker) |
-| `~/.config/opencode/plugins/betterfocus-notify.js` | OpenCode plugin |
+| `~/.qoder/hooks/betterfocus-notify.sh` | Qoder hook 启动器 |
+| `~/.qoder/hooks/betterfocus-hook.py` | Qoder hook 主体 |
+| `~/.qoder/settings.json` | Qoder hook 注册（带 `betterfocus` 标记） |
+| `~/.config/opencode/plugins/betterfocus-notify.js` | OpenCode 插件 |
 
-## Common Tasks
+## 常见任务
 
-### Adding a New Setting
+### 新增一个设置
 
-1. Add `@Published` property to `Settings.swift` with default value
-2. Add read/write in `Settings.load()` and `Settings.save()` (use `??` for backward compat)
-3. Add to `Settings.resetAll()`
-4. Add `SettingDefinition` to `SettingCatalog.all` with appropriate `kind`, `group`, `section`
-5. If it needs to trigger hook re-install, set `needsReinstall: true` and update `InstallerPaths`
+1. 在 `Settings.swift` 中添加带默认值的 `@Published` 属性
+2. 在 `Settings.load()` 与 `Settings.save()` 中添加读/写（用 `??` 保证向后兼容）
+3. 加入 `Settings.resetAll()`
+4. 在 `SettingCatalog.all` 中添加 `SettingDefinition`，设置合适的 `kind`、`group`、`section`
+5. 若它需要触发 hook 重装，设置 `needsReinstall: true` 并更新 `InstallerPaths`
 
-### Adding a New Card Type
+### 新增一种卡片类型
 
-1. Create model in `Models/`
-2. Create controller in `Services/` (follow `QuestionController` pattern)
-3. Add case to `ActiveCard` enum in `NotchService`
-4. Create SwiftUI view in `UI/`
-5. Wire into `NotchView` routing
-6. Add keyboard handling in `Keymap` if needed
+1. 在 `Models/` 中创建模型
+2. 在 `Services/` 中创建控制器（遵循 `QuestionController` 模式）
+3. 在 `NotchService` 的 `ActiveCard` 枚举中添加 case
+4. 在 `UI/` 中创建 SwiftUI 视图
+5. 接入 `NotchView` 路由
+6. 如有需要，在 `Keymap` 中添加键盘处理
 
-### Modifying Animation
+### 修改动画
 
-1. Spring parameters live in `NotchMotion` — do not hardcode in views
-2. Always check `Settings.shared.reduceMotionResolved` before applying bounce
-3. `NotchLayout` constants are read at call time from `Settings.shared` for live updates
+1. 弹簧参数位于 `NotchMotion` —— 不要在视图里硬编码
+2. 应用 bounce 前始终检查 `Settings.shared.reduceMotionResolved`
+3. `NotchLayout` 常量在调用时从 `Settings.shared` 读取，以实现实时更新
 
-### Debugging
+### 调试
 
 ```bash
-# Enable stderr logging
+# 启用 stderr 日志
 BETTERFOCUS_LOG_STDERR=1 open .build/debug/BetterFocusIDE.app
 
-# Set log level
+# 设置日志级别
 BETTERFOCUS_LOG_LEVEL=debug BETTERFOCUS_LOG_STDERR=1 .build/debug/BetterFocusIDE
 
-# Check socket
+# 检查 socket
 ls -la ~/Library/Application\ Support/BetterFocusIDE/agent-events.sock
 
-# Run doctor
-# Status bar → 自检 (Doctor)…
+# 运行自检
+# 状态栏 → 自检 (Doctor)…
 ```
 
-## Testing
+## 测试
 
-There is no automated test suite. Manual testing workflow:
+没有自动化测试套件。手动测试流程：
 
-1. Build: `./build.sh`
-2. Launch: `open .build/debug/BetterFocusIDE.app`
-3. Trigger events: use Qoder/OpenCode with the hook installed, or send JSON directly to the socket
-4. Verify: card appearance, keyboard shortcuts, pin/unpin, history, settings changes, doctor checks
-5. Check logs: `~/Library/Application Support/BetterFocusIDE/logs/betterfocus.log`
+1. 构建：`./build.sh`
+2. 启动：`open .build/debug/BetterFocusIDE.app`
+3. 触发事件：使用装有 hook 的 Qoder/OpenCode，或直接向 socket 发送 JSON
+4. 验证：卡片出现、键盘快捷键、钉住/取消钉住、历史、设置改动、自检结果
+5. 查看日志：`~/Library/Application Support/BetterFocusIDE/logs/betterfocus.log`
 
 
 ## Graphify 知识图谱（硬性规则）

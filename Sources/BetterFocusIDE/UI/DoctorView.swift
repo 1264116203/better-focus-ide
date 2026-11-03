@@ -3,12 +3,14 @@
 
 import SwiftUI
 
-/// Shows the doctor self-check report in a window, with a re-run button.
+/// 在窗口中展示自检（Doctor）报告，并提供重新运行按钮。
 struct DoctorView: View {
+    /// 检查结果列表，初次进入即运行一遍。
     @State private var checks: [DoctorCheck] = Doctor.run()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // 顶部标题栏 + 汇总状态（全部通过 / N 项待处理）。
             HStack {
                 Text("自检 (Doctor)")
                     .font(.system(size: 15, weight: .semibold))
@@ -45,6 +47,7 @@ struct DoctorView: View {
         .frame(width: 460, height: 420)
     }
 
+    /// 单条检查行：✔/✗ 图标 + 标签 + 详情，失败时附一行修复建议。
     private func row(_ check: DoctorCheck) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .top, spacing: 8) {
@@ -69,3 +72,13 @@ struct DoctorView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+
+#if DEBUG
+/// Xcode Canvas 预览：直接渲染自检面板（Doctor.run() 会在预览构建时执行）。
+struct DoctorView_Previews: PreviewProvider {
+    static var previews: some View {
+        DoctorView()
+            .preferredColorScheme(.dark)
+    }
+}
+#endif

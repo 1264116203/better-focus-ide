@@ -3,14 +3,13 @@
 
 import Foundation
 
-/// The embedded Python body of the Qoder hook (`betterfocus-hook.py`).
+/// Qoder hook（`betterfocus-hook.py`）的内嵌 Python 正文。
 ///
-/// Reads the hook payload on stdin, decides which event fired, forwards it to
-/// the island over the Unix socket, polls the answer files, and prints the
-/// decision Qoder reads on stdout. Written without `jq`: only python3.
+/// 从 stdin 读取 hook 载荷，判断触发的是哪个事件，通过 Unix socket 转发给
+/// 灵动岛，轮询应答文件，并在 stdout 打印 Qoder 读取的决策结果。不依赖 `jq`：
+/// 仅需 python3。
 ///
-/// Path / timeout placeholders (`__SOCKET_PATH__` …) are substituted at
-/// install time so the script points at this build's namespace.
+/// 路径 / 超时占位符（`__SOCKET_PATH__` 等）在安装时替换，使脚本指向本构建的命名空间。
 enum HelperTemplate {
     static let body = """
         #!/usr/bin/env python3
