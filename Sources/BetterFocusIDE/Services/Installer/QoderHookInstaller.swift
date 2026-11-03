@@ -3,21 +3,19 @@
 
 import Foundation
 
-/// Installs / uninstalls the Qoder hook that forwards permission requests,
-/// AskUserQuestion prompts, turn-finished and session-end events to the
-/// BetterFocusIDE island.
+/// 安装 / 卸载 Qoder hook，把权限请求、AskUserQuestion 提问、轮次完成、
+/// 会话结束等事件转发到 BetterFocusIDE 灵动岛。
 ///
-/// Two files are written: a tiny shell launcher (`betterfocus-notify.sh`) and
-/// the Python body (`betterfocus-hook.py`) that owns the protocol. All JSON
-/// work happens in Python so the hook needs no `jq`; python3 is already
-/// required to reach the socket. The hook group is merged into
-/// `~/.qoder/settings.json` under a marker so install / uninstall only ever
-/// touch our own entries.
+/// 写入两个文件：一个极小的 shell 启动器（`betterfocus-notify.sh`）和承载协议
+/// 的 Python 主体（`betterfocus-hook.py`）。所有 JSON 处理都放在 Python 侧，
+/// 使 hook 无需依赖 `jq`；反正要连 socket 就已经需要 python3。hook 分组带标记
+/// 合并进 `~/.qoder/settings.json`，安装/卸载只动我们自己的条目。
 enum QoderHookInstaller {
     static let marker = InstallerPaths.marker
 
-    // MARK: - Lifecycle
+    // MARK: - 生命周期
 
+    /// 安装：写脚本 + 写 Python 主体 + 合并 settings 注册 hook。
     static func install() throws {
         try ensureFile(path: InstallerPaths.qoderScriptPath,
                        content: scriptContent, executable: true)
@@ -26,25 +24,27 @@ enum QoderHookInstaller {
         try mergeSettings()
     }
 
+    /// 卸载：删除两个文件并从 settings 移除我们的 hook 分组。
     static func uninstall() {
         try? FileManager.default.removeItem(atPath: InstallerPaths.qoderScriptPath)
         try? FileManager.default.removeItem(atPath: InstallerPaths.qoderHelperPath)
         removeHookFromSettings()
     }
 
+    /// 通过启动脚本是否存在判断安装状态。
     static var isInstalled: Bool {
         FileManager.default.fileExists(atPath: InstallerPaths.qoderScriptPath)
     }
 
-    // MARK: - Settings merge
+    // MARK: - Settings 合并
 
-    /// Adds — or refreshes — our own matcher groups inside `hooks`, leaving
-    /// every other event and group untouched. Registers four events:
-    ///   - PermissionRequest (matcher `*`): the real permission channel.
-    ///   - PreToolUse (matcher `*`): legacy question entry; hook only handles
-    ///     AskUserQuestion, everything else exits immediately.
-    ///   - SessionEnd / Stop: fire-and-forget, short timeout so they never
-    ///     hold up the session.
+    /// 在 `hooks` 内新增或刷新我们自己的 matcher 分组，其余事件与分组原样保留。
+    ///
+    /// 注册四个事件：
+    ///   - PermissionRequest（matcher `*`）：真正的权限通道。
+    ///   - PreToolUse（matcher `*`）：遗留提问入口；hook 只处理 AskUserQuestion，
+    ///     其他立即退出。
+    ///   - SessionEnd / Stop：发后即忘，短超时，绝不阻塞会话。
     static func mergedHooks(_ hooks: [String: Any]) -> [String: Any] {
         var hooks = hooksAfterRemoval(hooks)
 
@@ -69,6 +69,7 @@ enum QoderHookInstaller {
         for (event, matcher, timeout) in specs {
             var groups = hooks[event] as? [[String: Any]] ?? []
             let newEntry = entry(matcher: matcher, timeout: timeout)
+            // 已有我们的分组则原地替换，否则追加。
             if let idx = groups.firstIndex(where: { isOurGroup($0) }) {
                 groups[idx] = newEntry
             } else {
@@ -79,6 +80,7 @@ enum QoderHookInstaller {
         return hooks
     }
 
+    /// 从各事件中剔除属于我们的分组；某事件剔空后连键一起移除。
     static func hooksAfterRemoval(_ hooks: [String: Any]) -> [String: Any] {
         var hooks = hooks
         for event in ["PreToolUse", "PermissionRequest", "SessionEnd", "Stop"] {
@@ -90,15 +92,17 @@ enum QoderHookInstaller {
         return hooks
     }
 
+    /// 判断某分组是否属于我们：优先看标记，兼容旧的扁平结构（command 指向我们脚本）。
     private static func isOurGroup(_ group: [String: Any]) -> Bool {
         if (group["_betterfocus_marker"] as? String) == marker { return true }
-        // Legacy flat shape: no hooks array, command points at our script.
+        // 遗留扁平形态：无 hooks 数组，command 直接指向我们的脚本。
         if group["hooks"] is [Any] { return false }
         if let command = group["command"] as? String,
            command.contains("betterfocus-notify.sh") { return true }
         return false
     }
 
+    /// 把合并后的 hooks 原子写回 `~/.qoder/settings.json`。
     private static func mergeSettings() throws {
         var settings = loadSettings()
         settings["hooks"] = mergedHooks(settings["hooks"] as? [String: Any] ?? [:])
@@ -110,6 +114,7 @@ enum QoderHookInstaller {
                        options: .atomic)
     }
 
+    /// 从 settings 移除我们的 hook 分组后写回（卸载路径，容错不抛错）。
     private static func removeHookFromSettings() {
         var settings = loadSettings()
         guard !settings.isEmpty else { return }
@@ -123,6 +128,7 @@ enum QoderHookInstaller {
         }
     }
 
+    /// 读取现有 Qoder settings；缺失或畸形时返回空字典。
     private static func loadSettings() -> [String: Any] {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: InstallerPaths.qoderSettingsPath)),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -130,10 +136,9 @@ enum QoderHookInstaller {
         return json
     }
 
-    // MARK: - File write (idempotent)
+    // MARK: - 文件写入（幂等）
 
-    /// Writes content only when it differs, so repeated installs don't churn
-    /// the mtime (which would make the platform think the script just changed).
+    /// 仅在内容不同时才写入，避免重复安装扰动 mtime（那会让平台误以为脚本刚变更）。
     private static func ensureFile(path: String, content: String, executable: Bool) throws {
         let dir = (path as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -146,10 +151,10 @@ enum QoderHookInstaller {
         if executable { chmod(path, 0o755) }
     }
 
-    // MARK: - Templates
+    // MARK: - 模板
 
-    /// The tiny shell launcher. Falls back to Qoder's own dialog when python3
-    /// is missing so a request is never left waiting on a card nobody sees.
+    /// 极小 shell 启动器。python3 缺失时回退到 Qoder 自带对话框，
+    /// 使请求绝不会卡在一张没人看见的卡片上。
     static var scriptContent: String {
         """
         #!/bin/bash
@@ -169,8 +174,8 @@ enum QoderHookInstaller {
         """
     }
 
-    /// The Python hook body. Placeholders are substituted with this build's
-    /// namespace paths so the hook points at BetterFocusIDE, not Vorssaint.
+    /// Python hook 主体。占位符替换为本构建的命名空间路径，使 hook 指向
+    /// BetterFocusIDE 而非 Vorssaint。
     static var helperContent: String {
         HelperTemplate.body
             .replacingOccurrences(of: "__SOCKET_PATH__", with: InstallerPaths.socketPath)

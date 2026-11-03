@@ -3,14 +3,19 @@
 
 import Foundation
 
-// MARK: - Permission Decision constants
+// MARK: - 权限决策常量
 
+/// 权限审批的四种决策结果。
+///
+/// rawValue 用于写回应答文件；`answerIndex` 用于卡片按钮下标映射，
+/// 超时为负值表示非用户主动点击。
 enum PermissionDecisionValue: String {
     case allowOnce = "once"
     case allowAlways = "always"
     case reject = "reject"
     case timeout = "timeout"
 
+    /// 决策的中文按钮/回显文案。
     var label: String {
         switch self {
         case .allowOnce: return "允许"
@@ -20,6 +25,7 @@ enum PermissionDecisionValue: String {
         }
     }
 
+    /// 映射到卡片按钮的顺序下标（允许=0、始终允许=1、拒绝=2、超时=-1）。
     var answerIndex: Int {
         switch self {
         case .allowOnce: return 0
@@ -32,27 +38,34 @@ enum PermissionDecisionValue: String {
 
 // MARK: - PermissionRequest
 
-/// A permission request from a tool call awaiting user approval.
+/// 一次工具调用产生的、等待用户审批的权限请求。
 struct PermissionRequest: Equatable, Identifiable {
     let requestID: String
     let provider: AgentProvider
     let sessionID: String
+    /// 归一化后的动作标识（如 shell/read/edit），用于生成标题。
     let action: String
+    /// 涉及的资源（命令、路径、URL 等），首项作为详情展示。
     let resources: [String]
+    /// 发起请求的子智能体名称（可为空）。
     let agent: String
     let toolName: String
+    /// 工具原始输入参数，用于在 resources 为空时反推详情。
     let toolInput: [String: AnyCodableValue]?
     let arrivedAt: Date
+    /// 协议风格标记，默认 "opencode"。
     var flavor: String = "opencode"
 
+    /// 卡片唯一标识：提供方+会话+请求 id 拼接。
     var id: String { "\(provider.rawValue).\(sessionID).\(requestID)" }
 
-    /// Human-readable title for the card header.
+    /// 卡片标题头的人类可读文案。
     var title: String {
         Self.actionLabel(action)
     }
 
-    /// Detail line: the command / path / URL.
+    /// 详情行：优先取 resources 首项，否则从 toolInput 里挑首个非空的关键字段
+    /// （命令 / 路径 / URL / 查询 / 模式）。
     var detail: String {
         if let first = resources.first { return first }
         guard let input = toolInput else { return "" }
@@ -62,6 +75,7 @@ struct PermissionRequest: Equatable, Identifiable {
         return ""
     }
 
+    /// 将动作标识翻译为中文标题；未知动作含 "/" 视为 MCP 工具，全兜底为"操作"。
     static func actionLabel(_ action: String) -> String {
         let labels: [String: String] = [
             "shell": "终端命令", "bash": "终端命令",
@@ -77,8 +91,11 @@ struct PermissionRequest: Equatable, Identifiable {
         return action.isEmpty ? "操作" : action
     }
 
-    // MARK: Parsing from socket payload
+    // MARK: 从 socket 载荷解析
 
+    /// 从 socket payload 构造权限请求；缺少 request_id 则返回 nil（无法应答）。
+    ///
+    /// 动作推断有三级兜底：显式 action → 由 tool_name 映射 → 由 tool_input 键反推。
     static func parse(payload: [String: AnyCodableValue]?, provider: AgentProvider,
                       sessionID: String) -> PermissionRequest? {
         guard let payload else { return nil }
@@ -86,6 +103,7 @@ struct PermissionRequest: Equatable, Identifiable {
             return nil
         }
 
+        // resources 可能是数组或单字符串。
         var resources: [String] = []
         if case .array(let arr) = payload["resources"] {
             resources = arr.compactMap { $0.stringValue }
@@ -98,7 +116,7 @@ struct PermissionRequest: Equatable, Identifiable {
             return nil
         }()
 
-        // Infer resources from tool_input if empty
+        // resources 为空时，尝试从 tool_input 的关键字段反推出资源。
         if resources.isEmpty, let input = toolInputDict {
             for key in ["command", "file_path", "path", "url", "query", "pattern"] {
                 if let val = input[key]?.stringValue, !val.isEmpty {
@@ -113,6 +131,7 @@ struct PermissionRequest: Equatable, Identifiable {
         if action.isEmpty {
             action = actionFromToolName(toolName)
         }
+        // 仍无法确定动作时，再从 tool_input 键反推，最终兜底为 permission。
         if action.isEmpty || toolName.lowercased() == "permission" || toolName.isEmpty {
             action = actionFromToolInput(toolInputDict) ?? action
             if action.isEmpty { action = "permission" }
@@ -132,6 +151,7 @@ struct PermissionRequest: Equatable, Identifiable {
         )
     }
 
+    /// 由工具名映射出归一化动作；`mcp__a__b` 形式转换为 `mcp/a/b`。
     private static func actionFromToolName(_ name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespaces).lowercased()
         if trimmed.isEmpty || trimmed == "permission" || trimmed == "tool" { return "" }
@@ -149,6 +169,7 @@ struct PermissionRequest: Equatable, Identifiable {
         return mapping[trimmed] ?? trimmed
     }
 
+    /// 从 tool_input 的键存在性反推动作（有 command→shell、有 url→webfetch 等）。
     private static func actionFromToolInput(_ input: [String: AnyCodableValue]?) -> String? {
         guard let input else { return nil }
         let keys: [(String, String)] = [

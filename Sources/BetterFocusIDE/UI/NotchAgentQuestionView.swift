@@ -3,7 +3,7 @@
 
 import SwiftUI
 
-/// Interactive question card shown on the island when an agent asks a question.
+/// 智能体提问时在灵动岛上展示的交互式问题卡片。
 struct NotchAgentQuestionView: View {
     @ObservedObject var controller: QuestionController
     var pinned = false
@@ -13,8 +13,8 @@ struct NotchAgentQuestionView: View {
     private var prompt: AgentQuestionPrompt? { controller.prompt }
     private var currentQuestion: AgentQuestion? { prompt?.question }
 
-    // Live type sizes (Python body_font / option_font / desc_font), read at
-    // render time so panel edits apply without a restart.
+    // 实时字号（Python body_font / option_font / desc_font），渲染时读取，
+    // 使面板改动无需重启即生效。
     private var bodyFontSize: CGFloat { CGFloat(Settings.shared.bodyFont) }
     private var optionFontSize: CGFloat { CGFloat(Settings.shared.optionFont) }
     private var descFontSize: CGFloat { CGFloat(Settings.shared.descFont) }
@@ -43,11 +43,12 @@ struct NotchAgentQuestionView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - 头部
 
+    /// 头部：提供方徽章 + "提供方 · 问题标题" + 多问翻页步进器 + 钉住按钮。
     private func header(prompt: AgentQuestionPrompt, question: AgentQuestion) -> some View {
         HStack(spacing: 8) {
-            // Provider badge
+            // 提供方徽章
             Text(String(prompt.provider.displayName.prefix(1)))
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.white)
@@ -62,7 +63,7 @@ struct NotchAgentQuestionView: View {
                 .truncationMode(.tail)
                 .layoutPriority(0)
             Spacer(minLength: 0)
-            // Multi-question stepper
+            // 多问翻页步进器（一次提问含多问时才出现）
             if prompt.questions.count > 1 {
                 HStack(spacing: 4) {
                     Button { controller.navigate(to: prompt.index - 1) } label: {
@@ -85,7 +86,7 @@ struct NotchAgentQuestionView: View {
                 .foregroundStyle(.white.opacity(0.85))
                 .layoutPriority(1)
             }
-            // Pin icon (hold mode): click or ⌘⇧P toggles 固定 ⇄ 按需.
+            // 钉住图标（固定模式）：点击或 ⌘⇧P 在 固定 ⇄ 按需 间切换。
             Button(action: onTogglePin) {
                 Image(systemName: pinned ? "pin.fill" : "pin")
                     .font(.system(size: 9, weight: .semibold))
@@ -99,7 +100,7 @@ struct NotchAgentQuestionView: View {
         }
     }
 
-    // MARK: - Options
+    // MARK: - 选项
 
     private func optionsView(question: AgentQuestion) -> some View {
         ForEach(Array(question.options.enumerated()), id: \.offset) { index, option in
@@ -107,6 +108,7 @@ struct NotchAgentQuestionView: View {
         }
     }
 
+    /// 单个选项行：勾选符号 + 标签 + 可选描述；选中时用提供方主题色高亮底。
     private func optionRow(index: Int, option: AgentQuestionOption, question: AgentQuestion) -> some View {
         let picked = isSelected(index, question: question)
         return Button {
@@ -143,8 +145,9 @@ struct NotchAgentQuestionView: View {
         .disabled(controller.choice != nil)
     }
 
-    // MARK: - Other row
+    // MARK: - "其他…"行
 
+    /// "其他…"行：点击进入自定义作答，展开一个输入框；焦点由 focusOtherTick 驱动。
     @ViewBuilder
     private func otherRow(question: AgentQuestion) -> some View {
         let picked = isOwnAnswer(question: question)
@@ -193,8 +196,9 @@ struct NotchAgentQuestionView: View {
         }
     }
 
-    // MARK: - Send button
+    // MARK: - 发送按钮
 
+    /// 发送按钮：仅在 `canSend` 时高亮可点，提交后禁用。
     private func sendButton(prompt: AgentQuestionPrompt) -> some View {
         Button {
             controller.submit()
@@ -213,8 +217,9 @@ struct NotchAgentQuestionView: View {
         .disabled(!controller.canSend || controller.choice != nil)
     }
 
-    // MARK: - Helpers
+    // MARK: - 辅助方法
 
+    /// 该选项是否处于选中态（已提交则看 choice，否则看当前 picks）。
     private func isSelected(_ index: Int, question: AgentQuestion) -> Bool {
         let displayed = controller.choice ?? controller.picks[question.id]
         switch displayed {
@@ -224,14 +229,47 @@ struct NotchAgentQuestionView: View {
         }
     }
 
+    /// 该问题当前是否为自定义作答。
     private func isOwnAnswer(question: AgentQuestion) -> Bool {
         let displayed = controller.choice ?? controller.picks[question.id]
         if case .custom = displayed { return true }
         return false
     }
 
+    /// 勾选符号：多选方形、单选圆形；选中时填充。
     private func pickSymbol(_ picked: Bool, multiSelect: Bool) -> String {
         if multiSelect { return picked ? "checkmark.square.fill" : "square" }
         return picked ? "checkmark.circle.fill" : "circle"
     }
 }
+
+#if DEBUG
+/// Xcode Canvas 预览：构造一个 QuestionController 并注入模拟的提问。
+struct NotchAgentQuestionView_Previews: PreviewProvider {
+    static var previews: some View {
+        let ctrl = QuestionController()
+        let question = AgentQuestion(
+            id: "q1",
+            header: "重构方案选择",
+            question: "是否将当前工程拆分为 library + executable 双目标以支持 SwiftUI Preview？",
+            options: [
+                AgentQuestionOption(label: "是，立即重构", description: "拆分为库目标与瘦可执行目标"),
+                AgentQuestionOption(label: "暂不", description: "保持现有单 executable 结构"),
+                AgentQuestionOption(label: "稍后提醒", description: "下次启动时再询问"),
+            ],
+            multiSelect: false
+        )
+        let prompt = AgentQuestionPrompt(
+            provider: .qoder,
+            sessionID: "preview-session",
+            questions: [question],
+            arrivedAt: Date()
+        )
+        ctrl.present(prompt)
+        return NotchAgentQuestionView(controller: ctrl)
+            .frame(width: 420)
+            .padding()
+            .preferredColorScheme(.dark)
+    }
+}
+#endif

@@ -3,30 +3,33 @@
 
 import Foundation
 
-/// Installs / uninstalls the OpenCode plugin that forwards questions,
-/// permission evaluations and session-idle (turn finished) events to the
-/// BetterFocusIDE island over the Unix socket.
+/// 安装 / 卸载 OpenCode 插件，把提问、权限评估、会话空闲（轮次完成）等事件
+/// 通过 Unix socket 转发到 BetterFocusIDE 灵动岛。
 enum OpenCodePluginInstaller {
     static let pluginPath = InstallerPaths.opencodePluginPath
 
+    /// 安装：确保目录存在后写入插件；内容相同则跳过（幂等，保持 mtime 稳定）。
     static func install() throws {
         let dir = (pluginPath as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let content = pluginContent
-        // Idempotent: don't rewrite identical content (keeps mtime stable).
+        // 幂等：不重写相同内容（保持 mtime 稳定）。
         if let existing = try? String(contentsOfFile: pluginPath, encoding: .utf8),
            existing == content { return }
         try content.write(toFile: pluginPath, atomically: true, encoding: .utf8)
     }
 
+    /// 卸载：删除插件文件。
     static func uninstall() {
         try? FileManager.default.removeItem(atPath: pluginPath)
     }
 
+    /// 通过文件是否存在判断安装状态。
     static var isInstalled: Bool {
         FileManager.default.fileExists(atPath: pluginPath)
     }
 
+    /// 插件正文：安装时把占位符替换为本构建的命名空间路径与超时值。
     static var pluginContent: String {
         PluginTemplate.body
             .replacingOccurrences(of: "__SOCKET_PATH__", with: InstallerPaths.socketPath)
@@ -37,8 +40,7 @@ enum OpenCodePluginInstaller {
     }
 }
 
-/// The embedded `betterfocus-notify.js` body. Placeholders are substituted at
-/// install time so the plugin points at this build's namespace.
+/// 内嵌的 `betterfocus-notify.js` 正文。占位符在安装时替换，使插件指向本构建的命名空间。
 enum PluginTemplate {
     static let body = """
         // BetterFocusIDE <-> OpenCode plugin.

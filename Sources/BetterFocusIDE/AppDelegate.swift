@@ -4,48 +4,56 @@
 import AppKit
 import SwiftUI
 
+/// 应用生命周期代理。
+///
+/// 负责：单实例互斥锁校验、状态栏菜单搭建、灵动岛服务初始化、
+/// 键盘应答与设置/自检辅助窗口的呈现。
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// 状态栏图标项（菜单栏常驻入口）。
     private var statusItem: NSStatusItem!
+    /// 灵动岛中央编排服务（单例）。
     private var notchService: NotchService!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Run as accessory app (no Dock icon)
+        // 以辅助应用模式运行（不在 Dock 显示图标）。
         NSApp.setActivationPolicy(.accessory)
 
-        // Single-instance guard first: if another island already holds the
-        // socket, exit before raising a second (ghost) island. A duplicate
-        // launch of a background accessory app should no-op silently (like
-        // most menu-bar tools) — a modal alert here would block this thread
-        // and leave the rejected process hanging instead of quitting.
+        // 单实例守卫优先执行：若另一个灵动岛实例已持有 socket，则在拉起
+        // 第二个（幽灵）实例之前先退出。后台辅助应用的重复启动应静默无操作
+        // （与多数菜单栏工具一致）——此处若弹模态框会阻塞主线程，让被拒绝的
+        // 进程挂起而非正常退出。
         notchService = NotchService.shared
         switch notchService.startSocket() {
         case .started:
             break
         case .alreadyRunning:
-            Log.info("another instance already holds the socket; exiting.", topic: "app")
+            Log.info("另一实例已持有 socket；退出。", topic: "app")
             NSApp.terminate(nil)
             return
         case .failed(let error):
-            Log.error("socket start failed (\(error)); exiting.", topic: "app")
+            Log.error("socket 启动失败（\(error)）；退出。", topic: "app")
             NSApp.terminate(nil)
             return
         }
 
-        // Set up status bar item with a menu.
+        // 搭建带菜单的状态栏图标。
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "capsule", accessibilityDescription: "BetterFocusIDE")
         }
         statusItem.menu = buildMenu()
 
-        // Show the notch initially
+        // 初次显示灵动岛。
         notchService.show()
 
-        // Keyboard answering + settings shortcut wiring.
+        // 键盘应答 + 设置快捷键接线。
         notchService.onOpenSettings = { [weak self] in self?.openSettings() }
         notchService.startKeyboard()
     }
 
+    /// 构建状态栏下拉菜单，并把菜单项的 target 绑定到 self。
+    ///
+    /// 菜单项：展开/收起、最近通知、安装/卸载 Hook、自检、设置、退出。
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "展开 / 收起灵动岛",
@@ -76,6 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
+    // MARK: - 菜单动作
+
     @objc private func toggleNotch() {
         notchService.toggle()
     }
@@ -84,11 +94,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchService.showHistory()
     }
 
+    /// 一键安装 Qoder Hook 与 OpenCode Plugin，完成后弹窗汇总结果。
     @objc private func installAll() {
         let summary = notchService.installAll()
         showAlert(title: "安装完成", message: summary)
     }
 
+    /// 卸载 Qoder Hook 与 OpenCode Plugin。
     @objc private func uninstallAll() {
         notchService.uninstallAll()
         showAlert(title: "已卸载", message: "Qoder Hook 与 OpenCode Plugin 已移除。")
@@ -98,16 +110,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         presentWindow(title: "自检 (Doctor)", rootView: DoctorView(), size: CGSize(width: 460, height: 420))
     }
 
+    /// 打开设置面板（可调整大小，带最小尺寸约束）。
     @objc private func openSettings() {
         presentWindow(title: "灵动岛设置", rootView: SettingsView(),
                       size: CGSize(width: 760, height: 620),
                       minSize: CGSize(width: 620, height: 420))
     }
 
-    // MARK: - Window / alert helpers
+    // MARK: - 窗口 / 弹窗辅助
 
+    /// 按标题缓存辅助窗口，避免同一窗口重复创建。
     private var auxiliaryWindows: [String: NSWindow] = [:]
 
+    /// 呈现（或复用）一个承载 SwiftUI 内容的辅助窗口。
+    ///
+    /// - 若同名窗口已存在：激活应用并前置该窗口。
+    /// - 若传入 `minSize`：窗口可调整大小并强制最小尺寸下限
+    ///   （设置面板的侧栏 + 读数列不能被压缩到重叠）。
     private func presentWindow<Content: View>(title: String, rootView: Content, size: CGSize,
                                               minSize: CGSize? = nil) {
         if let existing = auxiliaryWindows[title] {
@@ -120,8 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = title
         window.styleMask = [.titled, .closable]
         if let minSize {
-            // Resizable panels (settings) enforce a floor so the sidebar +
-            // readout columns never collapse into each other.
+            // 可调整大小的面板强制最小尺寸下限，避免侧栏与读数列被压缩到重叠。
             window.styleMask.insert(.resizable)
             window.contentMinSize = minSize
         }
@@ -133,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
     }
 
+    /// 弹出信息型模态告警（仅在用户主动操作后调用，非启动路径）。
     private func showAlert(title: String, message: String) {
         let alert = NSAlert()
         alert.messageText = title
@@ -142,6 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    /// 应用退出前收尾：停止 socket 监听、持久化设置。
     func applicationWillTerminate(_ notification: Notification) {
         notchService.stopSocket()
         Settings.shared.save()

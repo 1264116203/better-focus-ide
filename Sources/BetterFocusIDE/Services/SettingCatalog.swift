@@ -4,8 +4,7 @@
 import Foundation
 import SwiftUI
 
-/// The value a setting row reads / writes. `choice` rows always carry a
-/// `String` (the option value); `color` rows carry device RGB.
+/// 设置行读写到的值。`choice` 行恒携带 `String`（选项值）；`color` 行携带设备 RGB。
 enum SettingValue: Equatable {
     case bool(Bool)
     case double(Double)
@@ -14,14 +13,14 @@ enum SettingValue: Equatable {
     case rgb(Double, Double, Double)
 }
 
+/// 设置行的控件类型。
 enum SettingKind {
     case slider, toggle, color, choice
 }
 
-/// One configurable item. Mirrors the Python reference's `Setting` dataclass:
-/// the fields up to `defaultValue` participate in read/write & persistence
-/// (via the closures); `section` / `enabledWhen` / `enabledBy` / `advanced` /
-/// `keywords` only describe presentation & filtering.
+/// 一个可配置项。对齐 Python 参考实现的 `Setting` dataclass：到 `defaultValue`
+/// 为止的字段参与读写与持久化（经闭包）；`section` / `enabledWhen` / `enabledBy` /
+/// `advanced` / `keywords` 只描述展示与过滤。
 struct SettingDefinition: Identifiable {
     let key: String
     let label: String
@@ -35,9 +34,11 @@ struct SettingDefinition: Identifiable {
     var digits: Int = 2
     var choices: [(String, String)] = []
     var note: String = ""
+    /// 变更是否需要重装 Hook / Plugin（如 agentWaitLimit）。
     var needsReinstall: Bool = false
     var enabledBy: [String] = []
     var enabledWhen: (() -> Bool)? = nil
+    /// 高级项：默认折叠，仅在展示高级设置时出现。
     var advanced: Bool = false
     var keywords: [String] = []
     let defaultValue: SettingValue
@@ -46,9 +47,10 @@ struct SettingDefinition: Identifiable {
 
     var id: String { key }
 
+    /// 当前是否可交互（无依赖谓词时默认可用）。
     func isEnabled() -> Bool { enabledWhen?() ?? true }
 
-    /// Search hit: label / group / key / keywords, any contains (case-insensitive).
+    /// 搜索命中：label / group / key / keywords 任一包含查询（大小写不敏感）。
     func matches(_ query: String) -> Bool {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return true }
@@ -57,7 +59,8 @@ struct SettingDefinition: Identifiable {
     }
 }
 
-/// KeyPath-based accessors keep the catalog compact and type-safe.
+// 基于 KeyPath 的访问器，让 catalog 保持紧凑且类型安全。每个 setter 写值后都
+// 调用 markChanged() 广播变更。
 private func getD(_ kp: KeyPath<Settings, Double>) -> () -> SettingValue {
     { .double(Settings.shared[keyPath: kp]) }
 }
@@ -88,7 +91,7 @@ private func getRGB(_ kp: KeyPath<Settings, String>) -> () -> SettingValue {
 private func setRGB(_ kp: ReferenceWritableKeyPath<Settings, String>) -> (SettingValue) -> Void {
     { if case .rgb(let r, let g, let b) = $0 { Settings.shared[keyPath: kp] = Settings.rgbString(r, g, b); Settings.shared.markChanged() } }
 }
-/// Int-backed value exposed to the panel as a String choice.
+/// 以 Int 存储、向面板暴露为 String choice 的值。
 private func getIS(_ kp: KeyPath<Settings, Int>) -> () -> SettingValue {
     { .string(String(Settings.shared[keyPath: kp])) }
 }
@@ -96,7 +99,7 @@ private func setIS(_ kp: ReferenceWritableKeyPath<Settings, Int>) -> (SettingVal
     { if case .string(let v) = $0 { Settings.shared[keyPath: kp] = Int(v) ?? 0; Settings.shared.markChanged() } }
 }
 
-// Dependency predicates (Python `_question_on` / `_sound_on` / …).
+// 依赖谓词（对应 Python `_question_on` / `_sound_on` / …）：控制某行是否可交互。
 private let questionOn: () -> Bool = { Settings.shared.questionEnabled }
 private let permissionOn: () -> Bool = { Settings.shared.permissionEnabled }
 private let anyCardOn: () -> Bool = { Settings.shared.questionEnabled || Settings.shared.permissionEnabled }
@@ -104,11 +107,11 @@ private let turnNotifyOn: () -> Bool = { Settings.shared.turnNotifyEnabled }
 private let soundOn: () -> Bool = { !Settings.shared.notifySound.isEmpty }
 private let hapticOn: () -> Bool = { Settings.shared.hapticOnArrive || Settings.shared.hapticOnAnswer }
 
-/// The full setting catalog, ordered exactly like the Python reference so the
-/// panel's groups / sections / rows line up one-for-one.
+/// 完整设置目录，顺序与 Python 参考实现严格一致，使面板的分组 / 小节 / 行一一对应。
 enum SettingCatalog {
     static let groups = ["提醒", "尺寸", "外观", "动画", "声音与触感", "行为", "超时与排队"]
 
+    /// 每个分组的一句话说明（面板顶部展示）。
     static let groupHints: [String: String] = [
         "提醒": "总开关：关掉即把请求交回 IDE 自己的弹窗与提问框",
         "尺寸": "卡片、气泡与通知卡片的尺寸与字号",
@@ -119,11 +122,13 @@ enum SettingCatalog {
         "超时与排队": "等多久、同时排几项",
     ]
 
+    /// 每个分组的 SF Symbol 图标名。
     static let groupSymbols: [String: String] = [
         "提醒": "bell", "尺寸": "ruler", "外观": "paintpalette", "动画": "sparkles",
         "声音与触感": "speaker.wave.2", "行为": "hand.tap", "超时与排队": "clock",
     ]
 
+    /// 所有设置项的定义列表（声明式；面板据此渲染，不硬编码 UI 行）。
     static let all: [SettingDefinition] = [
         // ---------------- 提醒 ----------------
         SettingDefinition(key: "permissionEnabled", label: "权限申请提醒", kind: .toggle, group: "提醒",
@@ -185,7 +190,7 @@ enum SettingCatalog {
             defaultValue: .double(380), get: getD(\.notifyWidth), set: setD(\.notifyWidth)),
         SettingDefinition(key: "notifyHeight", label: "通知卡片高度", kind: .slider, group: "尺寸", section: "气泡与通知",
             min: 56, max: 180, step: 2, unit: "pt", digits: 0,
-            defaultValue: .double(74), get: getD(\.notifyHeight), set: setD(\.notifyHeight)),
+            defaultValue: .double(100), get: getD(\.notifyHeight), set: setD(\.notifyHeight)),
 
         // ---------------- 外观 ----------------
         SettingDefinition(key: "backgroundColor", label: "卡片背景色", kind: .color, group: "外观",
@@ -320,10 +325,12 @@ enum SettingCatalog {
             defaultValue: .int(45), get: getI(\.sweepGrace), set: setI(\.sweepGrace)),
     ]
 
+    /// 按 key 查找设置项定义。
     static func byKey(_ key: String) -> SettingDefinition? {
         all.first { $0.key == key }
     }
 
+    /// 取某分组下的全部设置项（保持目录顺序）。
     static func settings(in group: String) -> [SettingDefinition] {
         all.filter { $0.group == group }
     }

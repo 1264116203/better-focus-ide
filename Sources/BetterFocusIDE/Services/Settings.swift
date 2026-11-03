@@ -6,19 +6,16 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Persistent user settings, loaded from and saved to
-/// `~/Library/Application Support/BetterFocusIDE/settings.json`.
+/// 持久化的用户设置，从 `~/Library/Application Support/BetterFocusIDE/settings.json`
+/// 加载并保存回该文件。
 ///
-/// This is the single live configuration source (the Swift counterpart of the
-/// Python reference's `config` module): every consumer reads these values at
-/// call time, so a change takes effect immediately without a restart. The
-/// settings panel writes through `SettingCatalog`, which calls
-/// `changes.send()` so the island can re-layout (Python `settings.on_change`).
+/// 这是唯一的实时配置来源（对应 Python 参考实现的 `config` 模块）：所有消费者都在
+/// 调用时读取这些值，因此改动无需重启即刻生效。设置面板经 `SettingCatalog` 写入，
+/// 后者调用 `changes.send()`，让灵动岛重新布局（对应 Python `settings.on_change`）。
 final class Settings: ObservableObject {
     static let shared = Settings()
 
-    /// Emitted after any setting is mutated through the catalog, so the island
-    /// and panel can react (re-layout / refresh greying).
+    /// 任一设置经 catalog 变更后发出，让灵动岛与面板做出反应（重新布局 / 刷新置灰）。
     let changes = PassthroughSubject<Void, Never>()
 
     private let settingsURL: URL = {
@@ -47,7 +44,7 @@ final class Settings: ObservableObject {
     @Published var notifyWidth: Double = 380
     @Published var notifyHeight: Double = 74
 
-    // MARK: - 外观 (appearance); colors stored as "r,g,b"
+    // MARK: - 外观 (appearance)；颜色以 "r,g,b" 字符串存储
     @Published var backgroundColor = "0.05,0.05,0.07"
     @Published var backgroundAlpha: Double = 0.96
     @Published var accentColor = "0.29,0.62,1.0"
@@ -58,7 +55,7 @@ final class Settings: ObservableObject {
 
     // MARK: - 动画 (motion)
     @Published var motionGrowBounce: Double = 0.25
-    /// Tri-state: "system" follows the accessibility setting, "on"/"off" force.
+    /// 三态："system" 跟随无障碍设置，"on"/"off" 强制。
     @Published var reduceMotion = "system"
     @Published var animationSpeed: Double = 1.0
     @Published var animationFps = 0
@@ -91,7 +88,7 @@ final class Settings: ObservableObject {
     @Published var sweepInterval = 15
     @Published var sweepGrace = 45
 
-    /// Available system sounds (name, display label).
+    /// 可选的系统提示音（名字，展示标签）。
     static let soundChoices: [(String, String)] = [
         ("", "不播放"), ("Ping", "Ping（清脆）"), ("Glass", "Glass（玻璃）"),
         ("Hero", "Hero（上扬）"), ("Frog", "Frog（蛙鸣）"), ("Funk", "Funk（放克）"),
@@ -100,23 +97,25 @@ final class Settings: ObservableObject {
         ("Submarine", "Submarine（潜艇）"), ("Tink", "Tink（轻击）"), ("Basso", "Basso（低沉）"),
     ]
 
+    /// 可选的触感反馈模式。
     static let hapticChoices: [(String, String)] = [
         ("generic", "通用（推荐）"), ("levelChange", "变化（档位）"),
     ]
 
+    /// 可选的动画帧率（"0" = 自动跟随屏幕）。
     static let fpsChoices: [(String, String)] = [
         ("0", "自动（跟随屏幕，ProMotion 120Hz）"), ("60", "60 fps"),
         ("90", "90 fps"), ("120", "120 fps"),
     ]
 
-    // MARK: - Derived colors
+    // MARK: - 派生颜色
 
     var backgroundRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(backgroundColor, fallback: (0.05, 0.05, 0.07)) }
     var accentRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(accentColor, fallback: (0.29, 0.62, 1.0)) }
     var qoderTintRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(qoderTint, fallback: (0.58, 0.45, 0.82)) }
     var opencodeTintRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(opencodeTint, fallback: (0.06, 0.73, 0.51)) }
 
-    /// Resolved reduce-motion flag (tri-state → bool).
+    /// 解析后的 reduce-motion 布尔值（三态 → bool）。
     var reduceMotionResolved: Bool {
         switch reduceMotion {
         case "on": return true
@@ -125,30 +124,34 @@ final class Settings: ObservableObject {
         }
     }
 
+    /// 把 "r,g,b" 字符串解析成三元组；字段不足时回退到 fallback。
     static func parseRGB(_ text: String, fallback: (Double, Double, Double)) -> (r: Double, g: Double, b: Double) {
         let parts = text.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
         guard parts.count >= 3 else { return (fallback.0, fallback.1, fallback.2) }
         return (parts[0], parts[1], parts[2])
     }
 
+    /// 把三元组格式化为 "r,g,b" 字符串（4 位有效数字）。
     static func rgbString(_ r: Double, _ g: Double, _ b: Double) -> String {
         String(format: "%.4g,%.4g,%.4g", r, g, b)
     }
 
-    /// Notify subscribers that a setting changed (island re-layouts).
+    /// 通知订阅者某设置已变更（灵动岛据此重新布局）。
     func markChanged() { changes.send() }
 
     private init() {
         load()
     }
 
-    // MARK: - Persistence
+    // MARK: - 持久化
 
+    /// 落盘结构：版本号 + 键值映射。缺键读取时用 `??` 回退，保证向后兼容。
     private struct Stored: Codable {
         var version: Int
         var values: [String: AnyCodableValue]
     }
 
+    /// 从 settings.json 加载；文件缺失或解码失败时保留当前（默认）值。
     func load() {
         guard let data = try? Data(contentsOf: settingsURL),
               let stored = try? JSONDecoder().decode(Stored.self, from: data) else { return }
@@ -204,6 +207,7 @@ final class Settings: ObservableObject {
         sweepGrace = v["sweepGrace"]?.intValue ?? sweepGrace
     }
 
+    /// 把所有 @Published 字段序列化进 values 并原子写盘。
     func save() {
         var values: [String: AnyCodableValue] = [:]
         values["permissionEnabled"] = .bool(permissionEnabled)
@@ -264,10 +268,11 @@ final class Settings: ObservableObject {
         }
     }
 
-    // MARK: - Debounced save (panel drags write once after the hand stops)
+    // MARK: - 去抖保存（面板拖动时手停下后只写一次）
 
     private var saveWork: DispatchWorkItem?
 
+    /// 安排一次延迟保存：反复调用只保留最后一次，避免拖动滑块时高频写盘。
     func scheduleSave(delay: TimeInterval = 0.5) {
         saveWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.save() }
@@ -275,14 +280,16 @@ final class Settings: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
+    /// 取消待执行的保存并立即落盘。
     func flushSave() {
         saveWork?.cancel()
         saveWork = nil
         save()
     }
 
-    // MARK: - Reset to factory defaults
+    // MARK: - 恢复出厂默认
 
+    /// 把所有字段重置为默认值，随后广播变更并落盘。
     func resetAll() {
         permissionEnabled = true; questionEnabled = true; turnNotifyEnabled = true
         turnNotifyJump = true; permissionNoticeJump = true
@@ -308,11 +315,13 @@ final class Settings: ObservableObject {
 }
 
 private extension AnyCodableValue {
+    /// 宽松取 Int：int 直接取，double 截断取整，其余 nil。
     var intValue: Int? {
         if case .int(let i) = self { return i }
         if case .double(let d) = self { return Int(d) }
         return nil
     }
+    /// 宽松取 Double：double 直接取，int 提升为 Double，其余 nil。
     var doubleValue: Double? {
         if case .double(let d) = self { return d }
         if case .int(let i) = self { return Double(i) }

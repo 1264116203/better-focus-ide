@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="BetterFocusIDE"
-EXECUTABLE="BetterFocusIDE"
+EXECUTABLE="BetterFocusIDEApp"
 APP_BUNDLE_ID="com.betterfocus.ide"
 BUILD_CONFIGURATION="debug"
 TARGET="arm64-apple-macosx14.0"

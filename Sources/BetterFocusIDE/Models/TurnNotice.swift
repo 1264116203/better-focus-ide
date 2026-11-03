@@ -3,28 +3,37 @@
 
 import Foundation
 
-/// A "turn finished" notification the agent emits when it completes a reply
-/// (Qoder Stop / OpenCode session.idle). Shown as a banner the user can click
-/// to jump back to the IDE that produced it.
+/// 智能体完成一次回复时发出的"轮次完成"通知（Qoder Stop / OpenCode session.idle）。
+///
+/// 以横幅形式展示，用户点击可跳回产生它的 IDE。
 struct TurnNotice: Equatable, Identifiable {
     let id = UUID()
+    /// 提供方标识（小写原始值）。
     let provider: String
+    /// 提供方展示名。
     let providerName: String
     let sessionID: String
+    /// 横幅标题（优先取会话真实标题，否则回退到通用文案）。
     let title: String
+    /// 横幅正文（优先取最新一条助手消息，否则回退到跳转提示）。
     let body: String
+    /// 项目叶子名（工作目录末级）。
     let project: String
+    /// 宿主应用信息，用于精确跳转。
     let host: HostInfo?
     let arrivedAt: Date
-    /// Whether clicking jumps back to the IDE.
+    /// 点击是否跳回 IDE。
     let jumpEnabled: Bool
-    /// Session was spawned by `qodercli` (a headless script), not the IDE the
-    /// user is waiting on — record it to history but don't raise a banner.
+    /// 会话是否由 `qodercli`（无头脚本）产生：仍记入历史但不抢占屏幕——
+    /// 它的"用户输入"是被管道进来的 diff，而非用户正在等待的内容。
     let fromCLI: Bool
 
     static func == (lhs: TurnNotice, rhs: TurnNotice) -> Bool { lhs.id == rhs.id }
 
-    /// Parse a `turn_finished` socket message into a notice.
+    /// 将 `turn_finished` socket 消息解析为一条通知。
+    ///
+    /// 标题与正文读取自 hook 上报的 transcript jsonl（见 `Transcript.sessionSummary`）；
+    /// 文件缺失/不可读时坍缩为空并回退到通用文案。
     static func parse(message: AgentSocketMessage) -> TurnNotice? {
         let provider = (message.provider).lowercased()
         let sessionID = message.sessionID
@@ -33,8 +42,7 @@ struct TurnNotice: Equatable, Identifiable {
         let project = projectLeaf(from: host)
         let name = AgentProvider(rawValue: provider)?.displayName
             ?? provider.capitalized
-        // Read the real session title from the transcript jsonl the hook reports.
-        // Missing / unreadable collapses to empty, so we fall back to generic text.
+        // 从 hook 上报的 transcript jsonl 读取真实会话标题。
         let transcriptPath = message.payload?["transcript_path"]?.stringValue
         let summary = Transcript.sessionSummary(path: transcriptPath, provider: provider)
 
@@ -52,7 +60,7 @@ struct TurnNotice: Equatable, Identifiable {
         )
     }
 
-    /// The last path component of the project directory (the window title).
+    /// 项目目录的最后一个路径组件（即窗口标题）。
     private static func projectLeaf(from host: HostInfo) -> String {
         let cwd = host.cwd
         guard !cwd.isEmpty else { return "" }

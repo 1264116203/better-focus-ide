@@ -3,23 +3,22 @@
 
 import Foundation
 
-/// The single logging entry point (mirrors the Python `log.py`). Every module
-/// logs through this instead of raw `NSLog`, so problems leave a real trail in
-/// `…/BetterFocusIDE/logs/betterfocus.log` rather than vanishing.
+/// 唯一的日志入口（对齐 Python 的 `log.py`）。所有模块都经此记录而非直接用
+/// `NSLog`，让问题在 `…/BetterFocusIDE/logs/betterfocus.log` 里留下真实痕迹，
+/// 而不是凭空消失。
 ///
-/// - File: `<AppSupport>/BetterFocusIDE/logs/betterfocus.log`, 5 MB × 3 rotation.
-/// - Console: off by default; on with `BETTERFOCUS_LOG_STDERR=1` (or when the
-///   disk isn't writable, so logging never blocks startup).
-/// - Level: `DEBUG` by default (the rotation absorbs the volume), overridable
-///   with `BETTERFOCUS_LOG_LEVEL`.
-/// - **Never logs user content**: command bodies, question text, file contents
-///   stay out. Cross-process messages go through `describe(...)` which keeps
-///   only event / provider / id prefixes.
+/// - 文件：`<AppSupport>/BetterFocusIDE/logs/betterfocus.log`，5 MB × 3 轮转。
+/// - 控制台：默认关闭；`BETTERFOCUS_LOG_STDERR=1` 打开（或磁盘不可写时也打开，
+///   使日志从不阻塞启动）。
+/// - 级别：默认 `DEBUG`（轮转能吸收体量），可用 `BETTERFOCUS_LOG_LEVEL` 覆盖。
+/// - **绝不记录用户内容**：命令正文、问题文本、文件内容一律不落日志。跨进程消息
+///   经 `describe(...)` 处理，只保留事件 / 提供方 / id 前缀。
 ///
-/// Logging itself never throws and never takes the island down.
+/// 日志本身从不抛错、也从不把灵动岛拖垮。
 enum LogLevel: Int, Comparable {
     case debug = 0, info, warning, error
     static func < (lhs: LogLevel, rhs: LogLevel) -> Bool { lhs.rawValue < rhs.rawValue }
+    /// 定宽级别标签，便于日志列对齐。
     var label: String {
         switch self {
         case .debug: return "DEBUG  "
@@ -33,8 +32,11 @@ enum LogLevel: Int, Comparable {
 final class Log {
     static let shared = Log()
 
+    /// 单文件上限 5 MB。
     static let maxBytes = 5 * 1024 * 1024
+    /// 保留的历史备份数。
     static let backupCount = 3
+    /// `describe` 中 id 前缀截断长度。
     private static let idPrefix = 8
 
     private let queue = DispatchQueue(label: "com.betterfocus.log")
@@ -50,9 +52,9 @@ final class Log {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
     }
 
-    // MARK: - Setup
+    // MARK: - 初始化配置
 
-    /// Configure once (idempotent). Safe to call before anything else logs.
+    /// 配置一次（幂等）。在任何日志之前调用都安全。
     static func setup() { shared.configure() }
 
     private func configure() {
@@ -67,8 +69,7 @@ final class Log {
             let dir = appSupport.appendingPathComponent("BetterFocusIDE/logs", isDirectory: true)
             let target = dir.appendingPathComponent("betterfocus.log")
 
-            // Try to make the directory + touch the file; if the volume is
-            // read-only or permission fails, degrade to stderr only.
+            // 尝试建目录 + touch 文件；若卷只读或权限失败，降级为仅输出到 stderr。
             do {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 if !FileManager.default.fileExists(atPath: target.path) {
@@ -88,6 +89,7 @@ final class Log {
         }
     }
 
+    /// 从环境变量解析日志级别；无法识别返回 nil（由调用方回退默认）。
     private static func levelFromEnv() -> LogLevel? {
         guard let name = ProcessInfo.processInfo.environment["BETTERFOCUS_LOG_LEVEL"]?
             .trimmingCharacters(in: .whitespaces).uppercased(), !name.isEmpty else { return nil }
@@ -100,10 +102,11 @@ final class Log {
         }
     }
 
-    // MARK: - Writing
+    // MARK: - 写入
 
+    /// 组装一行日志并按需写文件 / stderr（在串行队列上异步执行）。
     private func write(_ level: LogLevel, topic: String, _ message: String) {
-        // Ensure configured even if setup() wasn't called explicitly.
+        // 即便没显式调用 setup() 也确保已配置。
         if !configured { configure() }
         guard level >= minLevel else { return }
         let line = "\(formatter.string(from: Date())) \(level.label) \(topic): \(message)\n"
@@ -124,7 +127,7 @@ final class Log {
         }
     }
 
-    /// Roll `log → log.1 → … → log.N` when the file would exceed `maxBytes`.
+    /// 当文件将超过 `maxBytes` 时轮转：`log → log.1 → … → log.N`。
     private func rotateIfNeeded(incoming: Int, url: URL) {
         guard currentSize + incoming > Log.maxBytes else { return }
         let base = url.path
@@ -144,15 +147,15 @@ final class Log {
         currentSize = 0
     }
 
-    // MARK: - Public API
+    // MARK: - 公开 API
 
     static func debug(_ message: String, topic: String = "app") { shared.write(.debug, topic: topic, message) }
     static func info(_ message: String, topic: String = "app") { shared.write(.info, topic: topic, message) }
     static func warning(_ message: String, topic: String = "app") { shared.write(.warning, topic: topic, message) }
     static func error(_ message: String, topic: String = "app") { shared.write(.error, topic: topic, message) }
 
-    /// A desensitized one-line summary of a socket message — event type,
-    /// provider, and id prefixes only. Never the payload (user content).
+    /// 对一条 socket 消息做脱敏的单行摘要——只含事件类型、提供方、id 前缀，
+    /// 绝不含 payload（用户内容）。
     static func describe(event: String?, provider: String?, session: String?, request: String?) -> String {
         func cut(_ s: String?) -> String {
             let v = s ?? "-"

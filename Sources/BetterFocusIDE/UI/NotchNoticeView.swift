@@ -3,19 +3,19 @@
 
 import SwiftUI
 
-/// The banner shown when an agent finishes a reply. Clicking it jumps back to
-/// the IDE that produced the reply (when jump is enabled).
+/// 智能体完成一次回复时展示的横幅。点击可跳回产生该回复的 IDE（启用跳转时）。
 struct NotchNoticeView: View {
     let notice: TurnNotice
     var pinned = false
     var onTogglePin: () -> Void = {}
     let onTap: () -> Void
-    /// When set, triggers the bell swing animation on the provider badge.
+    /// 有值时触发提供方徽章上的铃铛摆动动画。
     var bellSwingStart: Date?
 
     @State private var bellAngle: Double = 0
     @State private var bellScale: CGFloat = 1.0
 
+    /// 徽章主题色：取提供方 tint，无对应提供方时回退到默认蓝。
     private var tint: Color {
         AgentProvider(rawValue: notice.provider)?.tint ?? Color(red: 0.29, green: 0.62, blue: 1.0)
     }
@@ -24,7 +24,7 @@ struct NotchNoticeView: View {
         ZStack(alignment: .topTrailing) {
             Button(action: onTap) {
                 HStack(spacing: 10) {
-                    // Provider badge with bell swing animation
+                    // 提供方徽章 + 铃铛摆动动画
                     Text(String(notice.providerName.prefix(1)))
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(.white)
@@ -57,14 +57,14 @@ struct NotchNoticeView: View {
                             .foregroundStyle(.white.opacity(0.5))
                     }
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 24)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // Pin toggle: hold the banner open instead of letting it retract.
+            // 钉住开关：把横幅保持展开，而非自行收拢。
             Button(action: onTogglePin) {
                 Image(systemName: pinned ? "pin.fill" : "pin")
                     .font(.system(size: 9, weight: .semibold))
@@ -80,10 +80,10 @@ struct NotchNoticeView: View {
         .onChange(of: bellSwingStart) { startBellSwing() }
     }
     
-    /// Bell swing: 4 sine cycles over 1.2s, amplitude 20° decaying to 0,
-    /// scale from 1.35 decaying to 1.0 (Python BELL_SWING_*).
+    /// 铃铛摆动：1.2 秒内 4 个正弦周期，幅度 20° 衰减到 0，缩放从 1.35 衰减到 1.0
+    /// （Python BELL_SWING_*）。
     private func startBellSwing() {
-        // Animate scale up then settle.
+        // 先放大再落定。
         bellScale = 1.35
         bellAngle = 20
         withAnimation(.easeOut(duration: 1.2)) {
@@ -92,3 +92,27 @@ struct NotchNoticeView: View {
         }
     }
 }
+
+#if DEBUG
+/// Xcode Canvas 预览：构造一条模拟的 turn_finished 通知横幅。
+struct NotchNoticeView_Previews: PreviewProvider {
+    static var previews: some View {
+        let mock = TurnNotice(
+            provider: "qoder",
+            providerName: "Qoder",
+            sessionID: "preview-session",
+            title: "预览模式：代码重构已完成",
+            body: "已将所有注释翻译为中文，编译通过。",
+            project: "better-focus-ide",
+            host: nil,
+            arrivedAt: Date(),
+            jumpEnabled: true,
+            fromCLI: false
+        )
+        NotchNoticeView(notice: mock, onTap: {})
+            .frame(width: 380)
+            .padding()
+            .preferredColorScheme(.dark)
+    }
+}
+#endif

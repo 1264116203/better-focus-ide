@@ -7,12 +7,20 @@ import QuartzCore
 
 // MARK: - NotchPanel
 
+/// 灵动岛的窗口壳（无边框、透明的 NSPanel）。
+///
+/// 关键不变量：`level = statusBar + 1` 让它浮在菜单栏之上；`collectionBehavior`
+/// 使其跨所有空间、全屏辅助层常驻且固定不随窗口循环切换。`canBecomeKey` 仅在
+/// 有卡片需要接收键盘输入时返回 true。
 final class NotchPanel: NSPanel {
+    /// 覆盖式 collectionBehavior：所有空间可见 + 全屏辅助 + 固定 + 不参与窗口循环。
     static let overlayCollectionBehavior: NSWindow.CollectionBehavior = [
         .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle
     ]
+    /// 窗口层级：菜单栏之上 1 级。
     static let normalLevel = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
 
+    /// 是否允许成为 key 窗口（有交互卡片时才置 true）。
     var acceptsKeyFocus = false
 
     override var canBecomeKey: Bool { acceptsKeyFocus }
@@ -25,11 +33,14 @@ final class NotchPanel: NSPanel {
 
 // MARK: - NotchHostingView
 
+/// 承载 SwiftUI 内容的 NSHostingView 子类。
+///
+/// 自定义 `hitTest`：落在自身边界外的点返回 nil，让透明区域的点击穿透到下方窗口。
 final class NotchHostingView: NSHostingView<AnyView> {
     override var acceptsFirstResponder: Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        // Allow clicks to pass through transparent areas
+        // 让点击穿过透明区域
         guard let superview = self.superview else { return super.hitTest(point) }
         let localPoint = convert(point, from: superview)
         guard bounds.contains(localPoint) else { return nil }
@@ -39,32 +50,26 @@ final class NotchHostingView: NSHostingView<AnyView> {
 
 // MARK: - NotchCanvas
 
-/// The window's content view. A black base layer masked to the island
-/// silhouette, a frosted-glass `NSVisualEffectView` that fades in on an
-/// expanded card, and the SwiftUI content hosted on top — all clipped to the
-/// morphing silhouette.
+/// 窗口的内容视图。一层被裁成灵动岛轮廓的黑色底、一层在卡片展开时淡入的磨砂玻璃
+/// `NSVisualEffectView`、以及叠在最上的 SwiftUI 内容——全部裁切到随帧形变的轮廓内。
 ///
-/// During a resize the window is held at the *envelope* size (the widest the
-/// spring swings to, plus shadow padding) while the mask path morphs
-/// frame-by-frame, so the notch corners and shoulders stay true as the sides
-/// swing apart. The padding around the island is transparent, which is where
-/// the window's drop shadow renders.
+/// 缩放期间窗口保持在*包络*尺寸（弹簧摆到的最宽处 + 阴影留白），而遮罩路径逐帧形变，
+/// 于是两侧摆开时刘海的圆角与肩部始终保真。岛四周的留白是透明的，窗口的投影正是在
+/// 这里绘制。
 final class NotchCanvas: NSView {
     let host: NotchHostingView
     private let silhouette = CAShapeLayer()
     private let edge = CAShapeLayer()
     private let glass = NSVisualEffectView()
-    /// A dark wash over the frosted glass. `.hudWindow` blurs whatever sits
-    /// behind the window, and at the top of the screen that's the (often light)
-    /// menu bar, which washed the whole card to a pale grey. This constant dim
-    /// pulls the frost back to a dark, subtle one. When collapsed the glass is
-    /// transparent, so the dim simply sits on the black base and stays black.
+    /// 覆在磨砂玻璃上的一层暗色洗色。`.hudWindow` 会模糊窗口后面的内容，而屏幕顶部
+    /// 往往是（偏亮的）菜单栏，会把整张卡片冲成浅灰。这层恒定暗化把磨砂拉回深邃、
+    /// 含蓄的暗色。收起时玻璃透明，暗层直接落在黑色底上、保持纯黑。
     private let dim = NSView()
-    /// The size the island is heading to / resting at (content size).
+    /// 岛正在趋向 / 静止于的尺寸（内容尺寸）。
     private var contentSize: CGSize
     private var trackingArea: NSTrackingArea?
 
-    // MARK: - Mouse callbacks (wired by NotchWindowHost → NotchService)
+    // MARK: - 鼠标回调（由 NotchWindowHost → NotchService 接线）
     var onMouseEnter: (() -> Void)?
     var onMouseExit: (() -> Void)?
     var onMouseMove: ((NSPoint) -> Void)?
@@ -79,6 +84,7 @@ final class NotchCanvas: NSView {
         host = NotchHostingView(rootView: content)
         host.sizingOptions = []
         host.wantsLayer = true
+        host.layer?.masksToBounds = true  // 裁剪溢出 host bounds 的 SwiftUI 内容
         host.autoresizingMask = []
         super.init(frame: CGRect(origin: .zero, size: size))
         autoresizesSubviews = false
@@ -87,9 +93,8 @@ final class NotchCanvas: NSView {
         layer?.masksToBounds = true
         layer?.mask = silhouette
 
-        // Frosted dark material behind the content. It blurs what's behind the
-        // window, so it only reads on an expanded card; the collapsed strip
-        // stays solid black to blend into the physical notch.
+        // 内容之后的暗色磨砂材质。它模糊窗口后面的东西，故只在展开卡片时才显现；
+        // 收起的细条保持纯黑以融入物理刘海。
         glass.material = .hudWindow
         glass.blendingMode = .behindWindow
         glass.state = .active
@@ -99,7 +104,7 @@ final class NotchCanvas: NSView {
         addSubview(glass, positioned: .below, relativeTo: host)
         addSubview(host)
 
-        // Dark wash above the glass, below the content (constant alpha).
+        // 暗色洗色层：在玻璃之上、内容之下（恒定 alpha）。
         dim.wantsLayer = true
         dim.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
         addSubview(dim, positioned: .below, relativeTo: host)
@@ -116,15 +121,14 @@ final class NotchCanvas: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    // MARK: Geometry helpers
+    // MARK: 几何辅助
 
-    /// The island's rect for `size`, centered horizontally in the current
-    /// canvas width, hanging from the top edge (flipped, so y=0 is screen top).
+    /// `size` 对应的岛矩形：在当前画布宽度内水平居中、从顶边垂下（flipped，y=0 是屏幕顶）。
     func islandRect(for size: CGSize) -> CGRect {
         CGRect(x: (bounds.width - size.width) / 2, y: 0, width: size.width, height: size.height)
     }
 
-    /// The silhouette path for `size` within the current canvas bounds.
+    /// `size` 在当前画布边界内的轮廓路径。
     func morphPath(for size: CGSize) -> CGPath {
         let shape = NotchShape(attached: true,
                                radius: NotchLayout.surfaceRadius(height: size.height),
@@ -132,8 +136,8 @@ final class NotchCanvas: NSView {
         return shape.path(in: islandRect(for: size)).cgPath
     }
 
-    /// The island's size as currently drawn (reads the presentation path so an
-    /// interrupted animation resumes from what's on screen, not the target).
+    /// 当前绘制出的岛尺寸（读取 presentation 路径，使被打断的动画从屏幕上的实际
+    /// 形态续接，而非从目标值重新开始）。
     var visibleSize: CGSize? {
         guard let path = (silhouette.presentation()?.path ?? silhouette.path) else { return nil }
         let box = path.boundingBoxOfPath
@@ -141,13 +145,15 @@ final class NotchCanvas: NSView {
         return CGSize(width: box.width, height: max(0, box.maxY))
     }
 
-    // MARK: Resting layout
+    // MARK: 静止布局
 
     func setContentSize(_ size: CGSize) {
         contentSize = size
         needsLayout = true
     }
 
+    /// 静止布局：在一个禁用隐式动画的 CATransaction 里，把各层摆到 contentSize
+    /// 对应的矩形并刷新遮罩路径、底色与对比度。
     override func layout() {
         super.layout()
         CATransaction.begin()
@@ -161,12 +167,13 @@ final class NotchCanvas: NSView {
         edge.path = path
         applyBaseColor()
         updateContrast()
+        // 调试日志：输出遮罩与内容的实际尺寸，用于诊断对齐问题。
+        Log.debug("Canvas.layout: contentSize=\(contentSize), islandRect=\(rect), canvas.bounds=\(bounds)", topic: "layout")
         CATransaction.commit()
     }
 
-    /// Base island color from Settings (background_color × background_alpha),
-    /// replacing the fixed notch black so appearance edits apply live. Re-read
-    /// on every layout, which the settings-change re-present triggers.
+    /// 从 Settings 取岛底色（background_color × background_alpha），取代固定刘海黑，
+    /// 使外观改动实时生效。每次 layout 都重读，而设置变更会触发重新 present。
     private func applyBaseColor() {
         let c = Settings.shared.backgroundRGB
         let alpha = CGFloat(min(1, max(0, Settings.shared.backgroundAlpha)))
@@ -175,12 +182,11 @@ final class NotchCanvas: NSView {
         ).cgColor
     }
 
-    /// The glass appears only on an expanded card; on the thin resting strip it
-    /// is off so the island reads as solid notch black. The hairline edge stroke
-    /// appears only when expanded (Python `_draw_hairline`).
+    /// 磨砂只在展开卡片时出现；细条静止态关闭它，让岛读作实心刘海黑。发丝描边也只在
+    /// 展开时出现（Python `_draw_hairline`）。
     private func updateContrast() {
         let expanded = contentSize.height > 60
-        // Edge highlight: subtle white stroke on expanded cards only.
+        // 边缘高光：仅展开卡片有细微白描边。
         let targetWidth: CGFloat = expanded ? 0.75 : 0
         if edge.lineWidth != targetWidth {
             edge.lineWidth = targetWidth
@@ -193,12 +199,13 @@ final class NotchCanvas: NSView {
         }
     }
 
+    /// 给定点是否落在当前遮罩轮廓内（自定义命中测试）。
     func containsVisiblePoint(_ point: NSPoint) -> Bool {
         guard let path = silhouette.path else { return false }
         return path.contains(point)
     }
 
-    // MARK: - Mouse tracking
+    // MARK: - 鼠标追踪
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -229,10 +236,10 @@ final class NotchCanvas: NSView {
         onRightClick?(point)
     }
 
-    // MARK: Morph
+    // MARK: 形变
 
-    /// Begin a spring-driven shape morph to `size`. The caller has already put
-    /// the window at the envelope frame, so `bounds` is the padded envelope.
+    /// 开始一次弹簧驱动的形变到 `size`。调用方已把窗口置于包络 frame，故 `bounds`
+    /// 是带留白的包络。
     func startMorph(_ animation: CAKeyframeAnimation, to size: CGSize, expanding: Bool) {
         contentSize = size
         let final = morphPath(for: size)
@@ -251,18 +258,17 @@ final class NotchCanvas: NSView {
         }
         CATransaction.commit()
 
-        // Content and glass unveil with the growing shape (expand) or leave
-        // ahead of the shrinking shape (collapse) so nothing is squashed mid-flight.
-        // Fade windows aligned with Python: expand p=0.15→0.65, collapse p=0.40→0.06.
+        // 内容与玻璃随生长形状揭幕（展开），或先于收缩形状离场（收起），使飞行途中
+        // 没有任何东西被挤压。淡入淡出窗口对齐 Python：展开 p=0.15→0.65，收起 p=0.40→0.06。
         let totalDuration = animation.duration
         let fadeStart: CFTimeInterval
         let fadeDuration: CFTimeInterval
         if expanding {
-            // Content appears from 15% to 65% of the animation.
+            // 内容在动画 15%→65% 期间浮现。
             fadeStart = totalDuration * 0.15
             fadeDuration = totalDuration * 0.50
         } else {
-            // Content disappears from 0% to 40% of the animation (starts immediately).
+            // 内容在动画 0%→40% 期间消失（立即开始）。
             fadeStart = 0
             fadeDuration = totalDuration * 0.40
         }
@@ -271,6 +277,7 @@ final class NotchCanvas: NSView {
         fadeGlass(to: expanding ? 1 : 0, duration: fadeDuration, delay: fadeStart)
     }
 
+    /// 对某层做 opacity 淡入淡出（可选 easeIn，带延迟）。
     private func fadeLayer(_ layer: CALayer?, from: Float, to: Float,
                            duration: CFTimeInterval, delay: CFTimeInterval = 0,
                            easeIn: Bool) {
@@ -287,6 +294,7 @@ final class NotchCanvas: NSView {
         layer.add(fade, forKey: "fade")
     }
 
+    /// 对磨砂玻璃层做 opacity 淡入淡出（从当前 presentation 值起）。
     private func fadeGlass(to: CGFloat, duration: CFTimeInterval, delay: CFTimeInterval = 0) {
         guard let layer = glass.layer else { return }
         layer.removeAnimation(forKey: "fade")
@@ -301,9 +309,8 @@ final class NotchCanvas: NSView {
         layer.add(fade, forKey: "fade")
     }
 
-    /// Commit the morph once the spring settles: drop the animations and lay
-    /// out for the resting (== content) size. `bounds` is already the padded
-    /// target when this is called.
+    /// 弹簧落定后提交形变：撤掉动画、按静止（== 内容）尺寸布局。调用时 `bounds`
+    /// 已是带留白的目标。
     func settleMorph(to size: CGSize) {
         contentSize = size
         CATransaction.begin()
@@ -327,23 +334,25 @@ final class NotchCanvas: NSView {
 
 // MARK: - NotchWindowHost
 
+/// 窗口宿主：持有 NotchPanel + NotchCanvas，负责把内容呈现到正确的窗口 frame，
+/// 并驱动弹簧形变动画（作为 CAAnimationDelegate 在落定后收尾）。
 final class NotchWindowHost: NSObject, CAAnimationDelegate {
     let panel: NotchPanel
     private let canvas: NotchCanvas
     private var currentGeometry: NotchGeometry
     private var appliedFrame = CGRect.zero
+    /// 动画代号：每次新动画自增，落定回调里比对以丢弃被抢占的旧动画。
     private var animationGeneration = 0
     private var isAnimating = false
     private var settleCompletion: (() -> Void)?
     private(set) var targetSize: CGSize
-    /// Whether the island is displaying content cards (vs. collapsed capsule).
+    /// 岛是否正在展示内容卡片（相对于收起胶囊）。
     private var showsContent = false
 
-    /// Transparent room around the island so the window's drop shadow has space
-    /// to render within the window bounds (top is flush with the screen edge).
+    /// 岛四周的透明留白，让窗口投影有空间在窗口边界内绘制（顶部与屏幕边缘齐平）。
     private let shadowPad: CGFloat = 26
 
-    /// Wire mouse tracking callbacks on the canvas.
+    /// 把鼠标追踪回调接到画布上。
     func setMouseCallbacks(enter: @escaping () -> Void,
                            exit: @escaping () -> Void,
                            move: @escaping (NSPoint) -> Void,
@@ -377,11 +386,9 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         appliedFrame = panel.frame
     }
 
-    /// The padded window frame that holds an island of `islandSize` at the top
-    /// centre: `shadowPad` on the sides and bottom, none on top (it's flush
-    /// with the screen edge, where a shadow would fall off-screen anyway).
-    /// When `showsContent` is `false` the frame sits just below the notch
-    /// cutout so the collapsed capsule doesn't overlap the camera housing.
+    /// 容纳顶部居中岛的带留白窗口 frame：四周与底部各留 `shadowPad`，顶部不留（与
+    /// 屏幕边缘齐平，投影本就会掉到屏幕外）。`showsContent` 为 false 时 frame 落在
+    /// 刘海切口正下方，使收起胶囊不压到摄像头外壳。
     private func panelFrame(for islandSize: CGSize, showsContent: Bool = true) -> CGRect {
         let base = currentGeometry.frame(for: islandSize, showsContent: showsContent)
         return CGRect(x: base.minX - shadowPad,
@@ -390,16 +397,19 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
                       height: base.height + shadowPad)
     }
 
+    /// 呈现岛到 `size`。
+    ///
+    /// 关键不变量：末尾必须调用 `orderFrontRegardless()`——仅 setFrame 不会让窗口显示。
+    /// 尺寸变化且允许动画时走弹簧；否则禁用隐式动画直接落位。
     func present(size: CGSize, geometry: NotchGeometry, animated: Bool, showsContent: Bool) {
         targetSize = size
         currentGeometry = geometry
         self.showsContent = showsContent
 
         let fromSize = canvas.visibleSize ?? size
-        // Reduce-motion is resolved inside NotchMotion (grow bounce forced to 0),
-        // matching Python spring_for: the morph still runs, just without rebound.
-        // So the spring is allowed whenever we animate to a different size, and
-        // the tri-state (system/on/off) is honored through the bounce, not here.
+        // reduce-motion 在 NotchMotion 内部解析（生长回弹强制为 0），对齐 Python
+        // spring_for：形变照跑，只是不回弹。故只要动画到不同尺寸就允许弹簧，三态
+        // （system/on/off）通过 bounce 体现，而非在此判断。
         let canSpring = animated && fromSize != size
 
         if canSpring {
@@ -416,6 +426,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         panel.orderFrontRegardless()
     }
 
+    /// 隐藏岛：不动画直接 orderOut；动画则先收回到静止尺寸再 orderOut。
     func hide(animated: Bool) {
         guard animated else {
             panel.orderOut(nil)
@@ -428,9 +439,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         }
     }
 
-    /// Hold the window at the envelope (the widest/tallest the spring reaches,
-    /// padded for the shadow) so the overshoot never clips, then morph the mask
-    /// path through the spring's interpolated sizes.
+    /// 把窗口保持在包络（弹簧摆到的最宽/最高处，含阴影留白）以免超调被裁切，
+    /// 再让遮罩路径穿过弹簧插值出的各尺寸形变。
     private func animateTo(size: CGSize, geometry: NotchGeometry, from fromSize: CGSize,
                            completion: (() -> Void)? = nil) {
         animationGeneration += 1
@@ -448,8 +458,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         canvas.layoutSubtreeIfNeeded()
         CATransaction.commit()
 
-        // Paths are computed after the window is at the padded envelope, so the
-        // canvas bounds already centre the island correctly.
+        // 路径在窗口已处于带留白包络后才计算，此时画布边界已正确居中岛。
         let paths = motion.sizes.map { canvas.morphPath(for: $0) }
         let animation = CAKeyframeAnimation(keyPath: "path")
         animation.values = paths
@@ -462,14 +471,15 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         canvas.startMorph(animation, to: size, expanding: expanding)
     }
 
+    /// 动画落定回调：仅处理最新一代动画，把窗口从包络缩回静止带留白尺寸，
+    /// 并对新边界提交落定后的轮廓。
     func animationDidStop(_ anim: CAAnimation, finished flag: Bool) {
         guard flag,
               anim.value(forKey: "notchGeneration") as? Int == animationGeneration else { return }
         isAnimating = false
         let completion = settleCompletion
         settleCompletion = nil
-        // Shrink the window from the envelope back to the resting padded size,
-        // then commit the settled silhouette against the new bounds.
+        // 把窗口从包络缩回静止的带留白尺寸，再对新边界提交落定轮廓。
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         panel.setFrame(pixelAligned(panelFrame(for: targetSize, showsContent: showsContent)), display: true)
@@ -480,6 +490,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         completion?()
     }
 
+    /// 把 rect 对齐到物理像素（按 backingScaleFactor 取整），避免半像素模糊。
     private func pixelAligned(_ rect: CGRect) -> CGRect {
         let scale = panel.screen?.backingScaleFactor ?? 2
         return CGRect(

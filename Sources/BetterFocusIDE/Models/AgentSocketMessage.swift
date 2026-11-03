@@ -3,14 +3,19 @@
 
 import Foundation
 
-/// A JSON message received from a Hook/Plugin through the Unix Socket.
+/// Hook/Plugin 通过 Unix Socket 发来的 JSON 消息（线协议顶层结构）。
 struct AgentSocketMessage: Codable {
+    /// 提供方标识（qoder / opencode）。
     let provider: String
+    /// 事件类型，对应 `SocketEvent`。
     let event: String
+    /// 会话标识。
     let sessionID: String
+    /// 事件时间戳（可选）。
     let timestamp: Date?
+    /// 事件载荷，字段随 event 类型而异。
     let payload: [String: AnyCodableValue]?
-    /// Host app identity (bundle/name/path) sent at the top level.
+    /// 顶层携带的宿主应用身份（bundle/name/path）。
     let host: [String: AnyCodableValue]?
 
     enum CodingKeys: String, CodingKey {
@@ -19,7 +24,7 @@ struct AgentSocketMessage: Codable {
         case timestamp
     }
 
-    /// Decoder accepting both whole-second and fractional-second ISO 8601.
+    /// 构造解码器：自定义时间戳策略，同时接受整秒与带小数秒的 ISO 8601。
     static func decoder() -> JSONDecoder {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .custom { decoder in
@@ -34,6 +39,7 @@ struct AgentSocketMessage: Codable {
         return d
     }
 
+    /// 解析 ISO 8601 字符串：优先带小数秒格式，回退到整秒格式。
     static func socketDate(from text: String) -> Date? {
         let withFrac = ISO8601DateFormatter()
         withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -43,7 +49,7 @@ struct AgentSocketMessage: Codable {
     }
 }
 
-/// Recognized event types in the socket protocol.
+/// Socket 协议中已识别的事件类型。
 enum SocketEvent: String {
     case questionRequested = "question_requested"
     case questionAnswered = "question_answered"
@@ -56,7 +62,10 @@ enum SocketEvent: String {
     case activity
 }
 
-/// Type-erased Codable value for flexible JSON payloads.
+/// 类型擦除的可解码值，用于承载结构不固定的 JSON 载荷。
+///
+/// 仅支持 string/int/double/bool/array/dictionary/null；颜色等复合值
+/// 以 "r,g,b" 字符串形式存于 `.string`。
 enum AnyCodableValue: Codable, Equatable {
     case string(String)
     case int(Int)
@@ -66,6 +75,7 @@ enum AnyCodableValue: Codable, Equatable {
     case dictionary([String: AnyCodableValue])
     case null
 
+    /// 按类型依次试探解码：null → string → int → double → bool → array → dictionary。
     init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
         if c.decodeNil() { self = .null }
@@ -91,13 +101,15 @@ enum AnyCodableValue: Codable, Equatable {
         }
     }
 
-    // MARK: - Accessors
+    // MARK: - 取值访问器
 
+    /// 以字符串读取（非字符串返回 nil）。
     var stringValue: String? {
         if case .string(let s) = self { return s }
         return nil
     }
 
+    /// 以布尔读取：兼容真正的 bool 与字符串 "true"。
     var boolValue: Bool? {
         switch self {
         case .bool(let b): return b
@@ -106,11 +118,13 @@ enum AnyCodableValue: Codable, Equatable {
         }
     }
 
+    /// 以数组读取（非数组返回 nil）。
     var arrayValue: [AnyCodableValue]? {
         if case .array(let a) = self { return a }
         return nil
     }
 
+    /// 以字典读取（非字典返回 nil）。
     var dictValue: [String: AnyCodableValue]? {
         if case .dictionary(let d) = self { return d }
         return nil
