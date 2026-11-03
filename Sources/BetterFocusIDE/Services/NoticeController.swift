@@ -63,6 +63,63 @@ final class NoticeController: ObservableObject {
         show(parsed)
     }
 
+    /// 处理一条 `permission_notice` 消息：权限申请只通知不拦截，以横幅形式展示。
+    func handlePermissionNotice(message: AgentSocketMessage) {
+        let settings = Settings.shared
+        Log.debug("handlePermissionNotice: entry, permissionEnabled=\(settings.permissionEnabled), session=\(message.sessionID)", topic: "permission")
+        guard settings.permissionEnabled else {
+            Log.debug("handlePermissionNotice: blocked by permissionEnabled=false", topic: "permission")
+            return
+        }
+
+        let sessionID = message.sessionID
+        let now = Date()
+        // 去抖
+        if let last = lastNoticeAt[sessionID],
+           now.timeIntervalSince(last) < settings.notifyBannerDuration * 0.4 {
+            Log.debug("handlePermissionNotice: debounced (interval=\(now.timeIntervalSince(last))s)", topic: "permission")
+            return
+        }
+        if hasPendingCard() {
+            Log.debug("handlePermissionNotice: skipped, hasPendingCard=true", topic: "permission")
+            return
+        }
+
+        // 从 permission_notice 构造一条通知
+        let provider = message.provider.lowercased()
+        let name = AgentProvider(rawValue: provider)?.displayName ?? provider.capitalized
+        let host = HostInfo(from: message.host,
+                            cwd: message.payload?["cwd"]?.stringValue)
+        let toolName = message.payload?["tool_name"]?.stringValue ?? ""
+        let resources = message.payload?["resources"]?.arrayValue?.compactMap { $0.stringValue } ?? []
+        let detail = resources.first ?? ""
+        let action = PermissionRequest.actionFromToolName(toolName)
+        let title = "Agent 请求执行「\(PermissionRequest.actionLabel(action))」"
+        let body = detail.isEmpty ? "请在 Qoder 对话框中做出决策" : detail
+        let project = host.cwd.isEmpty ? "" : (host.cwd as NSString).lastPathComponent
+
+        Log.info("handlePermissionNotice: showing notice title='\(title)', host=\(host.name), tool=\(toolName)", topic: "permission")
+
+        let notice = TurnNotice(
+            provider: provider,
+            providerName: host.name.isEmpty ? name : host.name,
+            sessionID: sessionID,
+            title: title,
+            body: body,
+            project: project,
+            host: host.isEmpty ? nil : host,
+            arrivedAt: Date(),
+            jumpEnabled: Settings.shared.permissionNoticeJump,
+            fromCLI: false
+        )
+
+        if lastNoticeAt.count > 32 { lastNoticeAt.removeAll() }
+        lastNoticeAt[sessionID] = now
+
+        onRemember?(notice)
+        show(notice)
+    }
+
     // MARK: - 展示 / 消失
 
     private func show(_ newNotice: TurnNotice) {

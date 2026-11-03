@@ -57,6 +57,8 @@ enum SocketEvent: String {
     case permissionRequested = "permission_requested"
     case permissionResolved = "permission_resolved"
     case permissionTimeout = "permission_timeout"
+    /// 权限通知（只提醒，不拦截）：hook 发完即回 ask，让 Qoder 弹原生对话框。
+    case permissionNotice = "permission_notice"
     case sessionEnded = "session_ended"
     case turnFinished = "turn_finished"
     case activity

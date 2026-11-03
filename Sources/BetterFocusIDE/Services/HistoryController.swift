@@ -76,14 +76,15 @@ final class HistoryController: ObservableObject {
     /// 由一次提问构造历史条目。
     static func question(prompt: AgentQuestionPrompt, state: String) -> HistoryEntry {
         let tint = prompt.provider.tintRGB
+        let source = prompt.host?.name.isEmpty == false ? prompt.host!.name : prompt.provider.displayName
         return HistoryEntry(
             title: prompt.question.header,
             body: prompt.question.question,
             state: state,
-            source: prompt.provider.displayName,
+            source: source,
             project: "",
             provider: prompt.provider.rawValue,
-            host: nil,
+            host: prompt.host,
             tintRGB: tint,
             timestamp: Date())
     }
@@ -91,14 +92,15 @@ final class HistoryController: ObservableObject {
     /// 由一次权限请求构造历史条目。
     static func permission(request: PermissionRequest, state: String) -> HistoryEntry {
         let tint = request.provider.tintRGB
+        let source = request.host?.name.isEmpty == false ? request.host!.name : request.provider.displayName
         return HistoryEntry(
             title: request.title,
             body: request.detail,
             state: state,
-            source: request.provider.displayName,
+            source: source,
             project: "",
             provider: request.provider.rawValue,
-            host: nil,
+            host: request.host,
             tintRGB: tint,
             timestamp: Date())
     }

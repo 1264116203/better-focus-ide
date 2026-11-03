@@ -55,6 +55,8 @@ struct PermissionRequest: Equatable, Identifiable {
     let arrivedAt: Date
     /// 协议风格标记，默认 "opencode"。
     var flavor: String = "opencode"
+    /// 宿主应用身份（hook 上报的 IDE 信息），用于历史来源展示与跳转。
+    var host: HostInfo?
 
     /// 卡片唯一标识：提供方+会话+请求 id 拼接。
     var id: String { "\(provider.rawValue).\(sessionID).\(requestID)" }
@@ -152,7 +154,7 @@ struct PermissionRequest: Equatable, Identifiable {
     }
 
     /// 由工具名映射出归一化动作；`mcp__a__b` 形式转换为 `mcp/a/b`。
-    private static func actionFromToolName(_ name: String) -> String {
+    static func actionFromToolName(_ name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespaces).lowercased()
         if trimmed.isEmpty || trimmed == "permission" || trimmed == "tool" { return "" }
         if trimmed.hasPrefix("mcp__") {

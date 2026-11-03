@@ -40,8 +40,10 @@ struct TurnNotice: Equatable, Identifiable {
         let host = HostInfo(from: message.host,
                             cwd: message.payload?["cwd"]?.stringValue)
         let project = projectLeaf(from: host)
-        let name = AgentProvider(rawValue: provider)?.displayName
-            ?? provider.capitalized
+        // 来源展示名：优先使用 hook 上报的真实 IDE 名称（如 "IntelliJ IDEA"），
+        // 否则回退到提供方名（"Qoder" / "OpenCode"）。
+        let name = host.name.isEmpty == false ? host.name :
+            (AgentProvider(rawValue: provider)?.displayName ?? provider.capitalized)
         // 从 hook 上报的 transcript jsonl 读取真实会话标题。
         let transcriptPath = message.payload?["transcript_path"]?.stringValue
         let summary = Transcript.sessionSummary(path: transcriptPath, provider: provider)
