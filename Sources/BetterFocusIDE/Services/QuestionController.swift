@@ -46,9 +46,9 @@ final class QuestionController: ObservableObject {
             let questions = AgentQuestionPrompt.parseQuestions(from: message.payload)
             guard !questions.isEmpty else { return }
             let requestID = message.payload?["request_id"]?.stringValue ?? ""
-            guard let provider = AgentProvider(rawValue: message.provider) else { return }
+            let provider = message.resolvedProvider
             let host = HostInfo(from: message.host,
-                                cwd: message.payload?["cwd"]?.stringValue)
+                                cwd: message.cwd)
             let newPrompt = AgentQuestionPrompt(
                 provider: provider, sessionID: message.sessionID,
                 questions: questions, arrivedAt: Date(), requestID: requestID,

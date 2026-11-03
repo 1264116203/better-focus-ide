@@ -224,13 +224,107 @@ enum HelperTemplate {
                 return ("", "")
 
 
+        # ── Product 识别：三层决策树 ──────────────────────────────────
+        # product 完全由 hook 进程启动时读取的环境变量决定，与事件 JSON 内容无关。
+        # 识别结果写入 SessionState 并持久化到磁盘，后续事件从 state 读取。
+
+        _STATE_DIR = os.path.join(os.path.expanduser("~"),
+                                  "Library", "Application Support",
+                                  "BetterFocusIDE", "sessions")
+
+
+        def _identify_product():
+            \"\"\"通过环境变量决策树推导 product（与事件 JSON 无关）。
+
+            优先级：
+              1 - 有 QODER_PROJECT_DIR 且无 QODER_SESSION_ID => qoder_cli
+              2 - 有 QODER_SESSION_ID:
+                 - QODER_STANDALONE=1 => qoder
+                 - Bundle ID 含 jetbrains/intellij => jetbrains_plugin
+                 - Bundle ID 含 qoder => qoder_ide
+                 - 有 QODER_TRANSCRIPT_PATH（Bundle 缺失兜底）=> qoder_ide
+              3 - 以上均不满足 => unknown
+            \"\"\"
+            project_dir = os.environ.get("QODER_PROJECT_DIR") or ""
+            session_id = os.environ.get("QODER_SESSION_ID") or ""
+            standalone = os.environ.get("QODER_STANDALONE") or ""
+            bundle_id = (os.environ.get("QODER_BUNDLE_ID")
+                         or os.environ.get("__CFBundleIdentifier")
+                         or "").lower()
+            transcript_path = os.environ.get("QODER_TRANSCRIPT_PATH") or ""
+
+            # 优先级 1：有项目目录但无会话 id → CLI 模式
+            if project_dir and not session_id:
+                return "qoder_cli"
+
+            if session_id:
+                # 优先级 2a：显式 standalone 标记 → 独立 Qoder
+                if standalone == "1":
+                    return "qoder"
+                # 优先级 2b：Bundle ID 含 jetbrains / intellij → JetBrains 插件
+                if "jetbrains" in bundle_id or "intellij" in bundle_id:
+                    return "jetbrains_plugin"
+                # 优先级 2c：Bundle ID 含 qoder → Qoder IDE
+                if "qoder" in bundle_id:
+                    return "qoder_ide"
+                # 优先级 2d：有 transcript path（Bundle 缺失兜底）→ Qoder IDE
+                if transcript_path:
+                    return "qoder_ide"
+
+            # 优先级 3：兜底
+            return "unknown"
+
+
+        def _state_path(session_id):
+            return os.path.join(_STATE_DIR, safe_id(session_id) + ".json")
+
+
+        def _load_state(session_id):
+            try:
+                with open(_state_path(session_id)) as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+
+
+        def _save_state(session_id, state):
+            try:
+                os.makedirs(_STATE_DIR, exist_ok=True)
+                with open(_state_path(session_id), "w") as f:
+                    json.dump(state, f)
+            except Exception:
+                pass
+
+
+        def _merge_state(session_id, new_product):
+            \"\"\"合并 product 到会话状态：新值为空或 unknown 时保留磁盘上已有的值。\"\"\"
+            state = _load_state(session_id)
+            if new_product and new_product != "unknown":
+                state["product"] = new_product
+            _save_state(session_id, state)
+            return state.get("product", "unknown")
+
+
+        def _get_product(session_id):
+            \"\"\"获取会话的 product：优先从持久化 state 读取，缺失则降级重新识别。\"\"\"
+            state = _load_state(session_id)
+            product = state.get("product") or ""
+            if product and product != "unknown":
+                return product
+            # state 缺失或为 unknown → 降级再次识别
+            return _identify_product()
+
+
         def run_question(payload, session_id, questions):
             request_id = safe_id(payload.get("request_id") or ("q" + str(int(time.time()))))
-            send({"provider": "qoder", "event": "question_requested",
+            product = _get_product(session_id)
+            send({"provider": "qoder", "product": product,
+                  "event": "question_requested",
                   "session_id": session_id, "request_id": request_id,
                   # 宿主身份：岛侧历史列表要写出「是哪个渠道找过我」（在 IDEA 里跑的
                   # Qoder 写 IntelliJ IDEA），点那一行也按它决定跳回哪个窗口。
                   "host": host_app(),
+                  "cwd": payload.get("cwd") or "",
                   "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                   "payload": {"questions": questions, "request_id": request_id}})
             since = time.time()
@@ -251,7 +345,8 @@ enum HelperTemplate {
                          "Use these answers and continue.\\n" + "\\n".join(lines))
                     return
                 time.sleep(1)
-            send({"provider": "qoder", "event": "question_timeout", "session_id": session_id,
+            send({"provider": "qoder", "product": product,
+                  "event": "question_timeout", "session_id": session_id,
                   "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                   "payload": {"question_id": questions[0]["id"] if questions else "q1",
                               "request_id": request_id}})
@@ -275,6 +370,7 @@ enum HelperTemplate {
                                  or payload.get("request_id")
                                  or (tool_name + "-" + str(int(time.time() * 1000))))
             host = host_app()
+            product = _get_product(session_id)
 
             # tool_input 里挑一个最能说明问题的字段作为详情
             detail = ""
@@ -287,7 +383,8 @@ enum HelperTemplate {
                 detail = json.dumps(tool_input, ensure_ascii=False)[:400]
 
             # 只递信不等回答：发完就收工
-            send({"provider": "qoder", "event": "permission_notice",
+            send({"provider": "qoder", "product": product,
+                  "event": "permission_notice",
                   "session_id": session_id,
                   "host": host,
                   "cwd": payload.get("cwd") or "",
@@ -303,14 +400,18 @@ enum HelperTemplate {
 
         def emit_turn_finished(session_id, payload):
             host = host_app()
-            send({"provider": "qoder", "event": "turn_finished", "session_id": session_id,
+            product = _get_product(session_id)
+            send({"provider": "qoder", "product": product,
+                  "event": "turn_finished", "session_id": session_id,
                   "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                   "host": host, "cwd": os.getcwd(),
                   "payload": {"transcript_path": payload.get("transcript_path", "")}})
 
 
         def emit_session_ended(session_id):
-            send({"provider": "qoder", "event": "session_ended", "session_id": session_id,
+            product = _get_product(session_id)
+            send({"provider": "qoder", "product": product,
+                  "event": "session_ended", "session_id": session_id,
                   "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "payload": {}})
 
 
@@ -323,6 +424,11 @@ enum HelperTemplate {
                 payload = {}
             session_id = payload.get("session_id") or payload.get("sessionId") or "unknown"
             event = payload.get("hook_event_name") or payload.get("hookEventName") or ""
+
+            # 首次调用时识别 product 并持久化到会话状态文件。
+            # 后续调用从 state 读取，保证同一会话 product 一致。
+            product = _identify_product()
+            _merge_state(session_id, product)
 
             if event == "Stop":
                 if alerts_enabled("turn"):

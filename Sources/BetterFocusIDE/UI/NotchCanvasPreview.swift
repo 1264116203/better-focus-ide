@@ -14,7 +14,7 @@ struct NotchCanvasPreview: NSViewRepresentable {
     let size: CGSize
     
     func makeNSView(context: Context) -> NotchCanvas {
-        NotchCanvas(content: content, size: size)
+        return NotchCanvas(content: content, size: size)
     }
     
     func updateNSView(_ nsView: NotchCanvas, context: Context) {

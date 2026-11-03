@@ -7,6 +7,8 @@ import Foundation
 struct AgentSocketMessage: Codable {
     /// 提供方标识（qoder / opencode）。
     let provider: String
+    /// 产品标识（由 hook 环境变量决策树推导，如 jetbrains_plugin / qoder_ide / qoder_cli）。
+    let product: String?
     /// 事件类型，对应 `SocketEvent`。
     let event: String
     /// 会话标识。
@@ -17,9 +19,11 @@ struct AgentSocketMessage: Codable {
     let payload: [String: AnyCodableValue]?
     /// 顶层携带的宿主应用身份（bundle/name/path）。
     let host: [String: AnyCodableValue]?
+    /// 顶层携带的项目目录（二级定位用）。
+    let cwd: String?
 
     enum CodingKeys: String, CodingKey {
-        case provider, event, payload, host
+        case provider, product, event, payload, host, cwd
         case sessionID = "session_id"
         case timestamp
     }
@@ -46,6 +50,12 @@ struct AgentSocketMessage: Codable {
         let whole = ISO8601DateFormatter()
         whole.formatOptions = [.withInternetDateTime]
         return withFrac.date(from: text) ?? whole.date(from: text)
+    }
+
+    /// 解析产品标识：优先用 `product`（hook 决策树输出），回退到 `provider`（旧版兼容）。
+    var resolvedProvider: AgentProvider {
+        if let product, let p = AgentProvider(rawValue: product) { return p }
+        return AgentProvider(rawValue: provider.lowercased()) ?? .unknown
     }
 }
 

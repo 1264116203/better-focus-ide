@@ -35,12 +35,12 @@ final class PermissionController: ObservableObject {
     func handleEvent(_ event: SocketEvent, message: AgentSocketMessage) {
         switch event {
         case .permissionRequested:
-            guard let provider = AgentProvider(rawValue: message.provider),
-                  var req = PermissionRequest.parse(
+            let provider = message.resolvedProvider
+            guard var req = PermissionRequest.parse(
                     payload: message.payload, provider: provider,
                     sessionID: message.sessionID) else { return }
             let host = HostInfo(from: message.host,
-                                cwd: message.payload?["cwd"]?.stringValue)
+                                cwd: message.cwd)
             req.host = host.isEmpty ? nil : host
             present(req)
 

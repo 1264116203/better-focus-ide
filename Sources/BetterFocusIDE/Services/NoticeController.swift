@@ -86,10 +86,11 @@ final class NoticeController: ObservableObject {
         }
 
         // 从 permission_notice 构造一条通知
-        let provider = message.provider.lowercased()
-        let name = AgentProvider(rawValue: provider)?.displayName ?? provider.capitalized
+        let providerEnum = message.resolvedProvider
+        let provider = providerEnum.rawValue
+        let name = providerEnum.displayName
         let host = HostInfo(from: message.host,
-                            cwd: message.payload?["cwd"]?.stringValue)
+                            cwd: message.cwd)
         let toolName = message.payload?["tool_name"]?.stringValue ?? ""
         let resources = message.payload?["resources"]?.arrayValue?.compactMap { $0.stringValue } ?? []
         let detail = resources.first ?? ""

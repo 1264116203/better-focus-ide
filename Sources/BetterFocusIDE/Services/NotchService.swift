@@ -980,7 +980,7 @@ final class NotchService: ObservableObject {
     func handleSurfaceTap() {
         if activeCard == .permission, Settings.shared.permissionNoticeJump,
            let req = permissionController.request {
-            IDELauncher.activateAsync(provider: req.provider.rawValue, host: nil)
+            IDELauncher.activateAsync(provider: req.provider.rawValue, host: req.host)
         }
         toggle()
     }

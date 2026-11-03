@@ -132,6 +132,53 @@ OpenCode Plugin (JS) ─┘                          │                    │
 - **出站**：应答文件写入 `~/Library/Application Support/BetterFocusIDE/answers/`
 - **协议**：线格式见 `AgentSocketMessage` 与 `SocketEvent`
 
+### IDE 跳转与二级定位
+
+用户点击通知横幅时，`IDELauncher` 负责激活产生该通知的 IDE 窗口。系统支持**二级定位**：不仅激活 IDE 应用，还能精确聚焦到具体项目窗口。
+
+#### Hook 上报的 Host 字段
+
+每条 socket 消息应携带以下宿主信息以支持二级定位：
+
+| 字段 | 位置 | 类型 | 说明 | 示例 |
+|------|------|------|------|------|
+| `host.bundle` | `host` 对象 | string | 宿主应用 Bundle ID | `com.jetbrains.intellij` |
+| `host.name` | `host` 对象 | string | 宿主应用名称 | `IntelliJ IDEA` |
+| `host.path` | `host` 对象 | string | 宿主 `.app` 包路径 | `/Applications/IntelliJ IDEA.app` |
+| `cwd` | 消息顶层 | string | **项目工作目录（二级定位关键）** | `/Users/dev/my-project` |
+
+> **注意**：`cwd` 必须在消息顶层，不在 `host` 对象内。所有事件类型（`question_requested`、`permission_notice`、`turn_finished`）都应携带。
+
+#### 二级定位策略
+
+| IDE 类型 | 定位方式 | 回退链 |
+|----------|----------|--------|
+| **JetBrains** | ① CLI 直达 → ② AXRaise → ③ Window 菜单 | ① `<binary> <cwd>` 让 IDE 自聚焦 → ② System Events `AXRaise` 按窗口标题匹配 → ③ 点击 Window 菜单项（跨 Space 可靠，有闪烁） |
+| **Qoder IDE / CN IDE** | `code -r <cwd>` | VS Code 系 fork，复用已打开的 workspace 窗口 |
+| **Qoder.app** | App 级激活 | 独立应用，无 `code` 二进制，直接激活应用 |
+| **OpenCode** | App 级激活 | 按 bundle id 或应用名激活 |
+
+#### 支持的应用 Bundle ID 对照表
+
+| 应用 | Bundle ID | 二级定位支持 | 说明 |
+|------|-----------|--------------|------|
+| **Qoder.app** | `com.qoder.app` | ❌ | 独立桌面应用（类 Electron），无 `code` 二进制 |
+| **Qoder IDE.app** | `com.qoder.ide` | ✅ `code -r` | VS Code 系 IDE 英文版 |
+| **Qoder CN IDE.app** | `com.aliyun.lingma.ide` | ✅ `code -r` | VS Code 系 IDE 中文版 |
+| **IntelliJ IDEA** | `com.jetbrains.intellij` | ✅ CLI/AXRaise/Menu | JetBrains IDE |
+| **PyCharm** | `com.jetbrains.pycharm` | ✅ CLI/AXRaise/Menu | JetBrains IDE |
+| **GoLand** | `com.jetbrains.goland` | ✅ CLI/AXRaise/Menu | JetBrains IDE |
+| **其他 JetBrains** | `com.jetbrains.*` | ✅ CLI/AXRaise/Menu | 所有 JetBrains IDE 均支持 |
+| **OpenCode** | `ai.opencode.desktop` | ❌ | 仅 App 级激活 |
+| **终端** | `com.apple.Terminal` 等 | ⛔ 不可跳转 | CLI 模式无 GUI 窗口 |
+
+#### 关键实现文件
+
+- `IDELauncher.swift`：跳转逻辑主入口，包含 `activate(provider:host:)` 和各定位方法
+- `HelperTemplate.swift`：Python hook 模板，`host_app()` 沿父进程链识别宿主应用
+- `AgentSocketMessage.swift`：消息模型，解析顶层 `cwd` 字段
+- `HostInfo`：宿主信息结构体，承载 `bundle`/`name`/`path`/`cwd`
+
 ### 单实例锁
 
 Unix socket 文件本身就是锁锚点：
@@ -269,5 +316,27 @@ ls -la ~/Library/Application\ Support/BetterFocusIDE/agent-events.sock
 3. 触发事件：使用装有 hook 的 Qoder/OpenCode，或直接向 socket 发送 JSON
 4. 验证：卡片出现、键盘快捷键、钉住/取消钉住、历史、设置改动、自检结果
 5. 查看日志：`~/Library/Application Support/BetterFocusIDE/logs/betterfocus.log`
+
+### 二级定位测试
+
+验证 IDE 跳转是否精确聚焦到项目窗口：
+
+```bash
+# 向 socket 发送测试消息（替换 bundle/cwd 为实际值）
+SOCKET=~/Library/Application\ Support/BetterFocusIDE/agent-events.sock
+
+# JetBrains 测试
+echo '{"provider":"qoder","product":"jetbrains_plugin","event":"turn_finished","session_id":"test-'$(date +%s)'","host":{"bundle":"com.jetbrains.intellij","name":"IntelliJ IDEA","path":"/Applications/IntelliJ IDEA.app"},"cwd":"/path/to/your/project","payload":{"transcript_path":""}}' | nc -U "$SOCKET"
+
+# Qoder IDE 测试
+echo '{"provider":"qoder","product":"qoder_ide","event":"turn_finished","session_id":"test-'$(date +%s)'","host":{"bundle":"com.qoder.ide","name":"Qoder","path":"/Applications/Qoder IDE.app"},"cwd":"/path/to/your/project","payload":{"transcript_path":""}}' | nc -U "$SOCKET"
+```
+
+点击通知后检查日志中的定位方式：
+- `已用 JetBrains CLI 定位窗口` → 第一层成功
+- `AXRaise 定位 JetBrains 窗口` → 第二层成功
+- `已定位 JetBrains 窗口...菜单定位` → 第三层兜底
+- `已用 code -r 定位 Qoder 窗口` → VS Code 系成功
+- `已激活 ...` → 回退到 App 级激活
 
 
