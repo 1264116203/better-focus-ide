@@ -51,11 +51,6 @@ struct NotchNoticeView: View {
                         }
                     }
                     Spacer(minLength: 0)
-                    if notice.jumpEnabled {
-                        Image(systemName: "arrow.up.forward")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
                 }
                 .padding(.horizontal, 32)
                 .padding(.vertical, 10)
@@ -67,13 +62,13 @@ struct NotchNoticeView: View {
             // 钉住开关：把横幅保持展开，而非自行收拢。
             Button(action: onTogglePin) {
                 Image(systemName: pinned ? "pin.fill" : "pin")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .rotationEffect(.degrees(pinned ? 0 : 45))
                     .foregroundStyle(pinned ? tint : Color.white.opacity(0.4))
             }
             .buttonStyle(.plain)
             .padding(.top, 6)
-            .padding(.trailing, 8)
+            .padding(.trailing, 32)  // 与左侧对称
             .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
         }
         .onAppear { startBellSwing() }

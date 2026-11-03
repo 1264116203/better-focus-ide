@@ -5,7 +5,7 @@ import AppKit
 import Foundation
 
 /// hook 在事件顶层上报的宿主应用身份信息。
-struct HostInfo: Equatable {
+struct HostInfo: Codable, Equatable {
     var bundle: String = ""
     var name: String = ""
     var path: String = ""

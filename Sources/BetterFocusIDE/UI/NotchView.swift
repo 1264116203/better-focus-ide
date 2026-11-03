@@ -21,12 +21,11 @@ struct NotchView: View {
         .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
         .clipped()  // 防止 SwiftUI 内容在 AppKit 壳布局完成前溢出
         .foregroundStyle(.white)
+        // 表面点击：仅收起态或无卡片时处理；展开的交互式卡片由自身处理交互，
+        // 背景点击不应触发收起（否则点选项间隙会误关卡片）。
         .contentShape(Rectangle())
         .onTapGesture {
-            // 防误触：卡片出现后的守卫窗口内忽略点击。仅适用于交互式卡片（提问/权限）。
-            if service.activeCard == .question || service.activeCard == .permission {
-                guard !service.isClickGuarded else { return }
-            }
+            guard !service.expanded || service.activeCard == .none else { return }
             service.handleSurfaceTap()
         }
         .environment(\.colorScheme, .dark)

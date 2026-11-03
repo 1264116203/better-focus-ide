@@ -5,9 +5,10 @@ import Foundation
 
 /// 最近通知历史中的一条记录：发生了什么、由哪个应用产生、如何跳回。
 ///
-/// 仅驻留内存（保留最近 N 条），不落盘。
-struct HistoryEntry: Identifiable, Equatable {
-    let id = UUID()
+/// 持久化到 `~/Library/Application Support/BetterFocusIDE/history.json`，
+/// 保留最近 N 条（默认 5 条），超出时裁掉最旧的。
+struct HistoryEntry: Identifiable, Equatable, Codable {
+    let id: UUID
     /// 内容标题（问题头部 / 工具动作名 / 会话标题）。
     let title: String
     /// 副文字（回答内容 / 详情），在卡片中以"答："前缀展示。
@@ -22,9 +23,66 @@ struct HistoryEntry: Identifiable, Equatable {
     let provider: String?
     /// 宿主应用信息（bundle/name/path），用于精确跳转。
     let host: HostInfo?
-    /// 徽章主题色 RGB 分量。
+    /// 徽章主题色 RGB 分量（存储为 "r,g,b" 字符串）。
     let tintRGB: (red: Double, green: Double, blue: Double)
     let timestamp: Date
+
+    // MARK: - Codable
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, body, state, source, project, provider, host, timestamp
+        case tintRed, tintGreen, tintBlue
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        body = try container.decode(String.self, forKey: .body)
+        state = try container.decode(String.self, forKey: .state)
+        source = try container.decode(String.self, forKey: .source)
+        project = try container.decode(String.self, forKey: .project)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider)
+        host = try container.decodeIfPresent(HostInfo.self, forKey: .host)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        let r = try container.decode(Double.self, forKey: .tintRed)
+        let g = try container.decode(Double.self, forKey: .tintGreen)
+        let b = try container.decode(Double.self, forKey: .tintBlue)
+        tintRGB = (red: r, green: g, blue: b)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(body, forKey: .body)
+        try container.encode(state, forKey: .state)
+        try container.encode(source, forKey: .source)
+        try container.encode(project, forKey: .project)
+        try container.encodeIfPresent(provider, forKey: .provider)
+        try container.encodeIfPresent(host, forKey: .host)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(tintRGB.red, forKey: .tintRed)
+        try container.encode(tintRGB.green, forKey: .tintGreen)
+        try container.encode(tintRGB.blue, forKey: .tintBlue)
+    }
+
+    // MARK: - 构造器
+
+    init(id: UUID = UUID(), title: String, body: String, state: String,
+         source: String, project: String, provider: String?, host: HostInfo?,
+         tintRGB: (red: Double, green: Double, blue: Double), timestamp: Date) {
+        self.id = id
+        self.title = title
+        self.body = body
+        self.state = state
+        self.source = source
+        self.project = project
+        self.provider = provider
+        self.host = host
+        self.tintRGB = tintRGB
+        self.timestamp = timestamp
+    }
 
     static func == (lhs: HistoryEntry, rhs: HistoryEntry) -> Bool { lhs.id == rhs.id }
 
