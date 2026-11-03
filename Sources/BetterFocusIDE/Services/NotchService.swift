@@ -378,10 +378,10 @@ final class NotchService: ObservableObject {
         pinned = false
         let rows = max(1, historyController.entries.count)
         // Metrics mirror the Python reference (config.HISTORY_*): 12pt inset,
-        // 20pt header, 34pt rows with 2pt gaps, 380pt wide. On top we still
+        // 20pt header, 40pt rows with 4pt gaps, 380pt wide. On top we still
         // clear the camera cutout the way our window-at-screen-top needs.
-        let content = 12.0 * 2 + 20.0 + 2.0
-            + Double(rows) * 34.0 + Double(max(0, rows - 1)) * 2.0
+        let content = 12.0 * 2 + 20.0 + 4.0
+            + Double(rows) * 40.0 + Double(max(0, rows - 1)) * 4.0
         let height = geometry.safeContentTop + content
         if !expanded {
             expanded = true
@@ -495,8 +495,8 @@ final class NotchService: ObservableObject {
                           height: NotchLayout.expandedHeight)
         case .history:
             let rows = max(1, historyController.entries.count)
-            let content = 12.0 * 2 + 20.0 + 2.0
-                + Double(rows) * 34.0 + Double(max(0, rows - 1)) * 2.0
+            let content = 12.0 * 2 + 20.0 + 4.0
+                + Double(rows) * 40.0 + Double(max(0, rows - 1)) * 4.0
             let height = geometry.safeContentTop + content
             return CGSize(width: NotchLayout.historyWidth, height: height)
         case .none:

@@ -24,9 +24,9 @@ struct NotchHistoryView: View {
     private let horizontalInset: CGFloat = 14
     private let verticalInset: CGFloat = 12
     private let headerHeight: CGFloat = 20
-    private let rowHeight: CGFloat = 34
-    private let rowGap: CGFloat = 2
-    private let badgeSize: CGFloat = 22
+    private let rowHeight: CGFloat = 40
+    private let rowGap: CGFloat = 4
+    private let badgeSize: CGFloat = 24
     private let metaWidth: CGFloat = 104
 
     var body: some View {
@@ -47,11 +47,14 @@ struct NotchHistoryView: View {
     private var header: some View {
         HStack(spacing: 0) {
             Text("最近通知")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.55))
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 30)
+//                .padding(.vertical, 10)
+                .foregroundStyle(.white.opacity(0.6))
             Spacer(minLength: 4)
             Text("\(controller.entries.count) 条")
-                .font(.system(size: 10))
+                .font(.system(size: 11))
+                .padding(.horizontal, 30)
                 .foregroundStyle(.white.opacity(0.4))
         }
         .frame(height: headerHeight)
@@ -83,32 +86,32 @@ struct NotchHistoryView: View {
                         .frame(width: badgeSize, height: badgeSize)
                         .background(Color(red: entry.tintRGB.red, green: entry.tintRGB.green,
                                           blue: entry.tintRGB.blue).opacity(0.9),
-                                    in: RoundedRectangle(cornerRadius: 6))
+                                    in: RoundedRectangle(cornerRadius: 7, style: .continuous))
 
-                    VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(entry.title)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Color(red: 1, green: 1, blue: 1, opacity: 0.92))
                             .lineLimit(1)
                         if !entry.body.isEmpty {
-                            Text(entry.body)
+                            Text("答：\(entry.body)")
                                 .font(.system(size: 10))
-                                .foregroundStyle(Color(red: 0.80, green: 0.82, blue: 0.87, opacity: 0.95))
+                                .foregroundStyle(Color(red: 0.70, green: 0.72, blue: 0.78, opacity: 0.9))
                                 .lineLimit(1)
                         }
                     }
                     .frame(width: titleW, alignment: .leading)
 
-                    VStack(alignment: .trailing, spacing: 1) {
+                    VStack(alignment: .trailing, spacing: 2) {
                         if !entry.state.isEmpty {
                             Text(entry.state)
                                 .font(.system(size: 10))
-                                .foregroundStyle(Color(red: 0.90, green: 0.92, blue: 0.96))
+                                .foregroundStyle(Color(red: 0.78, green: 0.80, blue: 0.86))
                                 .lineLimit(1)
                         }
                         Text(metaText(entry))
                             .font(.system(size: 10))
-                            .foregroundStyle(Color(red: 0.72, green: 0.74, blue: 0.78))
+                            .foregroundStyle(Color(red: 0.62, green: 0.64, blue: 0.70))
                             .lineLimit(1)
                     }
                     .frame(width: metaWidth, alignment: .trailing)
@@ -119,9 +122,7 @@ struct NotchHistoryView: View {
             }
             .frame(height: rowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.white.opacity(0.05),
-                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
