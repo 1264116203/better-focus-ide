@@ -153,20 +153,10 @@ enum HelperTemplate {
             return questions
 
 
-        # 只认这些 IDE：Qoder / OpenCode / JetBrains 系。其他（如 Xcode）是开发调试
-        # 时的父进程，不是真正的宿主，必须跳过。
-        KNOWN_IDE_BUNDLES = (
-            "com.qoder.ide", "com.aliyun.lingma.ide",  # Qoder
-            "ai.opencode.desktop",                       # OpenCode
-        )
-        KNOWN_IDE_BUNDLE_PREFIXES = ("com.jetbrains.",)  # JetBrains 系
-
-
         def host_app():
             # Walk the parent-process chain, skipping shells, to the outermost
             # .app so a turn-finished notice knows which IDE to jump back to.
-            # 只返回已知 IDE（Qoder / OpenCode / JetBrains）；遇到 Xcode 等未知
-            # 应用继续向上找，直到找到已知 IDE 或耗尽层级。
+            # 与 vorssaint 保持一致：返回父进程链中第一个 .app（真实宿主），不做过滤。
             pid = os.getpid()
             bundle, name, path = "", "", ""
             for _ in range(16):
@@ -179,11 +169,9 @@ enum HelperTemplate {
                     break
                 app_path = _app_path(comm)
                 if app_path:
-                    b, n = _bundle_identity(app_path)
-                    # 只接受已知 IDE；未知应用（如 Xcode）跳过，继续向上找。
-                    if b in KNOWN_IDE_BUNDLES or any(b.startswith(p) for p in KNOWN_IDE_BUNDLE_PREFIXES):
-                        bundle, name, path = b, n, app_path
-                        break
+                    bundle, name = _bundle_identity(app_path)
+                    path = app_path
+                    break
                 if not ppid or ppid == "1" or ppid == str(pid):
                     break
                 pid = ppid
