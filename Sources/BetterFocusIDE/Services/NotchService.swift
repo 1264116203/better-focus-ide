@@ -132,7 +132,8 @@ final class NotchService: ObservableObject {
         windowHost?.present(
             size: surfaceSize,
             geometry: geometry,
-            animated: false
+            animated: false,
+            showsContent: expanded
         )
     }
     
@@ -238,7 +239,8 @@ final class NotchService: ObservableObject {
         windowHost?.present(
             size: size,
             geometry: geometry,
-            animated: true
+            animated: true,
+            showsContent: expanded
         )
     }
     
@@ -270,7 +272,8 @@ final class NotchService: ObservableObject {
         windowHost?.present(
             size: surfaceSize,
             geometry: geometry,
-            animated: false
+            animated: false,
+            showsContent: expanded
         )
     }
     
@@ -886,7 +889,7 @@ final class NotchService: ObservableObject {
         // Assigning surfaceSize (even to the same value) republishes, so the
         // SwiftUI content re-renders and picks up new fonts / colors.
         surfaceSize = size
-        windowHost?.present(size: size, geometry: geometry, animated: false)
+        windowHost?.present(size: size, geometry: geometry, animated: false, showsContent: expanded)
     }
 
     /// The island body was tapped. For a permission reminder, optionally jump to

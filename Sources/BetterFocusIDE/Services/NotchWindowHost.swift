@@ -336,6 +336,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     private var isAnimating = false
     private var settleCompletion: (() -> Void)?
     private(set) var targetSize: CGSize
+    /// Whether the island is displaying content cards (vs. collapsed capsule).
+    private var showsContent = false
 
     /// Transparent room around the island so the window's drop shadow has space
     /// to render within the window bounds (top is flush with the screen edge).
@@ -355,7 +357,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     init(content: AnyView, geometry: NotchGeometry, size: CGSize) {
         targetSize = size
         currentGeometry = geometry
-        panel = NotchPanel(contentRect: geometry.frame(for: size),
+        panel = NotchPanel(contentRect: geometry.frame(for: size, showsContent: false),
                            styleMask: [.borderless, .nonactivatingPanel],
                            backing: .buffered, defer: false)
         canvas = NotchCanvas(content: content, size: size)
@@ -370,7 +372,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         panel.level = NotchPanel.normalLevel
         panel.collectionBehavior = NotchPanel.overlayCollectionBehavior
         panel.contentView = canvas
-        panel.setFrame(pixelAligned(panelFrame(for: size)), display: false)
+        panel.setFrame(pixelAligned(panelFrame(for: size, showsContent: false)), display: false)
         canvas.layoutSubtreeIfNeeded()
         appliedFrame = panel.frame
     }
@@ -378,17 +380,20 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     /// The padded window frame that holds an island of `islandSize` at the top
     /// centre: `shadowPad` on the sides and bottom, none on top (it's flush
     /// with the screen edge, where a shadow would fall off-screen anyway).
-    private func panelFrame(for islandSize: CGSize) -> CGRect {
-        let base = currentGeometry.frame(for: islandSize)
+    /// When `showsContent` is `false` the frame sits just below the notch
+    /// cutout so the collapsed capsule doesn't overlap the camera housing.
+    private func panelFrame(for islandSize: CGSize, showsContent: Bool = true) -> CGRect {
+        let base = currentGeometry.frame(for: islandSize, showsContent: showsContent)
         return CGRect(x: base.minX - shadowPad,
                       y: base.minY - shadowPad,
                       width: base.width + shadowPad * 2,
                       height: base.height + shadowPad)
     }
 
-    func present(size: CGSize, geometry: NotchGeometry, animated: Bool) {
+    func present(size: CGSize, geometry: NotchGeometry, animated: Bool, showsContent: Bool) {
         targetSize = size
         currentGeometry = geometry
+        self.showsContent = showsContent
 
         let fromSize = canvas.visibleSize ?? size
         // Reduce-motion is resolved inside NotchMotion (grow bounce forced to 0),
@@ -402,8 +407,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         } else {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            panel.setFrame(pixelAligned(panelFrame(for: size)), display: true)
-            appliedFrame = panelFrame(for: size)
+            panel.setFrame(pixelAligned(panelFrame(for: size, showsContent: showsContent)), display: true)
+            appliedFrame = panelFrame(for: size, showsContent: showsContent)
             canvas.setContentSize(size)
             canvas.layoutSubtreeIfNeeded()
             CATransaction.commit()
@@ -438,8 +443,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        panel.setFrame(pixelAligned(panelFrame(for: envelope)), display: true)
-        appliedFrame = panelFrame(for: envelope)
+        panel.setFrame(pixelAligned(panelFrame(for: envelope, showsContent: showsContent)), display: true)
+        appliedFrame = panelFrame(for: envelope, showsContent: showsContent)
         canvas.layoutSubtreeIfNeeded()
         CATransaction.commit()
 
@@ -467,8 +472,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         // then commit the settled silhouette against the new bounds.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        panel.setFrame(pixelAligned(panelFrame(for: targetSize)), display: true)
-        appliedFrame = panelFrame(for: targetSize)
+        panel.setFrame(pixelAligned(panelFrame(for: targetSize, showsContent: showsContent)), display: true)
+        appliedFrame = panelFrame(for: targetSize, showsContent: showsContent)
         canvas.layoutSubtreeIfNeeded()
         canvas.settleMorph(to: targetSize)
         CATransaction.commit()

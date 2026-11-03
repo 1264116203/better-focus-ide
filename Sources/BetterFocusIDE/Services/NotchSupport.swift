@@ -138,9 +138,17 @@ struct NotchGeometry: Equatable {
         return CGSize(width: min(cameraWidth, cameraWidth + shoulders), height: cameraHeight)
     }
     
-    func frame(for size: CGSize) -> CGRect {
+    func frame(for size: CGSize, showsContent: Bool = true) -> CGRect {
         let x = screen.midX - size.width / 2
-        let y = screen.maxY - size.height
+        /// Collapsed (no-content) capsule slides just below the notch cutout so it
+        /// doesn't overlap the camera housing. Content cards still expand from the
+        /// top edge (safeContentTop already accounts for the camera height).
+        let y: CGFloat
+        if !showsContent && isNotched {
+            y = screen.maxY - cameraHeight - size.height
+        } else {
+            y = screen.maxY - size.height
+        }
         return CGRect(x: x, y: y, width: size.width, height: size.height)
     }
 }
