@@ -57,7 +57,7 @@ struct NotchNoticeView: View {
                             .foregroundStyle(.white.opacity(0.5))
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 32)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
