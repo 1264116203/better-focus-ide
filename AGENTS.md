@@ -259,3 +259,26 @@ There is no automated test suite. Manual testing workflow:
 3. Trigger events: use Qoder/OpenCode with the hook installed, or send JSON directly to the socket
 4. Verify: card appearance, keyboard shortcuts, pin/unpin, history, settings changes, doctor checks
 5. Check logs: `~/Library/Application Support/BetterFocusIDE/logs/betterfocus.log`
+
+
+## Graphify 知识图谱（硬性规则）
+
+本项目已有知识图谱 `graphify-out/graph.json`。回答任何代码库事实问题（某功能如何实现 / 某类被谁调用 / 数据流向 / 表结构与字段）时，**在调用任何 Grep/SearchCodebase/Read 源码之前**，按以下顺序执行：
+
+1. **第一步必须**先用 Bash 运行：
+
+   ```bash
+   graphify query "<英文关键词，空格分隔>"
+   ```
+
+   ❌ **禁止把用户的中文提问原样作为查询词**：图谱按英文标识符索引，中文查询必返回空。即使用户用中文提问，也必须由你把问题翻译/提炼成 3-8 个英文关键词后再查询。
+   示例：用户问“注册流程是怎么实现的” → `graphify query "register registration SysUser controller service password encrypt"`
+
+2. 查询 A→B 关系用 `graphify path "A" "B"`；解释单个类/概念用 `graphify explain "Name"`。
+3. 若 query 无结果：换 3-5 个英文关键词**重试一次**；仍无结果才允许 Grep/Read 源码。
+4. graphify 返回的 `source_location` 是精确坐标，用它直接 Read 对应文件，不要全局 grep。
+5. **修改代码后**运行 `graphify update .`（纯 AST，无 token 成本）保持图谱最新。
+6. **例外**（不适用本规则）：用户明确说明不使用 graphify；查询/维护 graphify-out 产物本身（构建、更新、验证产物文件）；阅读 `GRAPH_REPORT.md` 做整体架构审查（仅当 query/path/explain 无法提供足够上下文时）。
+7. `graphify-out/` 下文件出现脏状态是 hooks/增量更新后的**预期行为**，不是跳过 graphify 的理由；`graphify-out/wiki/index.md` 可作为 query 之后的导航辅助，但不能替代第 1 步的 query 调用。
+8. **适用范围包含工作流与技能**：执行 `/wf-feature-large`、`/wf-feature-small`、`/wf-bug-fix` 或任何 `ss-*` 技能时，各阶段中"摸清现状"（现有实现/类调用关系/表结构/字段归属）同样属于本规则约束的代码库事实查询。**不得**以"本阶段是产出文档、不是在回答提问"为由跳过。阶段划分与门禁见 `.qoder/wf-rules/orchestrator-behavior.md` → 「代码图谱优先协议（graphify-first）」。
+9. **取证必须留痕（否则视为未取证）**：在上述阶段中，本阶段主产物（`02-intake.md` / `03-spec.md` / `04-domain.md` / `05-design.md` / `06-tasks.md` / `rootcause.md` 等）必须包含 `## 图谱证据` 段，记录：执行的 `graphify` 命令原文、每条命令得到的关键结论（含 `source_location`）、以及不得早于两次 graphify 重试失败前使用 Grep/Read 源码的兜底原因。**禁止仅在对话中口头声称已使用 graphify**：客观验证通道是 `graphify-out/cache/last_query_stamp`（`query`/`path`/`explain` 均会刷新，仅写入该文件的声称无效）。
