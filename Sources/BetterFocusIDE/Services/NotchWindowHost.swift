@@ -67,6 +67,8 @@ final class NotchCanvas: NSView {
     private let dim = NSView()
     /// 岛正在趋向 / 静止于的尺寸（内容尺寸）。
     private var contentSize: CGSize
+    /// 当前几何信息（用于获取 cameraHeight 定位气泡到刘海内）。
+    private var currentGeometry: NotchGeometry
     private var trackingArea: NSTrackingArea?
 
     // MARK: - 鼠标回调（由 NotchWindowHost → NotchService 接线）
@@ -79,8 +81,9 @@ final class NotchCanvas: NSView {
     override var isOpaque: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    init(content: AnyView, size: CGSize) {
+    init(content: AnyView, size: CGSize, geometry: NotchGeometry) {
         contentSize = size
+        currentGeometry = geometry
         host = NotchHostingView(rootView: content)
         host.sizingOptions = []
         host.wantsLayer = true
@@ -123,9 +126,15 @@ final class NotchCanvas: NSView {
 
     // MARK: 几何辅助
 
-    /// `size` 对应的岛矩形：在当前画布宽度内水平居中、从顶边垂下（flipped，y=0 是屏幕顶）。
+    /// `size` 对应的岛矩形：在当前画布宽度内水平居中。
+    ///
+    /// 收起态（画布矮于刘海）时气泡贴合刘海物理区域；展开态（画布向下延伸）时
+    /// 气泡仍锚定在刘海内，内容从气泡下缘开始向下铺开。
     func islandRect(for size: CGSize) -> CGRect {
-        CGRect(x: (bounds.width - size.width) / 2, y: 0, width: size.width, height: size.height)
+        let notchH = max(size.height, currentGeometry.cameraHeight)
+        let bubbleY = max(0, notchH - currentGeometry.cameraHeight)
+        return CGRect(x: (bounds.width - size.width) / 2, y: bubbleY,
+                      width: size.width, height: size.height)
     }
 
     /// `size` 在当前画布边界内的轮廓路径。
@@ -147,8 +156,9 @@ final class NotchCanvas: NSView {
 
     // MARK: 静止布局
 
-    func setContentSize(_ size: CGSize) {
+    func setContentSize(_ size: CGSize, geometry: NotchGeometry? = nil) {
         contentSize = size
+        if let g = geometry { currentGeometry = g }
         needsLayout = true
     }
 
@@ -369,7 +379,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         panel = NotchPanel(contentRect: geometry.frame(for: size, showsContent: false),
                            styleMask: [.borderless, .nonactivatingPanel],
                            backing: .buffered, defer: false)
-        canvas = NotchCanvas(content: content, size: size)
+        canvas = NotchCanvas(content: content, size: size, geometry: geometry)
         super.init()
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -419,7 +429,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
             CATransaction.setDisableActions(true)
             panel.setFrame(pixelAligned(panelFrame(for: size, showsContent: showsContent)), display: true)
             appliedFrame = panelFrame(for: size, showsContent: showsContent)
-            canvas.setContentSize(size)
+            canvas.setContentSize(size, geometry: geometry)
             canvas.layoutSubtreeIfNeeded()
             CATransaction.commit()
         }
@@ -455,6 +465,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         CATransaction.setDisableActions(true)
         panel.setFrame(pixelAligned(panelFrame(for: envelope, showsContent: showsContent)), display: true)
         appliedFrame = panelFrame(for: envelope, showsContent: showsContent)
+        canvas.setContentSize(envelope, geometry: geometry)
         canvas.layoutSubtreeIfNeeded()
         CATransaction.commit()
 
