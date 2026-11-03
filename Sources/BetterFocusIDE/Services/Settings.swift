@@ -295,7 +295,7 @@ final class Settings: ObservableObject {
         turnNotifyJump = true; permissionNoticeJump = true
         cardWidth = 540; cardMinHeight = 0; cardInset = 18; bodyFont = 12
         optionFont = 12; descFont = 10.5; optionRowMin = 30
-        bubbleWidth = 44; bubbleHeight = 26; notifyWidth = 380; notifyHeight = 74
+        bubbleWidth = 44; bubbleHeight = 26; notifyWidth = 380; notifyHeight = 100
         backgroundColor = "0.05,0.05,0.07"; backgroundAlpha = 0.96
         accentColor = "0.29,0.62,1.0"; qoderTint = "0.58,0.45,0.82"; opencodeTint = "0.06,0.73,0.51"
         radiusExpanded = 22; radiusBubble = 13
