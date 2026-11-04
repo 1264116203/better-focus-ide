@@ -21,11 +21,14 @@ enum AgentProvider: String, CaseIterable, Codable {
     case unknown
 
     /// 界面展示名称（用于徽章首字母、来源文案等）。
+    ///
+    /// 注意：JetBrains 插件模式返回空字符串，强制使用 host.name（具体 IDE 名称如
+    /// "IntelliJ IDEA"、"PyCharm"）；其他提供方返回各自的展示名。
     var displayName: String {
         switch self {
         case .qoder: return "Qoder"
         case .opencode: return "OpenCode"
-        case .jetbrains_plugin: return "JetBrains"
+        case .jetbrains_plugin: return ""  // 必须由 host.name 提供具体 IDE 名称
         case .qoder_ide: return "Qoder"
         case .qoder_cli: return "Qoder CLI"
         case .unknown: return "Unknown"
@@ -66,5 +69,33 @@ enum AgentProvider: String, CaseIterable, Codable {
         case .qoder, .jetbrains_plugin, .qoder_ide, .qoder_cli, .unknown:
             return "qoder"
         }
+    }
+
+    /// 获取有效的展示名称：优先使用 host.name（具体 IDE 名称），回退到 displayName。
+    ///
+    /// 对于 JetBrains 插件模式，displayName 为空，必须依赖 host.name 提供具体名称
+    /// （如 "IntelliJ IDEA"、"PyCharm"）。如果 host.name 也为空，返回 "JetBrains"
+    /// 作为最终兜底。
+    static func effectiveName(provider: AgentProvider, hostName: String?) -> String {
+        // 优先使用 host.name（具体 IDE 名称）
+        if let name = hostName, !name.isEmpty {
+            return name
+        }
+        // 回退到 provider.displayName
+        let displayName = provider.displayName
+        if !displayName.isEmpty {
+            return displayName
+        }
+        // JetBrains 插件模式且 host.name 缺失：最终兜底
+        if provider == .jetbrains_plugin {
+            return "JetBrains"
+        }
+        return "Unknown"
+    }
+
+    /// 获取徽章文本：取有效展示名称的首字母大写。
+    static func badgeText(provider: AgentProvider, hostName: String?) -> String {
+        let name = effectiveName(provider: provider, hostName: hostName)
+        return String(name.prefix(1)).uppercased()
     }
 }

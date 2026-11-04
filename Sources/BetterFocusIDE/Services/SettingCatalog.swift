@@ -281,10 +281,11 @@ enum SettingCatalog {
             defaultValue: .bool(true), get: getB(\.permissionHold), set: setB(\.permissionHold)),
 
         // ---------------- 超时与排队 ----------------
-        SettingDefinition(key: "agentWaitLimit", label: "卡片等待上限", kind: .slider, group: "超时与排队",
+        SettingDefinition(key: "agentWaitLimit", label: "提问/权限卡片最长等待时长", kind: .slider, group: "超时与排队",
             min: 60, max: 600, step: 30, unit: "秒", digits: 0,
-            note: "卡片必须先于 Hook / Plugin 到期，所以 Hook 时限自动取本值 + 60 秒",
+            note: "需要用户操作的提问和权限卡片最多等待多久，超时会被强制清理并写入 -1；Hook/Plugin 时限自动取本值 + 60 秒",
             needsReinstall: true,
+            keywords: ["等待", "超时", "卡片", "清理", "question", "permission"],
             defaultValue: .int(600), get: getI(\.agentWaitLimit), set: setI(\.agentWaitLimit)),
         SettingDefinition(key: "questionQueueLimit", label: "提问排队上限", kind: .slider, group: "超时与排队",
             min: 1, max: 20, step: 1, unit: "组", digits: 0,

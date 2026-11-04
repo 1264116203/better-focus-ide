@@ -37,6 +37,13 @@ cp Resources/Info.plist "$APP_DIR/Contents/Info.plist"
 # Copy entitlements (for reference, not used in ad-hoc signing)
 cp "$ENTITLEMENTS" "$APP_DIR/Contents/Resources/"
 
+# Copy SwiftPM resource bundles (IDE icons, etc.)
+RESOURCE_BUNDLE=".build/arm64-apple-macosx/$BUILD_CONFIGURATION/BetterFocusIDE_BetterFocusIDE.bundle"
+if [ -d "$RESOURCE_BUNDLE" ]; then
+    echo "▸ Copying resource bundles..."
+    cp -R "$RESOURCE_BUNDLE" "$APP_DIR/Contents/Resources/"
+fi
+
 # Sign the app (ad-hoc)
 echo "▸ Signing $APP_NAME.app (ad-hoc)..."
 codesign --force --deep --sign - --entitlements "$ENTITLEMENTS" "$APP_DIR"
