@@ -212,6 +212,9 @@ final class NotchService: ObservableObject {
             activeCard = .none
         } else if activeCard == .notice {
             noticeController.dismiss()
+            // 如果队列中有下一条通知，promoteNext 已在 onDismiss→handleCardDismissal 中触发，
+            // 此时 hasActiveNotice 为 true，不应收起——让 showNoticeBanner 接管。
+            if noticeController.hasActiveNotice { return }
             activeCard = .none
         }
         let newSize = geometry.restingSize(showsContent: false)
