@@ -162,6 +162,12 @@ final class NotchService: ObservableObject {
         } else if activeCard != .none {
             // 有卡片但处于收起态（按需模式）：展开它。
             expand()
+        } else if hasUnprocessedNotice, let restored = noticeController.restoreLastDismissed() {
+            // 有自动收起的未读通知：恢复展示（而非打开历史）。
+            hasUnprocessedNotice = false
+            unprocessedNoticeTint = nil
+            updateBreathingTint()
+            noticeController.show(restored)
         } else if noticeController.hasQueuedNotices {
             // 有未读通知排队：弹出下一条，而非打开历史。
             hasUnprocessedNotice = false
@@ -825,6 +831,7 @@ final class NotchService: ObservableObject {
                     let savedTint = noticeController.notice.flatMap {
                         AgentProvider(rawValue: $0.provider)?.tint
                     }
+                    noticeController.saveForRestore()   // 保存当前通知供气泡点击恢复
                     noticeController.dismiss()        // 清当前 + onDismiss + promoteNext()
                     if !noticeController.hasActiveNotice {
                         // 队列已空：标记未处理以驱动呼吸灯，然后收起。
