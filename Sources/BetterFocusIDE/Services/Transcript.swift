@@ -11,8 +11,12 @@ import Foundation
 /// - `first_prompt` —— 会话开场的用户轮次（= IDE 的会话标题）
 /// - `last_prompt`  —— 最近一次用户轮次（= 这一轮完成的事）
 ///
-/// 外加记录里的 `entrypoint`，从而能把后台的 `qodercli -p` 会话（其"用户输入"是被
-/// 管道进来的 diff、并非人类）与用户真正在等的 IDE 会话区分开。
+/// 外加记录里的 `entrypoint` 与 `humanInput`，从而能把后台的 `qodercli -p` 会话（其"用户输入"
+/// 是被管道进来的 diff、并非人类）与用户真正在等的 IDE 会话区分开。
+///
+/// 新版 Qoder 内核对 GUI 会话也统一写 `entrypoint: "cli"`（transcript 落在 `~/.qoder/projects/`），
+/// 单看 entrypoint 会把真人会话误当无头脚本。真人 UI 输入（含粘贴）的记录带 `humanInput`
+/// 标记；管道输入没有——两者组合才是可靠的判据。
 ///
 /// 文件可能有几 MB，故只读**头部与尾部各自的字节预算**——标题总在开头附近、当前轮次
 /// 总在结尾附近，中间对话从不触碰。任何失败都坍缩为空串，让调用方回退到通用文案；
@@ -33,12 +37,17 @@ enum Transcript {
         let title: String
         let latest: String
         let entrypoint: String
+        /// 首条人类发言记录是否带 `humanInput` 标记（真人 UI 输入，含粘贴）。
+        let hasHumanInput: Bool
         /// 由 `qodercli`（无头脚本）而非 IDE 里的人写出。
-        var fromCLI: Bool { entrypoint == entrypointCLI }
-        static let empty = Session(title: "", latest: "", entrypoint: "")
+        ///
+        /// 新版 Qoder 内核对 GUI 会话也写 `entrypoint: "cli"`，但真人 UI 输入的记录
+        /// 带 `humanInput` 标记；只有 entrypoint=cli 且无该标记的才是真正的管道会话。
+        var fromCLI: Bool { entrypoint == entrypointCLI && !hasHumanInput }
+        static let empty = Session(title: "", latest: "", entrypoint: "", hasHumanInput: false)
     }
 
-    /// 打开文件一次，返回标题 + 最新轮次 + entrypoint。
+    /// 打开文件一次，返回标题 + 最新轮次 + entrypoint + 人类输入标记。
     static func sessionSummary(path: String?, provider: String?) -> Session {
         guard let path, !path.isEmpty else { return .empty }
         var isDir: ObjCBool = false
@@ -46,9 +55,9 @@ enum Transcript {
               !isDir.boolValue,
               let handle = FileHandle(forReadingAtPath: path) else { return .empty }
         defer { try? handle.close() }
-        let (title, entrypoint) = first(handle: handle, limit: titleLimit, provider: provider)
+        let (title, entrypoint, human) = first(handle: handle, limit: titleLimit, provider: provider)
         let latest = last(handle: handle, limit: bodyLimit, provider: provider)
-        return Session(title: title, latest: latest, entrypoint: entrypoint)
+        return Session(title: title, latest: latest, entrypoint: entrypoint, hasHumanInput: human)
     }
 
     // MARK: - 空白折叠 / 截断
@@ -65,11 +74,12 @@ enum Transcript {
 
     // MARK: - 头部扫描（首条用户提问 + entrypoint）
 
-    /// 从头按块读取，返回遇到的第一条用户提问及其 entrypoint。
+    /// 从头按块读取，返回遇到的第一条用户提问、其 entrypoint 与人类输入标记。
     private static func first(handle: FileHandle, limit: Int,
-                              provider: String?) -> (String, String) {
+                              provider: String?) -> (String, String, Bool) {
         handle.seek(toFileOffset: 0)
         var entrypoint = ""
+        var human = false
         var spent = 0
         var carry = Data()
         while spent < headBytes {
@@ -78,23 +88,26 @@ enum Transcript {
             if data.isEmpty {
                 // EOF：尾部残留（若有）就是一条完整的最后一行。
                 if !carry.isEmpty {
-                    let (prompt, seen) = lineUser(carry, provider: provider)
+                    let (prompt, seen, seenHuman) = lineUser(carry, provider: provider)
                     if entrypoint.isEmpty { entrypoint = seen }
-                    if !prompt.isEmpty { return (shorten(prompt, limit: limit), entrypoint) }
+                    if !prompt.isEmpty { return (shorten(prompt, limit: limit), seen, seenHuman) }
                 }
-                return ("", entrypoint)
+                return ("", entrypoint, human)
             }
             spent += data.count
             var combined = carry + data
             let lines = completeLines(&combined)   // 余下部分保留在 combined 里
             carry = combined
             for line in lines {
-                let (prompt, seen) = lineUser(line, provider: provider)
-                if entrypoint.isEmpty { entrypoint = seen }
-                if !prompt.isEmpty { return (shorten(prompt, limit: limit), entrypoint) }
+                let (prompt, seen, seenHuman) = lineUser(line, provider: provider)
+                if entrypoint.isEmpty {
+                    entrypoint = seen
+                    human = seenHuman
+                }
+                if !prompt.isEmpty { return (shorten(prompt, limit: limit), seen, seenHuman) }
             }
         }
-        return ("", entrypoint)
+        return ("", entrypoint, human)
     }
 
     // MARK: - 尾部扫描（最近一条用户提问，逆序）
