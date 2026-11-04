@@ -11,6 +11,8 @@ struct NotchNoticeView: View {
     var pinned = false
     var onTogglePin: () -> Void = {}
     let onTap: () -> Void
+    /// 点击"已读"按钮的回调（不跳转 IDE，直接标记已读并关闭）。
+    var onMarkRead: () -> Void = {}
     /// 有值时触发提供方徽章上的铃铛摆动动画。
     var bellSwingStart: Date?
     /// 观察 Settings 单例，使设置变更时视图能自动重新渲染。
@@ -18,6 +20,11 @@ struct NotchNoticeView: View {
 
     @State private var bellAngle: Double = 0
     @State private var bellScale: CGFloat = 1.0
+    /// 拖动关闭手势的水平偏移量。
+    @State private var dragOffset: CGFloat = 0
+
+    /// 拖动关闭触发阈值（点）。
+    private let swipeDismissThreshold: CGFloat = 80
 
     /// 徽章主题色：取提供方 tint，无对应提供方时回退到默认蓝。
     private var tint: Color {
@@ -28,7 +35,6 @@ struct NotchNoticeView: View {
     private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
     /// 徽章文本：取 providerName（已由 Controller 层处理为具体 IDE 名称）的首字母大写。
-    /// 例如："IntelliJ IDEA" → "I"，"PyCharm" → "P"，"Qoder" → "Q"
     private var badgeText: String {
         String(notice.providerName.prefix(1)).uppercased()
     }
@@ -83,22 +89,67 @@ struct NotchNoticeView: View {
             }
             .buttonStyle(.plain)
 
-            // 钉住开关：统一使用主题色
-            Button(action: onTogglePin) {
-                Image(systemName: pinned ? "pin.fill" : "pin")
-                    .font(.system(size: 12, weight: .semibold))
-                    .rotationEffect(.degrees(pinned ? 0 : 45))
-                    .foregroundStyle(pinned
-                        ? Color(red: settings.accentRGB.r,
-                                green: settings.accentRGB.g,
-                                blue: settings.accentRGB.b)
-                        : Color.white.opacity(0.4))
+            // 顶部工具栏：已读按钮（左上）+ 钉住开关（右上）
+            HStack {
+                Button(action: onMarkRead) {
+                    Text("已读")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.white.opacity(0.08),
+                                    in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("标记为已读（不跳转）")
+
+                Spacer()
+
+                Button(action: onTogglePin) {
+                    Image(systemName: pinned ? "pin.fill" : "pin")
+                        .font(.system(size: 12, weight: .semibold))
+                        .rotationEffect(.degrees(pinned ? 0 : 45))
+                        .foregroundStyle(pinned
+                            ? Color(red: settings.accentRGB.r,
+                                    green: settings.accentRGB.g,
+                                    blue: settings.accentRGB.b)
+                            : Color.white.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+                .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
             }
-            .buttonStyle(.plain)
-            .padding(.top, 6)
-            .padding(.trailing, inset)  // 与左侧对称
-            .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
+            .padding(.top, 4)
+            .padding(.horizontal, inset)
         }
+        // 拖动关闭手势：左右滑动超过阈值视为已读并关闭
+        .offset(x: dragOffset)
+        .rotationEffect(.degrees(Double(dragOffset) / 20))
+        .opacity(1.0 - min(abs(dragOffset) / (swipeDismissThreshold * 2), 0.6))
+        .gesture(
+            DragGesture(minimumDistance: 10)
+                .onChanged { value in
+                    // 只跟踪水平拖动
+                    dragOffset = value.translation.width
+                }
+                .onEnded { value in
+                    if abs(value.translation.width) > swipeDismissThreshold {
+                        // 超过阈值：标记已读并关闭
+                        let direction: CGFloat = value.translation.width > 0 ? 1 : -1
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            dragOffset = direction * 300
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            dragOffset = 0
+                            onMarkRead()
+                        }
+                    } else {
+                        // 未达阈值：弹回原位
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            dragOffset = 0
+                        }
+                    }
+                }
+        )
         .onAppear { startBellSwing() }
         .onChange(of: bellSwingStart) { startBellSwing() }
     }

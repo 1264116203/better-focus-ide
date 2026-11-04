@@ -33,6 +33,12 @@ struct NotchView: View {
         }
         .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
         .clipped()  // 防止 SwiftUI 内容在 AppKit 壳布局完成前溢出
+        // 呼吸灯辉光层：在 clipped 外部渲染，确保辉光效果能完整显示
+        .overlay(
+            breathingGlowLayer
+                .frame(width: service.surfaceSize.width + 80,
+                       height: service.surfaceSize.height + 80)
+        )
         .foregroundStyle(.white)
         // 表面点击：仅收起态或无卡片时处理；展开的交互式卡片由自身处理交互，
         // 背景点击不应触发收起（否则点选项间隙会误关卡片）。
@@ -130,6 +136,7 @@ struct NotchView: View {
                                     pinned: service.pinned,
                                     onTogglePin: { service.togglePin() },
                                     onTap: { service.noticeController.tapped() },
+                                    onMarkRead: { service.noticeController.markRead() },
                                     bellSwingStart: service.bellSwingStart)
                 }
             case .history:
