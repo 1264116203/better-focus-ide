@@ -145,17 +145,20 @@ enum IDEIconProvider {
     }
 
     /// 从 Resources 目录加载图片
+    ///
+    /// 搜索顺序：
+    /// 1. Bundle.main.resourceURL 下的资源包（适用于 .app 打包和 SwiftPM 构建）
+    /// 2. Bundle.module（SwiftPM 自动生成的资源包引用）
+    /// 3. Bundle.main.resourcePath 直接搜索（兜底）
     private static func loadImage(named: String) -> Image? {
         #if canImport(AppKit)
-        // 方式1：尝试从 BetterFocusIDE_BetterFocusIDE.bundle 加载
         let bundleName = "BetterFocusIDE_BetterFocusIDE.bundle"
         var searchPaths: [URL] = []
         
-        // SwiftPM build 时的路径
+        // SwiftPM build / .app 打包后的路径
         if let path = Bundle.main.resourceURL?.appendingPathComponent(bundleName) {
             searchPaths.append(path)
         }
-        // App 打包后的路径
         searchPaths.append(Bundle.main.bundleURL.appendingPathComponent("Contents/Resources").appendingPathComponent(bundleName))
         // Bundle.module（SwiftPM 资源包）
         searchPaths.append(Bundle.module.bundleURL)
@@ -168,7 +171,7 @@ enum IDEIconProvider {
             }
         }
         
-        // 方式2：直接在资源路径中搜索
+        // 兜底：直接在资源路径中搜索
         if let resourcePath = Bundle.main.resourcePath {
             let directPath = (resourcePath as NSString).appendingPathComponent("IDE-Icons/\(named).png")
             if FileManager.default.fileExists(atPath: directPath),
