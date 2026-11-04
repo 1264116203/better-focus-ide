@@ -58,7 +58,7 @@ struct NotchNoticeView: View {
                             bundleID: notice.host?.bundle,
                             fallbackText: badgeText,
                             tint: tint,
-                            size: 28
+                            size: IDEIconProvider.badgeSize
                         )
                         .rotationEffect(.degrees(bellAngle))
                         .scaleEffect(bellScale)

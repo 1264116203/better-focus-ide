@@ -62,10 +62,9 @@ struct NotchHistoryView: View {
     /// 行间距 (4pt)
     private let rowGap: CGFloat = 4
 
-    /// 徽章尺寸 (24pt × 24pt)
-    ///
-    /// 圆角方形，显示提供者首字母，背景色为提供者主题色
-    private let badgeSize: CGFloat = 24
+    /// 徽章尺寸：与其它三类卡片共用同一常量，保证跨卡片图标等大。
+    /// 宽度公式里必须用同一值，否则标题区会多算 6pt。
+    private var badgeSize: CGFloat { IDEIconProvider.badgeSize }
 
     /// 元数据列宽度 (104pt)
     ///
@@ -167,7 +166,7 @@ struct NotchHistoryView: View {
                         tint: Color(red: entry.tintRGB.red,
                                     green: entry.tintRGB.green,
                                     blue: entry.tintRGB.blue),
-                        size: badgeSize
+                        size: IDEIconProvider.badgeSize
                     )
 
                     // 左侧内容：标题 + 回答文本

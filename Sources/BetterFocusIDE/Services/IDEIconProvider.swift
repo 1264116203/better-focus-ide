@@ -13,6 +13,15 @@ import SwiftUI
 ///
 /// 无真实图标的 IDE（如 Claude Code）使用带品牌色的文字徽章作为回退。
 enum IDEIconProvider {
+    /// 徽章统一尺寸（四类卡片共用）。
+    ///
+    /// 图标资源的「内容包围盒」差异很大：JetBrains 全家桶的 PNG 是满画布
+    /// （100%），而 Cursor / WorkBuddy / Qoder 这类圆角方片自带约 10% 透明留白
+    /// （≈0.80）。同样塞进 24pt 框，前者视觉上要大约 25%——这就是卡片之间
+    /// 「图标大小不一」的根因。加载时统一切到不透明包围盒（见 `trimmed`），
+    /// 再配合这一个尺寸常量，四个卡片的图标才会真正等大。
+    static let badgeSize: CGFloat = 30
+
     /// IDE 名称到图标文件名的映射（小写匹配）
     private static let iconMapping: [String: String] = [
         // JetBrains IDEs
@@ -192,25 +201,26 @@ enum IDEIconProvider {
     ///   - tint: 默认背景色（当无法匹配品牌色时使用）
     ///   - size: 徽章尺寸
     @ViewBuilder
-    static func badgeView(hostName: String?, bundleID: String? = nil, fallbackText: String, tint: Color, size: CGFloat = 24) -> some View {
+    static func badgeView(hostName: String?, bundleID: String? = nil, fallbackText: String, tint: Color, size: CGFloat = badgeSize) -> some View {
+        let radius = size * 0.22
         if let icon = icon(for: hostName, bundleID: bundleID) {
-            // 真实图标
+            // 真实图标：加载时已裁到内容包围盒，.fit 后各图标视觉等大。
             icon
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         } else {
             // 带品牌色的文字徽章
             let bgColor = hasBrandColor(for: hostName) ? brandColor(for: hostName) : tint
             // 确保文字不为空
             let displayText = fallbackText.isEmpty ? "?" : fallbackText
             Text(displayText)
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: size * 0.42, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: size, height: size)
                 .background(bgColor.opacity(0.9),
-                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            in: RoundedRectangle(cornerRadius: radius, style: .continuous))
         }
     }
 
@@ -225,11 +235,34 @@ enum IDEIconProvider {
 
     /// 从 Resources 目录加载图片
     ///
+    /// 搜索结果统一做两步处理后再缓存：
+    /// 1. 裁到不透明内容的包围盒（`trimmed`），消除各图标自带留白的差异；
+    /// 2. 转成 SwiftUI `Image` 缓存，避免每次重绘都重新读盘 + 重采样。
+    ///
     /// 搜索顺序：
     /// 1. Bundle.main.resourceURL 下的资源包（适用于 .app 打包和 SwiftPM 构建）
     /// 2. Bundle.module（SwiftPM 自动生成的资源包引用）
     /// 3. Bundle.main.resourcePath 直接搜索（兜底）
     private static func loadImage(named: String) -> Image? {
+        cacheLock.lock()
+        let cached = iconCache[named]
+        cacheLock.unlock()
+        if let cached { return cached }
+
+        guard let raw = rawImage(named: named) else { return nil }
+        let image = Image(nsImage: trimmed(raw))
+
+        cacheLock.lock()
+        iconCache[named] = image
+        cacheLock.unlock()
+        return image
+    }
+
+    /// 已处理图标的缓存。SwiftUI body 在主线程求值，锁只是防御性写法。
+    private static let cacheLock = NSLock()
+    private static var iconCache: [String: Image] = [:]
+
+    private static func rawImage(named: String) -> NSImage? {
         #if canImport(AppKit)
         let bundleName = "BetterFocusIDE_BetterFocusIDE.bundle"
         var searchPaths: [URL] = []
@@ -246,7 +279,7 @@ enum IDEIconProvider {
             let iconPath = basePath.appendingPathComponent("IDE-Icons").appendingPathComponent(named).appendingPathExtension("png")
             if FileManager.default.fileExists(atPath: iconPath.path),
                let nsImage = NSImage(contentsOf: iconPath) {
-                return Image(nsImage: nsImage)
+                return nsImage
             }
         }
         
@@ -255,11 +288,60 @@ enum IDEIconProvider {
             let directPath = (resourcePath as NSString).appendingPathComponent("IDE-Icons/\(named).png")
             if FileManager.default.fileExists(atPath: directPath),
                let nsImage = NSImage(contentsOfFile: directPath) {
-                return Image(nsImage: nsImage)
+                return nsImage
             }
         }
         #endif
         return nil
+    }
+
+    /// 把图标裁到不透明内容的外接矩形。
+    ///
+    /// 图标源的留白差异实测：JetBrains 系满画布（1.00），Cursor 0.803、
+    /// WorkBuddy 0.801、Qoder 0.773、iTerm/Warp 0.82。不裁的话同一尺寸框里
+    /// 视觉大小相差 25%。包围盒先在 64×64 缩略图上粗测（代价可忽略），
+    /// 再映射回原图裁切，避免逐像素扫描 1024×1024。
+    static func trimmed(_ image: NSImage) -> NSImage {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        else { return image }
+        let probe = 64
+        var pixels = [UInt8](repeating: 0, count: probe * probe * 4)
+        let drawn: Bool = pixels.withUnsafeMutableBytes { buffer in
+            guard let ctx = CGContext(data: buffer.baseAddress,
+                                      width: probe, height: probe,
+                                      bitsPerComponent: 8, bytesPerRow: probe * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            ctx.interpolationQuality = .low
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: probe, height: probe))
+            return true
+        }
+        guard drawn else { return image }
+
+        var minX = probe, minY = probe, maxX = -1, maxY = -1
+        for y in 0..<probe {
+            for x in 0..<probe {
+                // 阈值 24/255：滤掉抗锯齿边缘的半透明像素，只认真正的内容。
+                if pixels[(y * probe + x) * 4 + 3] > 24 {
+                    minX = min(minX, x); maxX = max(maxX, x)
+                    minY = min(minY, y); maxY = max(maxY, y)
+                }
+            }
+        }
+        guard maxX >= 0, maxY >= 0 else { return image }
+        // 满画布直接原样返回，省一次重采样。
+        if minX == 0, minY == 0, maxX == probe - 1, maxY == probe - 1 { return image }
+
+        let sx = CGFloat(cg.width) / CGFloat(probe)
+        let sy = CGFloat(cg.height) / CGFloat(probe)
+        // CGContext 原点在左下角，换算回自上而下的图像坐标。
+        let rect = CGRect(x: CGFloat(minX) * sx,
+                          y: CGFloat(cg.height) - CGFloat(maxY + 1) * sy,
+                          width: CGFloat(maxX - minX + 1) * sx,
+                          height: CGFloat(maxY - minY + 1) * sy).integral
+        guard let cropped = cg.cropping(to: rect) else { return image }
+        return NSImage(cgImage: cropped, size: NSSize(width: rect.width, height: rect.height))
     }
 
     /// 获取文字徽章（首字母大写）
