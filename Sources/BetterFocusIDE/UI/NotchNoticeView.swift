@@ -5,6 +5,8 @@ import SwiftUI
 
 /// 智能体完成一次回复时展示的横幅。点击可跳回产生该回复的 IDE（启用跳转时）。
 struct NotchNoticeView: View {
+    /// 通知控制器，用于读取未读队列数量并观察变化。
+    @ObservedObject var controller: NoticeController
     let notice: TurnNotice
     var pinned = false
     var onTogglePin: () -> Void = {}
@@ -63,6 +65,16 @@ struct NotchNoticeView: View {
                         }
                     }
                     Spacer(minLength: 0)
+                    // 未读通知计数徽章：队列中还有更多通知时显示
+                    if controller.queueCount > 1 {
+                        Text("+\(controller.queueCount)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(.white.opacity(0.15),
+                                        in: Capsule())
+                    }
                 }
                 .padding(.horizontal, inset)
                 .padding(.vertical, 10)
@@ -127,7 +139,8 @@ struct NotchNoticeView_Previews: PreviewProvider {
             jumpEnabled: true,
             fromCLI: false
         )
-        NotchNoticeView(notice: mock, onTap: {})
+        let ctrl = NoticeController()
+        NotchNoticeView(controller: ctrl, notice: mock, onTap: {})
             .frame(width: 380)
             .padding()
             .preferredColorScheme(.dark)
