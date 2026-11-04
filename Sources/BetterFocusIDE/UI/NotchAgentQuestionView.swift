@@ -99,7 +99,7 @@ struct NotchAgentQuestionView: View {
                 bundleID: prompt.host?.bundle,
                 fallbackText: badgeText,
                 tint: prompt.provider.tint,
-                size: 24
+                size: IDEIconProvider.badgeSize
             )
             .layoutPriority(1)
             Text("\(sourceName) · \(question.header)")

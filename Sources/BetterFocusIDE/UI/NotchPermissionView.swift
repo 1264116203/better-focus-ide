@@ -73,7 +73,7 @@ struct NotchPermissionView: View {
                 bundleID: req.host?.bundle,
                 fallbackText: badgeText,
                 tint: req.provider.tint,
-                size: 28
+                size: IDEIconProvider.badgeSize
             )
             .layoutPriority(1)
             Text("\(sourceName) · \(req.title)")
