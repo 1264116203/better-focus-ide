@@ -77,6 +77,44 @@ final class IDEIconProviderTests: XCTestCase {
         XCTAssertTrue(failed.isEmpty, "以下图标没填满 30pt 框：" + failed.joined(separator: ", "))
     }
 
+    /// 深色图标必须靠一圈亮边把方块边界「勾」出来。
+    ///
+    /// Cursor 的图标是近黑方块（平均亮度 0.23），面板底色是 0.28 —— 没有亮边时
+    /// 方块边界几乎看不见，只剩中间那个灰色立方体可见，看起来就比 WorkBuddy /
+    /// Qoder 小一圈（用户实际反馈）。这里把徽章压到面板同色背景上渲染，断言
+    /// 边缘一圈确实比内部底色亮。
+    @MainActor
+    func testDarkIconGetsVisibleRim() throws {
+        let size = IDEIconProvider.badgeSize
+        let view = ZStack {
+            Color(white: 0.28)
+            IDEIconProvider.badgeView(hostName: "Cursor", fallbackText: "C", tint: .gray, size: size)
+        }
+        .frame(width: size, height: size)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 4
+        let rendered = try XCTUnwrap(renderer.nsImage, "Cursor 徽章渲染失败")
+        let rep = try XCTUnwrap(NSBitmapImageRep(data: rendered.tiffRepresentation!))
+
+        // 左侧边缘取一列，避开圆角：只在竖直中段采样。
+        func meanLuminance(atX x: Int) -> Double {
+            var sum = 0.0, n = 0
+            let h = rep.pixelsHigh
+            for y in (h / 3)..<(h * 2 / 3) {
+                guard let c = rep.colorAt(x: x, y: y) else { continue }
+                sum += 0.2126 * c.redComponent + 0.7152 * c.greenComponent + 0.0722 * c.blueComponent
+                n += 1
+            }
+            return n > 0 ? sum / Double(n) : 0
+        }
+
+        // 0.5pt 的边在 @4x 下只有 2px 宽：取第 1 列，第 2 列已经在图标内部了。
+        let rim = meanLuminance(atX: 1)
+        let inner = meanLuminance(atX: 10)
+        XCTAssertGreaterThan(rim, inner + 0.04,
+                             "图标边缘没被提亮（边缘 \(rim) vs 内部 \(inner)），深色图标会糊在面板里")
+    }
+
     /// 名称 / bundle 解析仍能命中图标（改尺寸不该动匹配逻辑）。
     func testIconLookupStillWorks() {
         XCTAssertNotNil(IDEIconProvider.icon(for: "Cursor"))
