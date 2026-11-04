@@ -154,9 +154,14 @@ OpenCode Plugin (JS) ─┘                          │                    │
 | IDE 类型 | 定位方式 | 回退链 |
 |----------|----------|--------|
 | **JetBrains** | ① CLI 直达 → ② AXRaise → ③ Window 菜单 | ① `<binary> <cwd>` 让 IDE 自聚焦 → ② System Events `AXRaise` 按窗口标题匹配 → ③ 点击 Window 菜单项（跨 Space 可靠，有闪烁） |
-| **Qoder IDE / CN IDE** | `code -r <cwd>` | VS Code 系 fork，复用已打开的 workspace 窗口 |
-| **Qoder.app** | App 级激活 | 独立应用，无 `code` 二进制，直接激活应用 |
+| **Qoder IDE / CN IDE** | `code -r <cwd>` + IPC socket | VS Code 系 fork，通过 `VSCODE_IPC_HOOK_CLI` 环境变量指向运行中实例的 IPC socket（`*-main.sock`），复用已打开的 workspace 窗口 |
+| **Qoder.app** | App 级激活 | 独立桌面应用，无 `code` 二进制，直接激活应用 |
 | **OpenCode** | App 级激活 | 按 bundle id 或应用名激活 |
+
+**关键实现细节**：
+- **IPC socket 查找**：`findCodeIPCSocket()` 通过 bundle ID 映射到数据目录名（如 `com.qoder.ide` → `Qoder`，`com.aliyun.lingma.ide` → `QoderCN`），在 `~/Library/Application Support/<dir>/` 下查找 `*-main.sock` 文件
+- **环境变量设置**：调用 `code -r` 前必须设置 `VSCODE_IPC_HOOK_CLI` 指向找到的 socket 路径，否则 CLI 无法连接运行中实例而会打开新窗口
+- **应用名 ≠ 数据目录名**：Qoder IDE.app 的数据目录是 `Qoder`（不是 `Qoder IDE`），因此不能从应用名直接推导
 
 #### 支持的应用 Bundle ID 对照表
 

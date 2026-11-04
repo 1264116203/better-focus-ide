@@ -28,5 +28,11 @@ let package = Package(
             path: "Sources/BetterFocusIDE/App",
             sources: ["main.swift"]
         ),
+        // 测试目标：验证设置系统、控制器逻辑等核心功能。
+        .testTarget(
+            name: "BetterFocusIDETests",
+            dependencies: ["BetterFocusIDE"],
+            path: "Tests/BetterFocusIDETests"
+        ),
     ]
 )

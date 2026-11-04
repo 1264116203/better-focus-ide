@@ -53,6 +53,10 @@ final class NotchService: ObservableObject {
     private var isClosing = false
     /// 钉住的卡片保持展开而非自动收起（"固定 ⇄ 按需"）。
     @Published private(set) var pinned = false
+    /// 记住用户对历史面板的置顶偏好（历史面板是瞬态的，收起即消失）
+    private var lastHistoryPinned: Bool
+    /// 记住用户对通知横幅的置顶偏好（通知横幅是瞬态的，到时即消失）
+    private var lastNoticePinned: Bool
     private var keyMonitor: Any?
     /// 由 AppDelegate 接线，使 ⌘, 打开设置窗口。
     var onOpenSettings: (() -> Void)?
@@ -109,6 +113,10 @@ final class NotchService: ObservableObject {
         
         // 以收起尺寸启动
         self.surfaceSize = initialGeometry.restingSize(showsContent: false)
+        
+        // 初始化瞬态卡片的置顶偏好（取自设置默认值）
+        self.lastHistoryPinned = Settings.shared.pinByDefault
+        self.lastNoticePinned = Settings.shared.pinByDefault
         
         // 观察屏幕变化
         observeScreenChanges()
@@ -394,8 +402,13 @@ final class NotchService: ObservableObject {
     func showHistory() {
         // 不抢占交互式卡片
         if activeCard == .question || activeCard == .permission { return }
+        let cardChanged = activeCard != .history
         activeCard = .history
-        pinned = false
+        // 使用记住的置顶偏好（用户手动切换后再次打开时保留状态）
+        if cardChanged {
+            pinned = lastHistoryPinned
+        }
+        Log.info("showHistory: pinned=\(pinned), lastHistoryPinned=\(lastHistoryPinned), cardChanged=\(cardChanged)", topic: "history")
 
         let rows = max(1, historyController.entries.count)
 
@@ -426,8 +439,12 @@ final class NotchService: ObservableObject {
 
     /// Show the transient turn-finished banner at a compact height.
     private func showNoticeBanner() {
+        let cardChanged = activeCard != .notice
         activeCard = .notice
-        pinned = Settings.shared.pinByDefault
+        // 使用记住的置顶偏好（用户手动切换后再次收到通知时保留状态）
+        if cardChanged {
+            pinned = lastNoticePinned
+        }
         bellSwingStart = Date()  // Trigger bell swing animation.
         let bannerSize = CGSize(width: NotchLayout.expandedWidth,
                                 height: NotchLayout.expandedHeight)
@@ -444,8 +461,12 @@ final class NotchService: ObservableObject {
     }
 
     private func showCard(_ card: ActiveCard) {
+        let cardChanged = activeCard != card
         activeCard = card
-        pinned = Settings.shared.pinByDefault
+        // 只在卡片类型变化时重置置顶状态
+        if cardChanged {
+            pinned = Settings.shared.pinByDefault
+        }
         FeedbackService.onArrive()
         
         if pinned {
@@ -678,8 +699,10 @@ final class NotchService: ObservableObject {
             autoCollapseHeld = nil
         }
         // 按需模式：若因悬停而展开，则安排延迟收起。
+        Log.debug("mouseExited: pinned=\(pinned), expanded=\(expanded), activeCard=\(activeCard)", topic: "hover")
         if !pinned && expanded && activeCard != .question && activeCard != .permission {
             collapseAt = Date().addingTimeInterval(Self.hoverCollapseDelay)
+            Log.debug("mouseExited: setting collapseAt", topic: "hover")
         }
         ensureHoverTimer()
     }
@@ -944,8 +967,15 @@ final class NotchService: ObservableObject {
 
     /// 翻转固定模式：钉住的卡片保持展开而非自动收起。
     func togglePin() {
+        Log.info("togglePin called: before pinned=\(pinned), activeCard=\(activeCard)", topic: "pin")
         pinned.toggle()
         Log.info("图钉切换 pinned=\(pinned)", topic: "pin")
+        // 记住用户对瞬态卡片（历史/通知）的置顶偏好
+        if activeCard == .history {
+            lastHistoryPinned = pinned
+        } else if activeCard == .notice {
+            lastNoticePinned = pinned
+        }
         if pinned {
             // 钉住：取消任何待执行的自动收起。
             cancelAutoCollapse()

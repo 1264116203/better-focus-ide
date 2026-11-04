@@ -6,6 +6,8 @@ import SwiftUI
 /// 工具调用需要审批时，在灵动岛上展示的权限卡片。
 struct NotchPermissionView: View {
     @ObservedObject var controller: PermissionController
+    /// 观察 Settings 单例，使设置变更时视图能自动重新渲染（间距等即时生效）。
+    @ObservedObject private var settings = Settings.shared
     var pinned = false
     var onTogglePin: () -> Void = {}
 
@@ -22,30 +24,48 @@ struct NotchPermissionView: View {
 
     var body: some View {
         if let req = request {
-            VStack(alignment: .leading, spacing: 8) {
-                header(req)
-                bodyText(req)
-                if !req.detail.isEmpty {
-                    detailBlock(req)
+            ZStack(alignment: .topTrailing) {
+                VStack(alignment: .leading, spacing: 8) {
+                    header(req)
+                    bodyText(req)
+                    if !req.detail.isEmpty {
+                        detailBlock(req)
+                    }
+                    buttonsView(req)
                 }
-                buttonsView(req)
+                .padding(.horizontal, inset)
+                .padding(.vertical, 10)
+
+                // 钉住开关：ZStack 覆盖层，统一使用主题色
+                Button(action: onTogglePin) {
+                    Image(systemName: pinned ? "pin.fill" : "pin")
+                        .font(.system(size: 12, weight: .semibold))
+                        .rotationEffect(.degrees(pinned ? 0 : 45))
+                        .foregroundStyle(pinned
+                            ? Color(red: settings.accentRGB.r,
+                                    green: settings.accentRGB.g,
+                                    blue: settings.accentRGB.b)
+                            : Color.white.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 6)
+                .padding(.trailing, inset)
+                .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
             }
-            .padding(.horizontal, inset)
-            .padding(.vertical, 10)
         }
     }
 
     // MARK: - 头部
 
-    /// 头部：来源徽章 + "来源 · 动作标题" + 待处理数徽标 + 钉住按钮。
+    /// 头部：来源徽章 + "来源 · 动作标题" + 待处理数徽标。
     private func header(_ req: PermissionRequest) -> some View {
         HStack(spacing: 8) {
             Text(String(sourceName.prefix(1)))
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 18, height: 18)
+                .frame(width: 24, height: 24)
                 .background(req.provider.tint.opacity(0.9),
-                            in: RoundedRectangle(cornerRadius: 4))
+                            in: RoundedRectangle(cornerRadius: 6))
                 .layoutPriority(1)
             Text("\(sourceName) · \(req.title)")
                 .font(.system(size: 11, weight: .medium))
@@ -64,16 +84,6 @@ struct NotchPermissionView: View {
                                 in: Capsule())
                     .layoutPriority(1)
             }
-            Button(action: onTogglePin) {
-                Image(systemName: pinned ? "pin.fill" : "pin")
-                    .font(.system(size: 9, weight: .semibold))
-                    .rotationEffect(.degrees(pinned ? 0 : 45))
-                    .foregroundStyle(pinned ? AnyShapeStyle(req.provider.tint)
-                                     : AnyShapeStyle(.secondary))
-            }
-            .buttonStyle(.plain)
-            .layoutPriority(1)
-            .help(pinned ? "取消固定（按需收起）" : "固定（保持展开）")
         }
     }
 

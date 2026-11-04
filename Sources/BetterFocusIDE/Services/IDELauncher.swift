@@ -111,11 +111,18 @@ enum IDELauncher {
                     return true
                 }
             }
-            // Qoder IDE（VS Code 系）：code -r 复用窗口
-            // 注意：Qoder.app (com.qoder.app) 是独立应用，不支持 code -r，直接跳过
+            // Qoder IDE（VS Code 系）：code -r + IPC socket 环境变量复用窗口
+            if qoderVSCodeBundles.contains(hostBundle),
+               let hostPath = host?.path, !hostPath.isEmpty {
+                if focusCodeWindow(hostPath: hostPath, hostBundle: hostBundle, cwd: cwd) {
+                    Log.info("已用 code -r 定位 Qoder IDE 窗口 \(cwd)", topic: "launcher")
+                    return true
+                }
+            }
+            // Qoder IDE 二级定位失败时，回退到 App 级激活
             if qoderVSCodeBundles.contains(hostBundle) {
-                if focusCodeWindow(hostPath: host?.path ?? "", cwd: cwd) {
-                    Log.info("已用 code -r 定位 Qoder 窗口 \(cwd)", topic: "launcher")
+                if activateByAppleScript(bundle: hostBundle) {
+                    Log.info("已激活 Qoder IDE \(hostBundle)（App 级回退）", topic: "launcher")
                     return true
                 }
             }
@@ -306,20 +313,80 @@ enum IDELauncher {
 
     // MARK: - 二级定位：Qoder / VS Code 系
 
+    /// 从运行中 VS Code 系进程的数据目录查找 IPC socket 路径。
+    ///
+    /// VS Code 系应用启动时会在用户数据目录下创建 `<version>-main.sock` 文件用于进程间通信。
+    /// 外部调用 `code` CLI 时需要设置 `VSCODE_IPC_HOOK_CLI` 环境变量指向该 socket，
+    /// 否则 CLI 无法找到运行中的实例而会打开新窗口。
+    ///
+    /// 注意：应用名与数据目录名不一定相同（如 "Qoder IDE.app" → "Qoder"，
+    /// "Qoder CN IDE.app" → "QoderCN"），因此通过 bundle ID 映射到已知的数据目录名。
+    private static func findCodeIPCSocket(hostBundle: String) -> String? {
+        // bundle ID → 数据目录名（VS Code 系应用的用户数据目录不一定与应用名相同）
+        let bundleToDataDir: [String: String] = [
+            "com.qoder.ide": "Qoder",
+            "com.aliyun.lingma.ide": "QoderCN",
+            "com.microsoft.VSCode": "Code",
+            "com.visualstudio.code.oss": "Code - OSS",
+        ]
+
+        let appSupport = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support")
+
+        // 优先用 bundle ID 映射的数据目录名
+        var candidateDirs: [String] = []
+        if let dirName = bundleToDataDir[hostBundle] {
+            candidateDirs.append(dirName)
+        }
+        // 兜底：尝试从 host.path 推导应用名作为目录名
+        // （某些 VS Code fork 可能用应用名作为数据目录）
+
+        for dirName in candidateDirs {
+            let dataDir = appSupport.appendingPathComponent(dirName)
+            guard let contents = try? FileManager.default.contentsOfDirectory(atPath: dataDir.path) else {
+                continue
+            }
+            let sockFiles = contents.filter { $0.hasSuffix("-main.sock") }
+            if let latest = sockFiles.sorted().last {
+                let sockPath = dataDir.appendingPathComponent(latest).path
+                if FileManager.default.fileExists(atPath: sockPath) {
+                    Log.debug("找到 VS Code 系 IPC socket: \(sockPath)", topic: "launcher")
+                    return sockPath
+                }
+            }
+        }
+        return nil
+    }
+
     /// 用 IDE 自带的 `code` 启动器 `-r`（reuse-window）聚焦该 workspace 窗口。
     ///
-    /// Qoder 是 VS Code 系 fork，窗口标题不含项目路径；但 IDE 自己知道哪个窗口开着哪个
+    /// Qoder 是 VS Code 系 fork，窗口标题不含项目路径；但 IDE 自己知道哪个窗口开着着哪个
     /// folder，`code -r <folder>` 会把它复用/聚焦到那个窗口——不需要辅助功能授权，最准。
-    private static func focusCodeWindow(hostPath: String, cwd: String) -> Bool {
+    ///
+    /// **关键**：必须设置 `VSCODE_IPC_HOOK_CLI` 环境变量指向运行中实例的 IPC socket，
+    /// 否则 CLI 进程无法通过 socket 连接到已有实例，会退化为打开新窗口。
+    /// socket 路径从 `hostPath` 推导出的应用数据目录中查找（`*-main.sock`）。
+    private static func focusCodeWindow(hostPath: String, hostBundle: String, cwd: String) -> Bool {
         guard !hostPath.isEmpty else { return false }
         let codeBin = (hostPath as NSString).appendingPathComponent("Contents/Resources/app/bin/code")
         guard FileManager.default.isExecutableFile(atPath: codeBin) else {
             Log.debug("未找到 \(hostPath) 的 code 启动器，回退 App 级唤起", topic: "launcher")
             return false
         }
+
         let task = Process()
         task.executableURL = URL(fileURLWithPath: codeBin)
         task.arguments = ["-r", cwd]
+
+        // 设置 IPC socket 环境变量，让 CLI 能连接到运行中的实例而非开新窗口
+        var env = ProcessInfo.processInfo.environment
+        if let sockPath = findCodeIPCSocket(hostBundle: hostBundle) {
+            env["VSCODE_IPC_HOOK_CLI"] = sockPath
+        } else {
+            Log.debug("未找到 \(hostBundle) 的 IPC socket，尝试无环境变量调用", topic: "launcher")
+        }
+        task.environment = env
+
         do {
             try task.run()
             task.waitUntilExit()

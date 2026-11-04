@@ -43,6 +43,8 @@ final class Settings: ObservableObject {
     @Published var bubbleHeight: Double = 26
     @Published var notifyWidth: Double = 380
     @Published var notifyHeight: Double = 74
+    /// 刘海屏下卡片内容到摄像头区域的额外间距（pt），可为负值使内容更贴近刘海
+    @Published var notchTopPadding: Double = 4
 
     // MARK: - 外观 (appearance)；颜色以 "r,g,b" 字符串存储
     @Published var backgroundColor = "0.05,0.05,0.07"
@@ -172,6 +174,7 @@ final class Settings: ObservableObject {
         bubbleHeight = v["bubbleHeight"]?.doubleValue ?? bubbleHeight
         notifyWidth = v["notifyWidth"]?.doubleValue ?? notifyWidth
         notifyHeight = v["notifyHeight"]?.doubleValue ?? notifyHeight
+        notchTopPadding = v["notchTopPadding"]?.doubleValue ?? notchTopPadding
         backgroundColor = v["backgroundColor"]?.stringValue ?? backgroundColor
         backgroundAlpha = v["backgroundAlpha"]?.doubleValue ?? backgroundAlpha
         accentColor = v["accentColor"]?.stringValue ?? accentColor
@@ -226,6 +229,7 @@ final class Settings: ObservableObject {
         values["bubbleHeight"] = .double(bubbleHeight)
         values["notifyWidth"] = .double(notifyWidth)
         values["notifyHeight"] = .double(notifyHeight)
+        values["notchTopPadding"] = .double(notchTopPadding)
         values["backgroundColor"] = .string(backgroundColor)
         values["backgroundAlpha"] = .double(backgroundAlpha)
         values["accentColor"] = .string(accentColor)

@@ -11,6 +11,8 @@ struct NotchNoticeView: View {
     let onTap: () -> Void
     /// 有值时触发提供方徽章上的铃铛摆动动画。
     var bellSwingStart: Date?
+    /// 观察 Settings 单例，使设置变更时视图能自动重新渲染。
+    @ObservedObject private var settings = Settings.shared
 
     @State private var bellAngle: Double = 0
     @State private var bellScale: CGFloat = 1.0
@@ -19,6 +21,9 @@ struct NotchNoticeView: View {
     private var tint: Color {
         AgentProvider(rawValue: notice.provider)?.tint ?? Color(red: 0.29, green: 0.62, blue: 1.0)
     }
+
+    /// 卡片内边距（实时取自 Settings，改动即时生效）
+    private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -52,23 +57,27 @@ struct NotchNoticeView: View {
                     }
                     Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 32)
+                .padding(.horizontal, inset)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // 钉住开关：把横幅保持展开，而非自行收拢。
+            // 钉住开关：统一使用主题色
             Button(action: onTogglePin) {
                 Image(systemName: pinned ? "pin.fill" : "pin")
                     .font(.system(size: 12, weight: .semibold))
                     .rotationEffect(.degrees(pinned ? 0 : 45))
-                    .foregroundStyle(pinned ? tint : Color.white.opacity(0.4))
+                    .foregroundStyle(pinned
+                        ? Color(red: settings.accentRGB.r,
+                                green: settings.accentRGB.g,
+                                blue: settings.accentRGB.b)
+                        : Color.white.opacity(0.4))
             }
             .buttonStyle(.plain)
             .padding(.top, 6)
-            .padding(.trailing, 32)  // 与左侧对称
+            .padding(.trailing, inset)  // 与左侧对称
             .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
         }
         .onAppear { startBellSwing() }

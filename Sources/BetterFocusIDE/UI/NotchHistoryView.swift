@@ -31,16 +31,19 @@ import SwiftUI
 struct NotchHistoryView: View {
     /// 历史控制器，提供通知条目数据
     @ObservedObject var controller: HistoryController
+    /// 观察 Settings 单例，使设置变更时视图能自动重新渲染（内边距等即时生效）。
+    @ObservedObject private var settings = Settings.shared
+    /// 钉住状态：为 true 时面板保持展开，不自动收起
+    var pinned = false
+    /// 点击图钉按钮的回调，用于切换钉住状态
+    var onTogglePin: () -> Void = {}
     /// 点击行的回调，用于跳转回对应 IDE
     var onRowTap: (HistoryEntry) -> Void
 
     // MARK: - 布局常量
 
-    /// 水平内边距 (14pt)
-    ///
-    /// 必须达到灵动岛轮廓的肩部宽度 (NotchLayout.shoulder = 14)，
-    /// 因为黑色遮罩在此处裁切，12pt 会裁掉每行 2pt 的内容。
-    private let horizontalInset: CGFloat = 14
+    /// 水平内边距（实时取自 Settings，改动即时生效）
+    private var horizontalInset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
     /// 垂直内边距 (12pt)
     ///
@@ -73,36 +76,50 @@ struct NotchHistoryView: View {
     // MARK: - 主视图
 
     var body: some View {
-        VStack(alignment: .leading, spacing: rowGap) {
-            header
-            if controller.entries.isEmpty {
-                emptyRow
-            } else {
-                ForEach(controller.entries) { entry in
-                    row(entry)
+        ZStack(alignment: .topTrailing) {
+            VStack(alignment: .leading, spacing: rowGap) {
+                header
+                if controller.entries.isEmpty {
+                    emptyRow
+                } else {
+                    ForEach(controller.entries) { entry in
+                        row(entry)
+                    }
                 }
             }
+            .padding(.horizontal, horizontalInset)
+            .padding(.vertical, verticalInset)
+
+            // 钉住开关：ZStack 覆盖层，与通知卡片保持一致的样式
+            Button(action: onTogglePin) {
+                Image(systemName: pinned ? "pin.fill" : "pin")
+                    .font(.system(size: 12, weight: .semibold))
+                    .rotationEffect(.degrees(pinned ? 0 : 45))
+                    .foregroundStyle(pinned
+                        ? Color(red: settings.accentRGB.r,
+                                green: settings.accentRGB.g,
+                                blue: settings.accentRGB.b)
+                        : Color.white.opacity(0.4))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 12)  // 与标题栏垂直对齐
+            .padding(.trailing, horizontalInset)
+            .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
         }
-        .padding(.horizontal, horizontalInset)
-        .padding(.vertical, verticalInset)
     }
 
     // MARK: - 标题栏
 
-    /// 标题栏：左侧"最近通知"，右侧条目计数
-    ///
-    /// 字体 11pt，标题半粗体透明度 0.6，计数透明度 0.4
+    /// 标题栏：左侧"最近通知 + 计数"，右侧留空给图钉覆盖层
     private var header: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 6) {
             Text("最近通知")
                 .font(.system(size: 11, weight: .semibold))
-                .padding(.horizontal, 30)
                 .foregroundStyle(.white.opacity(0.6))
-            Spacer(minLength: 4)
             Text("\(controller.entries.count) 条")
                 .font(.system(size: 11))
-                .padding(.horizontal, 30)
                 .foregroundStyle(.white.opacity(0.4))
+            Spacer()
         }
         .frame(height: headerHeight)
     }
@@ -150,7 +167,7 @@ struct NotchHistoryView: View {
                                   green: entry.tintRGB.green,
                                   blue: entry.tintRGB.blue)
                                 .opacity(0.9),
-                            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
                         )
 
                     // 左侧内容：标题 + 回答文本
