@@ -217,6 +217,10 @@ enum SettingCatalog {
             defaultValue: .rgb(0.58, 0.45, 0.82), get: getRGB(\.qoderTint), set: setRGB(\.qoderTint)),
         SettingDefinition(key: "opencodeTint", label: "OpenCode 主题色", kind: .color, group: "外观",
             defaultValue: .rgb(0.06, 0.73, 0.51), get: getRGB(\.opencodeTint), set: setRGB(\.opencodeTint)),
+        SettingDefinition(key: "cursorTint", label: "Cursor 主题色", kind: .color, group: "外观",
+            defaultValue: .rgb(0.00, 0.55, 0.75), get: getRGB(\.cursorTint), set: setRGB(\.cursorTint)),
+        SettingDefinition(key: "workbuddyTint", label: "WorkBuddy 主题色", kind: .color, group: "外观",
+            defaultValue: .rgb(0.85, 0.55, 0.20), get: getRGB(\.workbuddyTint), set: setRGB(\.workbuddyTint)),
         SettingDefinition(key: "radiusExpanded", label: "卡片圆角", kind: .slider, group: "外观",
             min: 8, max: 34, step: 1, unit: "pt", digits: 0,
             defaultValue: .double(22), get: getD(\.radiusExpanded), set: setD(\.radiusExpanded)),
@@ -310,7 +314,7 @@ enum SettingCatalog {
 
         // ---------------- 行为 ----------------
         SettingDefinition(key: "pinByDefault", label: "卡片默认固定展示", kind: .toggle, group: "行为",
-            note: "关闭后新卡片只更新气泡计数，悬停才展开",
+            note: "关闭后卡片仍会弹出一次，但不再保持：鼠标移出或到时自动收起，气泡保留待处理提示",
             defaultValue: .bool(true), get: getB(\.pinByDefault), set: setB(\.pinByDefault)),
         SettingDefinition(key: "clickGuard", label: "防误触窗口", kind: .slider, group: "行为",
             min: 0, max: 2.0, step: 0.05, unit: "秒", digits: 2,

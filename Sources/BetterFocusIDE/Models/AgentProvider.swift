@@ -5,12 +5,15 @@ import SwiftUI
 
 /// 通过 Socket 发送事件的编码智能体提供方。
 ///
-/// 每个值对应 hook 侧 `_identify_product()` 决策树的一种输出：
+/// 每个值对应 hook 侧 `_identify_product()` 决策树的一种输出，或新宿主自身的
+/// provider 标识：
 /// - `qoder`：独立 Qoder（QODER_STANDALONE=1）
 /// - `opencode`：OpenCode JS 插件
 /// - `jetbrains_plugin`：JetBrains IDE 内的 Qoder 插件
 /// - `qoder_ide`：Qoder IDE（通义灵码）
 /// - `qoder_cli`：终端 CLI 模式（无头脚本）
+/// - `cursor`：Cursor 用户级 hooks（`~/.cursor/hooks.json`）
+/// - `workbuddy`：WorkBuddy 用户级 hooks（`~/.workbuddy/settings.json`）
 /// - `unknown`：无法识别
 enum AgentProvider: String, CaseIterable, Codable {
     case qoder
@@ -18,6 +21,8 @@ enum AgentProvider: String, CaseIterable, Codable {
     case jetbrains_plugin
     case qoder_ide
     case qoder_cli
+    case cursor
+    case workbuddy
     case unknown
 
     /// 界面展示名称（用于徽章首字母、来源文案等）。
@@ -31,6 +36,8 @@ enum AgentProvider: String, CaseIterable, Codable {
         case .jetbrains_plugin: return ""  // 必须由 host.name 提供具体 IDE 名称
         case .qoder_ide: return "Qoder"
         case .qoder_cli: return "Qoder CLI"
+        case .cursor: return "Cursor"
+        case .workbuddy: return "WorkBuddy"
         case .unknown: return "Unknown"
         }
     }
@@ -54,18 +61,26 @@ enum AgentProvider: String, CaseIterable, Codable {
         case .opencode:
             let c = Settings.shared.opencodeTintRGB
             return (c.r, c.g, c.b)
+        case .cursor:
+            let c = Settings.shared.cursorTintRGB
+            return (c.r, c.g, c.b)
+        case .workbuddy:
+            let c = Settings.shared.workbuddyTintRGB
+            return (c.r, c.g, c.b)
         case .unknown:
             return (red: 0.5, green: 0.5, blue: 0.5)
         }
     }
 
-    /// 归组到 IDE 跳转用的提供方键（`qoder` / `opencode`）。
+    /// 归组到 IDE 跳转用的提供方键（`qoder` / `opencode` / `cursor` / `workbuddy`）。
     ///
     /// `IDELauncher.ideBundles` 按大类索引，产品细分值需映射回组键才能查到
     /// 对应的 bundle id 列表。
     var providerGroup: String {
         switch self {
         case .opencode: return "opencode"
+        case .cursor: return "cursor"
+        case .workbuddy: return "workbuddy"
         case .qoder, .jetbrains_plugin, .qoder_ide, .qoder_cli, .unknown:
             return "qoder"
         }
