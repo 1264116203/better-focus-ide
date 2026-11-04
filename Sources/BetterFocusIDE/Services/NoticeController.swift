@@ -195,9 +195,13 @@ final class NoticeController: ObservableObject {
 
     // MARK: - 自动收起恢复
 
-    /// 保存当前通知供后续恢复展示（自动收起时调用，在 dismiss 之前）。
-    func saveForRestore() {
-        lastDismissedNotice = notice
+    /// 保存当前通知供后续恢复展示（收起前调用，在 dismiss 之前）。
+    /// 返回 true 表示实际保存了通知（当前有活动通知时）。
+    @discardableResult
+    func saveForRestore() -> Bool {
+        guard let n = notice else { return false }
+        lastDismissedNotice = n
+        return true
     }
 
     /// 恢复上次自动收起的通知：取出并清除缓存。
