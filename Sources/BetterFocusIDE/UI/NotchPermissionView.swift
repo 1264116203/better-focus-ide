@@ -16,10 +16,16 @@ struct NotchPermissionView: View {
     /// 卡片内边距（实时取自 Settings）。
     private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
-    /// 来源展示名：优先使用 hook 上报的真实 IDE 名称，否则回退到提供方名。
+    /// 来源展示名：使用 AgentProvider 的统一辅助方法，优先 host.name（具体 IDE 名称），
+    /// 回退到 displayName，JetBrains 插件模式下兜底为 "JetBrains"。
     private var sourceName: String {
-        if let hostName = request?.host?.name, !hostName.isEmpty { return hostName }
-        return request?.provider.displayName ?? ""
+        guard let req = request else { return "" }
+        return AgentProvider.effectiveName(provider: req.provider, hostName: req.host?.name)
+    }
+
+    /// 徽章文本：取来源展示名的首字母大写。
+    private var badgeText: String {
+        return String(sourceName.prefix(1)).uppercased()
     }
 
     var body: some View {
@@ -60,13 +66,14 @@ struct NotchPermissionView: View {
     /// 头部：来源徽章 + "来源 · 动作标题" + 待处理数徽标。
     private func header(_ req: PermissionRequest) -> some View {
         HStack(spacing: 8) {
-            Text(String(sourceName.prefix(1)))
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 24, height: 24)
-                .background(req.provider.tint.opacity(0.9),
-                            in: RoundedRectangle(cornerRadius: 6))
-                .layoutPriority(1)
+            // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章
+            IDEIconProvider.badgeView(
+                hostName: req.host?.name,
+                fallbackText: badgeText,
+                tint: req.provider.tint,
+                size: 24
+            )
+            .layoutPriority(1)
             Text("\(sourceName) · \(req.title)")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.9))

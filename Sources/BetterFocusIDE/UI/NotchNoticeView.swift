@@ -25,19 +25,25 @@ struct NotchNoticeView: View {
     /// 卡片内边距（实时取自 Settings，改动即时生效）
     private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
+    /// 徽章文本：取 providerName（已由 Controller 层处理为具体 IDE 名称）的首字母大写。
+    /// 例如："IntelliJ IDEA" → "I"，"PyCharm" → "P"，"Qoder" → "Q"
+    private var badgeText: String {
+        String(notice.providerName.prefix(1)).uppercased()
+    }
+
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Button(action: onTap) {
                 HStack(spacing: 10) {
-                    // 提供方徽章 + 铃铛摆动动画
-                    Text(String(notice.providerName.prefix(1)))
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 24, height: 24)
-                        .background(tint.opacity(0.9),
-                                    in: RoundedRectangle(cornerRadius: 6))
-                        .rotationEffect(.degrees(bellAngle))
-                        .scaleEffect(bellScale)
+                    // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章
+                    IDEIconProvider.badgeView(
+                        hostName: notice.host?.name,
+                        fallbackText: badgeText,
+                        tint: tint,
+                        size: 24
+                    )
+                    .rotationEffect(.degrees(bellAngle))
+                    .scaleEffect(bellScale)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(notice.title)

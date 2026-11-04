@@ -22,10 +22,16 @@ struct NotchAgentQuestionView: View {
     /// 卡片内边距（实时取自 Settings，改动即时生效）
     private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
-    /// 来源展示名：优先使用 hook 上报的真实 IDE 名称，否则回退到提供方名。
+    /// 来源展示名：使用 AgentProvider 的统一辅助方法，优先 host.name（具体 IDE 名称），
+    /// 回退到 displayName，JetBrains 插件模式下兜底为 "JetBrains"。
     private var sourceName: String {
-        if let hostName = prompt?.host?.name, !hostName.isEmpty { return hostName }
-        return prompt?.provider.displayName ?? ""
+        guard let prompt = prompt else { return "" }
+        return AgentProvider.effectiveName(provider: prompt.provider, hostName: prompt.host?.name)
+    }
+
+    /// 徽章文本：取来源展示名的首字母大写。
+    private var badgeText: String {
+        return String(sourceName.prefix(1)).uppercased()
     }
 
     var body: some View {
@@ -74,14 +80,14 @@ struct NotchAgentQuestionView: View {
     /// 头部：提供方徽章 + "来源 · 问题标题" + 多问翻页步进器。
     private func header(prompt: AgentQuestionPrompt, question: AgentQuestion) -> some View {
         HStack(spacing: 8) {
-            // 提供方徽章（首字母取自来源名）
-            Text(String(sourceName.prefix(1)))
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 24, height: 24)
-                .background(prompt.provider.tint.opacity(0.9),
-                            in: RoundedRectangle(cornerRadius: 6))
-                .layoutPriority(1)
+            // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章
+            IDEIconProvider.badgeView(
+                hostName: prompt.host?.name,
+                fallbackText: badgeText,
+                tint: prompt.provider.tint,
+                size: 24
+            )
+            .layoutPriority(1)
             Text("\(sourceName) · \(question.header)")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.9))

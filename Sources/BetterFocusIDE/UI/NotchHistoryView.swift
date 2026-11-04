@@ -157,18 +157,15 @@ struct NotchHistoryView: View {
                                  - badgeSize - gap * 2 - metaWidth)
 
                 HStack(spacing: gap) {
-                    // 提供者徽章：圆角方形，显示首字母，主题色背景
-                    Text(entry.badgeText)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: badgeSize, height: badgeSize)
-                        .background(
-                            Color(red: entry.tintRGB.red,
-                                  green: entry.tintRGB.green,
-                                  blue: entry.tintRGB.blue)
-                                .opacity(0.9),
-                            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        )
+                    // 提供者徽章：优先使用真实 IDE 图标，回退到文字徽章
+                    IDEIconProvider.badgeView(
+                        hostName: entry.host?.name,
+                        fallbackText: entry.badgeText,
+                        tint: Color(red: entry.tintRGB.red,
+                                    green: entry.tintRGB.green,
+                                    blue: entry.tintRGB.blue),
+                        size: badgeSize
+                    )
 
                     // 左侧内容：标题 + 回答文本
                     VStack(alignment: .leading, spacing: 2) {
