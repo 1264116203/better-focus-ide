@@ -94,16 +94,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchService.showHistory()
     }
 
-    /// 一键安装 Qoder Hook 与 OpenCode Plugin，完成后弹窗汇总结果。
+    /// 一键安装 Qoder / OpenCode / Cursor / WorkBuddy 四处集成，完成后弹窗汇总结果。
     @objc private func installAll() {
         let summary = notchService.installAll()
         showAlert(title: "安装完成", message: summary)
     }
 
-    /// 卸载 Qoder Hook 与 OpenCode Plugin。
+    /// 卸载四个宿主的 Hook / Plugin。
     @objc private func uninstallAll() {
         notchService.uninstallAll()
-        showAlert(title: "已卸载", message: "Qoder Hook 与 OpenCode Plugin 已移除。")
+        showAlert(title: "已卸载", message: "Qoder / OpenCode / Cursor / WorkBuddy 的集成已移除。")
     }
 
     @objc private func openDoctor() {

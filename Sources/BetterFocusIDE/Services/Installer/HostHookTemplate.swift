@@ -10,8 +10,9 @@ import Foundation
 /// - Cursor：`~/.cursor/hooks.json`，camelCase（`stop` / `sessionEnd`），权限类 hook
 ///   返回非法 JSON 会阻塞工具调用，因此只注册观测型事件，恒回 `{}`。
 /// - WorkBuddy：`~/.workbuddy/settings.json` 的 `hooks`，PascalCase
-///   （`Stop` / `SessionEnd` / `PreToolUse` / `PermissionRequest`），输出
-///   `hookSpecificOutput.permissionDecision`，与既有 Qoder hook 同构。
+///   （`Stop` / `SessionEnd` / `PreToolUse` / `Notification` / `PermissionRequest`），
+///   提问通过 `hookSpecificOutput.permissionDecision` 回传答案；权限只观测、
+///   stdout 保持静默，让宿主原生对话框继续负责审批。
 ///
 /// 应答走同一条通道：灵动岛写 `answers/<session>...json`，脚本轮询取走。
 /// 占位符在安装时替换（路径 / 超时 / provider / 事件方言 / 宿主兜底身份）。
@@ -278,13 +279,13 @@ enum HostHookTemplate {
             send(msg)
 
 
-        def run_question(session_id, payload, questions):
+        def run_question(session_id, payload, questions, hook_event):
             request_id = safe_id(payload.get("request_id") or ("q" + str(int(time.time()))))
             msg = base_event("question_requested", session_id, payload)
             msg["request_id"] = request_id
             msg["payload"] = {"questions": questions, "request_id": request_id}
             if not send(msg):
-                emit("allow", "BetterFocusIDE is not running; ask in the host dialog.", "PreToolUse")
+                emit("allow", "BetterFocusIDE is not running; ask in the host dialog.", hook_event)
                 return
             since = time.time()
             deadline = since + QUESTION_TIMEOUT
@@ -302,7 +303,8 @@ enum HostHookTemplate {
                 if answered == len(questions) and questions:
                     reason = ("The person answered on the BetterFocusIDE island. "
                               "Use these answers and continue." + chr(10) + chr(10).join(lines))
-                    emit("deny", reason, "PreToolUse")
+                    # deny 会拦掉宿主自己的提问对话框，reason 把答案回灌给 Agent。
+                    emit("deny", reason, hook_event)
                     return
                 time.sleep(1)
             timeout_msg = base_event("question_timeout", session_id, payload)
@@ -310,11 +312,13 @@ enum HostHookTemplate {
                                       "request_id": request_id}
             send(timeout_msg)
             emit("deny", "The person left the island question unanswered. Continue without it.",
-                 "PreToolUse")
+                 hook_event)
 
 
         def run_permission(session_id, payload):
-            # Notice only: the host still owns the permission decision.
+            # Notice only: print NOTHING on stdout so the host keeps its own
+            # permission dialog. WorkBuddy's Notification is observational and
+            # PermissionRequest must not be hijacked by a half-known schema.
             tool_name = payload.get("tool_name") or ""
             tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
             request_id = safe_id(payload.get("tool_use_id")
@@ -329,14 +333,14 @@ enum HostHookTemplate {
                     break
             if not detail and tool_input:
                 detail = json.dumps(tool_input, ensure_ascii=False)[:400]
+            if not detail:
+                detail = str(payload.get("message") or "")[:400]
             msg = base_event("permission_notice", session_id, payload)
             msg["payload"] = {"request_id": request_id, "tool_name": tool_name,
                               "tool_input": tool_input,
                               "resources": [detail] if detail else [],
                               "flavor": "permission"}
             send(msg)
-            emit("ask", "BetterFocusIDE only notifies about permissions; decide in the host dialog.",
-                 "PermissionRequest")
 
 
         def main():
@@ -362,7 +366,8 @@ enum HostHookTemplate {
                 cursor_ok()
                 return
 
-            # Claude/WorkBuddy dialect. Silence on stdout means "no decision".
+            # Claude/WorkBuddy dialect. Silence on stdout means "no decision":
+            # the host keeps its own dialogs and the agent loop is never blocked.
             if event == "Stop":
                 if alerts_enabled("turn"):
                     emit_turn_finished(session_id, payload)
@@ -370,13 +375,35 @@ enum HostHookTemplate {
             if event == "SessionEnd":
                 emit_session_ended(session_id, payload)
                 return
-            if event == "PermissionRequest":
+
+            # Permission surfaces. Notification is the documented, observational
+            # entry point; PermissionRequest (newer 27+ event family) carries the
+            # tool payload. Both are observe-only, and the island-side
+            # NoticeController debounces the duplicate banner.
+            if event in ("Notification", "PermissionRequest"):
+                kind = str(payload.get("notification_type") or "")
+                if event == "Notification" and kind and kind != "permission_prompt":
+                    return
                 if mode in AUTO_MODES or not alerts_enabled("permission") or not os.path.exists(SOCKET_PATH):
-                    emit("ask", "BetterFocusIDE permission notices are off; decide in the host dialog.",
-                         "PermissionRequest")
+                    return
+                tool_name = str(payload.get("tool_name") or "")
+                if "AskUserQuestion" in tool_name:
+                    # Some builds route the question tool through PermissionRequest
+                    # rather than PreToolUse. It is blocking, so answers can be
+                    # fed back to the agent via a deny reason.
+                    if not alerts_enabled("question"):
+                        emit("allow", "BetterFocusIDE question cards are off; ask in the host dialog.",
+                             event)
+                        return
+                    questions = normalise(payload.get("tool_input") or {})
+                    if questions:
+                        run_question(session_id, payload, questions, event)
+                    else:
+                        emit("allow", "Nothing to ask; continue.", event)
                     return
                 run_permission(session_id, payload)
                 return
+
             if event == "PreToolUse":
                 tool_name = str(payload.get("tool_name") or "")
                 if "AskUserQuestion" in tool_name:
@@ -386,7 +413,7 @@ enum HostHookTemplate {
                         return
                     questions = normalise(payload.get("tool_input") or {})
                     if questions:
-                        run_question(session_id, payload, questions)
+                        run_question(session_id, payload, questions, "PreToolUse")
                     else:
                         emit("allow", "Nothing to ask; continue.", "PreToolUse")
                 return
