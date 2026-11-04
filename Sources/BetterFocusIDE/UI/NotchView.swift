@@ -99,6 +99,7 @@ struct NotchView: View {
     }
     
     /// 呼吸灯辉光覆盖层（独立于气泡，渲染在更大区域内）
+    /// 使用 scaleEffect 放大辉光，使其超出气泡外沿，形成更明显的发光效果
     private var breathingGlowLayer: some View {
         BreathingGlowOverlay(
             tint: service.breathingTint,
@@ -107,6 +108,8 @@ struct NotchView: View {
                 geometry: service.geometry
             )
         )
+        // 放大辉光形状，使其超出气泡边界，形成更明显的外发光效果
+        .scaleEffect(2.0)
         .allowsHitTesting(false)
     }
     
