@@ -139,24 +139,44 @@ struct NotchGeometry: Equatable {
     
     var stripHeight: CGFloat { cameraHeight }
     
-    /// 收起态尺寸（宽度不超过摄像头宽度、且不挤占屏幕两侧）。
+    /// 收起态尺寸（使用 Settings 中的 bubbleWidth/bubbleHeight 设置）。
+    /// bubbleWidthPadding/bubbleHeightPadding 用于增加额外空间以容纳呼吸灯辉光效果
     var collapsed: CGSize {
-        CGSize(width: min(screen.width - 24, cameraWidth), height: stripHeight)
+        let baseWidth = CGFloat(Settings.shared.bubbleWidth)
+        let baseHeight = CGFloat(Settings.shared.bubbleHeight)
+        let widthPadding = CGFloat(Settings.shared.bubbleWidthPadding)
+        let heightPadding = CGFloat(Settings.shared.bubbleHeightPadding)
+        return CGSize(
+            width: baseWidth + widthPadding,
+            height: baseHeight + heightPadding
+        )
     }
     
-    /// 静止尺寸：显示内容时取 collapsed，否则按是否悬浮分别计算。
+    /// 空闲气泡尺寸（无卡片时刘海处的黑色气泡形状）。
+    /// 直接使用用户设置的 bubbleWidth/bubbleHeight。
+    var idleBubbleSize: CGSize {
+        let width = CGFloat(Settings.shared.bubbleWidth)
+        let height = CGFloat(Settings.shared.bubbleHeight)
+        return CGSize(width: width, height: height)
+    }
+    
+    /// 静止尺寸：显示内容时取 collapsed，否则使用空闲气泡尺寸。
     func restingSize(showsContent: Bool) -> CGSize {
         if showsContent { return collapsed }
-        guard floats else { return CGSize(width: cameraWidth, height: cameraHeight) }
-        let shoulders = NotchLayout.shoulder(height: stripHeight) * 2
-        return CGSize(width: min(cameraWidth, cameraWidth + shoulders), height: cameraHeight)
+        return idleBubbleSize
     }
     
-    /// 给定尺寸在屏幕坐标系中的 frame（水平居中）。
+    /// 给定尺寸在屏幕坐标系中的 frame。
     ///
     /// Frame 顶边始终对齐屏幕顶边。收起态气泡位于刘海位置，展开态卡片向下延伸。
+    /// 水平位置根据 showsContent 参数选择不同的偏移量：
+    /// - showsContent = false（收起态气泡）：使用 bubbleHorizontalOffset
+    /// - showsContent = true（展开态卡片）：使用 cardHorizontalOffset
     func frame(for size: CGSize, showsContent: Bool = true) -> CGRect {
-        let x = screen.midX - size.width / 2
+        let offsetX = showsContent
+            ? CGFloat(Settings.shared.cardHorizontalOffset)
+            : CGFloat(Settings.shared.bubbleHorizontalOffset)
+        let x = screen.midX - size.width / 2 + offsetX
         let y = screen.maxY - size.height
         return CGRect(x: x, y: y, width: size.width, height: size.height)
     }

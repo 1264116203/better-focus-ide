@@ -41,10 +41,18 @@ final class Settings: ObservableObject {
     @Published var optionRowMin: Double = 30
     @Published var bubbleWidth: Double = 44
     @Published var bubbleHeight: Double = 26
+    /// 气泡宽度额外余量（用于呼吸灯辉光等效果）
+    @Published var bubbleWidthPadding: Double = 0
+    /// 气泡高度额外余量（用于呼吸灯辉光等效果）
+    @Published var bubbleHeightPadding: Double = 0
     @Published var notifyWidth: Double = 380
     @Published var notifyHeight: Double = 74
     /// 刘海屏下卡片内容到摄像头区域的额外间距（pt），可为负值使内容更贴近刘海
     @Published var notchTopPadding: Double = 4
+    /// 气泡水平偏移（pt）：正值向右，负值向左，0 表示居中。用于将气泡移到屏幕右上角
+    @Published var bubbleHorizontalOffset: Double = 0
+    /// 卡片水平偏移（pt）：正值向右，负值向左，0 表示居中。展开态卡片通常保持居中
+    @Published var cardHorizontalOffset: Double = 0
 
     // MARK: - 外观 (appearance)；颜色以 "r,g,b" 字符串存储
     @Published var backgroundColor = "0.05,0.05,0.07"
@@ -172,9 +180,13 @@ final class Settings: ObservableObject {
         optionRowMin = v["optionRowMin"]?.doubleValue ?? optionRowMin
         bubbleWidth = v["bubbleWidth"]?.doubleValue ?? bubbleWidth
         bubbleHeight = v["bubbleHeight"]?.doubleValue ?? bubbleHeight
+        bubbleWidthPadding = v["bubbleWidthPadding"]?.doubleValue ?? bubbleWidthPadding
+        bubbleHeightPadding = v["bubbleHeightPadding"]?.doubleValue ?? bubbleHeightPadding
         notifyWidth = v["notifyWidth"]?.doubleValue ?? notifyWidth
         notifyHeight = v["notifyHeight"]?.doubleValue ?? notifyHeight
         notchTopPadding = v["notchTopPadding"]?.doubleValue ?? notchTopPadding
+        bubbleHorizontalOffset = v["bubbleHorizontalOffset"]?.doubleValue ?? bubbleHorizontalOffset
+        cardHorizontalOffset = v["cardHorizontalOffset"]?.doubleValue ?? cardHorizontalOffset
         backgroundColor = v["backgroundColor"]?.stringValue ?? backgroundColor
         backgroundAlpha = v["backgroundAlpha"]?.doubleValue ?? backgroundAlpha
         accentColor = v["accentColor"]?.stringValue ?? accentColor
@@ -227,9 +239,13 @@ final class Settings: ObservableObject {
         values["optionRowMin"] = .double(optionRowMin)
         values["bubbleWidth"] = .double(bubbleWidth)
         values["bubbleHeight"] = .double(bubbleHeight)
+        values["bubbleWidthPadding"] = .double(bubbleWidthPadding)
+        values["bubbleHeightPadding"] = .double(bubbleHeightPadding)
         values["notifyWidth"] = .double(notifyWidth)
         values["notifyHeight"] = .double(notifyHeight)
         values["notchTopPadding"] = .double(notchTopPadding)
+        values["bubbleHorizontalOffset"] = .double(bubbleHorizontalOffset)
+        values["cardHorizontalOffset"] = .double(cardHorizontalOffset)
         values["backgroundColor"] = .string(backgroundColor)
         values["backgroundAlpha"] = .double(backgroundAlpha)
         values["accentColor"] = .string(accentColor)
@@ -299,7 +315,9 @@ final class Settings: ObservableObject {
         turnNotifyJump = true; permissionNoticeJump = true
         cardWidth = 540; cardMinHeight = 0; cardInset = 32; bodyFont = 12
         optionFont = 12; descFont = 10.5; optionRowMin = 30
-        bubbleWidth = 44; bubbleHeight = 26; notifyWidth = 380; notifyHeight = 100
+        bubbleWidth = 44; bubbleHeight = 26; bubbleWidthPadding = 0; bubbleHeightPadding = 0
+        notifyWidth = 380; notifyHeight = 100; notchTopPadding = 4
+        bubbleHorizontalOffset = 0; cardHorizontalOffset = 0
         backgroundColor = "0.05,0.05,0.07"; backgroundAlpha = 0.96
         accentColor = "0.29,0.62,1.0"; qoderTint = "0.58,0.45,0.82"; opencodeTint = "0.06,0.73,0.51"
         radiusExpanded = 22; radiusBubble = 13

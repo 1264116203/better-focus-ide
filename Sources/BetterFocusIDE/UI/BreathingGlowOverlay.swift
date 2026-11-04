@@ -24,11 +24,11 @@ struct BreathingGlowOverlay: View {
     private let breathePeriod: TimeInterval = 1.8
     
     /// 辉光层配置（多层叠加实现更强效果）
-    /// 参数大幅增强，使气泡（小尺寸）上的辉光也能清晰可见
+    /// 参数调整为紧凑围绕气泡一圈的辉光
     private let glowLayers: [(lineWidth: CGFloat, blur: CGFloat, maxOpacity: Double)] = [
-        (24, 30, 0.95),  // 外层：超大模糊，远距离辉光
-        (14, 18, 0.8),   // 中层：强扩散
-        (8, 8, 0.65),    // 内层：明显描边
+        (8, 10, 0.9),   // 外层：适度扩散
+        (5, 6, 0.75),   // 中层：中等扩散
+        (3, 3, 0.6),    // 内层：紧贴描边
     ]
     
     var body: some View {

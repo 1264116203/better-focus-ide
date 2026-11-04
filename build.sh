@@ -44,9 +44,13 @@ if [ -d "$RESOURCE_BUNDLE" ]; then
     cp -R "$RESOURCE_BUNDLE" "$APP_DIR/Contents/Resources/"
 fi
 
-# Sign the app (ad-hoc)
-echo "▸ Signing $APP_NAME.app (ad-hoc)..."
-codesign --force --deep --sign - --entitlements "$ENTITLEMENTS" "$APP_DIR"
+# Sign the app (ad-hoc with hardened runtime for more stable TCC permissions)
+echo "▸ Signing $APP_NAME.app (ad-hoc with hardened runtime)..."
+codesign --force --deep --sign - --options=runtime --entitlements "$ENTITLEMENTS" "$APP_DIR"
+
+# Clear quarantine attribute to reduce permission prompts
+echo "▸ Clearing quarantine attribute..."
+xattr -dr com.apple.quarantine "$APP_DIR" 2>/dev/null || true
 
 echo "✓ Build complete: $APP_DIR"
 echo ""
@@ -56,5 +60,5 @@ echo ""
 echo "To install to /Applications:"
 echo "  cp -R $APP_DIR /Applications/"
 echo ""
-echo "Note: First launch may require bypassing Gatekeeper:"
-echo "  xattr -dr com.apple.quarantine /Applications/$APP_NAME.app"
+echo "Note: If macOS still shows security prompt, run:"
+echo "  sudo xattr -dr com.apple.quarantine /Applications/$APP_NAME.app"

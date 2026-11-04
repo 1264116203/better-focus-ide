@@ -279,6 +279,8 @@ final class NotchService: ObservableObject {
             move: { [weak self] point in self?.mouseMoved(point) },
             rightClick: { [weak self] point in self?.showContextMenu(at: point) }
         )
+        // 应用当前呼吸辉光状态（辉光层挂在 AppKit 画布上，需在窗口创建后刷新）。
+        updateBreathingTint()
         startHoverTimer()
     }
     
@@ -315,7 +317,7 @@ final class NotchService: ObservableObject {
         )
         
         if !expanded {
-            surfaceSize = geometry.restingSize(showsContent: false)
+            surfaceSize = geometry.restingSize(showsContent: true)  // 收起态使用 bubbleWidth/bubbleHeight
         }
         
         windowHost?.present(
@@ -733,20 +735,35 @@ final class NotchService: ObservableObject {
         updateBreathingTint()
     }
     
-    /// 更新呼吸灯覆盖层的主题色。
+    /// 更新气泡外缘呼吸辉光的颜色与开关。
     ///
-    /// 只有当通知卡片未操作自动收起后（hasUnprocessedNotice = true），
+    /// 测试期间：总是以主题色显示。
+    /// 正式逻辑：只有当通知卡片未操作自动收起后（hasUnprocessedNotice = true），
     /// 才显示呼吸灯提醒，颜色取该通知的提供方主题色。
+    ///
+    /// 辉光由 AppKit 画布层（glowShape）绘制，而非 SwiftUI 层——因为黑色岛面轮廓
+    /// 由 AppKit 遮罩裁剪，SwiftUI 内容无法越出气泡外缘。
     private func updateBreathingTint() {
-        // DEBUG: 强制显示蓝色辉光以测试渲染
-        breathingTint = Color.blue
+        // 测试模式：总是显示主题色辉光
+        let accent = NotchLayout.accentColor
+        breathingTint = Color(red: accent.r, green: accent.g, blue: accent.b)
+        let ns = NSColor(srgbRed: CGFloat(accent.r),
+                         green: CGFloat(accent.g),
+                         blue: CGFloat(accent.b),
+                         alpha: 1)
+        windowHost?.setGlow(color: ns, breathing: !Settings.shared.reduceMotionResolved)
+
+        // 正式逻辑（暂时注释）
         /*
         if hasUnprocessedNotice {
-            // 有未处理通知：显示呼吸灯
             breathingTint = unprocessedNoticeTint
+            if let c = unprocessedNoticeTint {
+                let ns = NSColor(c)
+                windowHost?.setGlow(color: ns, breathing: !Settings.shared.reduceMotionResolved)
+            }
         } else {
-            // 无未处理通知：关闭呼吸灯
             breathingTint = nil
+            windowHost?.setGlow(color: nil, breathing: false)
         }
         */
     }
@@ -1096,7 +1113,7 @@ final class NotchService: ObservableObject {
         restartSweepTimerIfNeeded()
         guard windowHost != nil else { return }
         let size = expanded ? targetSizeForCurrentCard()
-                            : geometry.restingSize(showsContent: false)
+                            : geometry.restingSize(showsContent: true)  // 收起态也使用 bubbleWidth/bubbleHeight
         // 给 surfaceSize 赋值（哪怕是相同值）会重新发布，使 SwiftUI 内容重渲染、
         // 采纳新的字号 / 颜色。
         surfaceSize = size
