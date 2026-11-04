@@ -20,8 +20,10 @@ struct NotchNoticeView: View {
 
     @State private var bellAngle: Double = 0
     @State private var bellScale: CGFloat = 1.0
-    /// 拖动关闭手势的水平偏移量。
-    @State private var dragOffset: CGFloat = 0
+    /// 抽屉效果：内容向右偏移量（跟随手指）。
+    @State private var drawerOffset: CGFloat = 0
+    /// 抽屉效果：可见宽度（从卡片满宽逐渐缩小到 0，模拟收入右侧抽屉）。
+    @State private var drawerVisibleWidth: CGFloat? = nil
 
     /// 拖动关闭触发阈值（点）。
     private let swipeDismissThreshold: CGFloat = 80
@@ -40,118 +42,128 @@ struct NotchNoticeView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Button(action: onTap) {
-                HStack(spacing: 10) {
-                    // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章
-                    IDEIconProvider.badgeView(
-                        hostName: notice.host?.name,
-                        bundleID: notice.host?.bundle,
-                        fallbackText: badgeText,
-                        tint: tint,
-                        size: 28
-                    )
-                    .rotationEffect(.degrees(bellAngle))
-                    .scaleEffect(bellScale)
+        GeometryReader { geo in
+            let fullW = geo.size.width
+            // 可见宽度：拖动时随偏移缩小（抽屉效果），未拖动时为满宽。
+            let visW = drawerVisibleWidth ?? fullW
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("任务完成")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.95))
-                            .lineLimit(1)
-                        Text(notice.body)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .lineLimit(1)
-                        if !notice.project.isEmpty {
-                            Text(notice.project)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.white.opacity(0.45))
+            ZStack(alignment: .topTrailing) {
+                Button(action: onTap) {
+                    HStack(spacing: 10) {
+                        // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章
+                        IDEIconProvider.badgeView(
+                            hostName: notice.host?.name,
+                            bundleID: notice.host?.bundle,
+                            fallbackText: badgeText,
+                            tint: tint,
+                            size: 28
+                        )
+                        .rotationEffect(.degrees(bellAngle))
+                        .scaleEffect(bellScale)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("任务完成")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.95))
                                 .lineLimit(1)
+                            Text(notice.body)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .lineLimit(1)
+                            if !notice.project.isEmpty {
+                                Text(notice.project)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.white.opacity(0.45))
+                                    .lineLimit(1)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                        // 未读通知计数徽章：队列中还有更多通知时显示
+                        if controller.queueCount > 1 {
+                            Text("+\(controller.queueCount)")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(.white.opacity(0.15),
+                                            in: Capsule())
                         }
                     }
-                    Spacer(minLength: 0)
-                    // 未读通知计数徽章：队列中还有更多通知时显示
-                    if controller.queueCount > 1 {
-                        Text("+\(controller.queueCount)")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(.white.opacity(0.15),
-                                        in: Capsule())
+                    .padding(.horizontal, inset)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                // 右上角工具栏：已读按钮 + 钉住开关
+                HStack(spacing: 8) {
+                    Button(action: onMarkRead) {
+                        Text("已读")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.55))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(.white.opacity(0.1),
+                                        in: RoundedRectangle(cornerRadius: 6,
+                                                             style: .continuous))
                     }
+                    .buttonStyle(.plain)
+                    .help("标记为已读（不跳转）")
+
+                    Button(action: onTogglePin) {
+                        Image(systemName: pinned ? "pin.fill" : "pin")
+                            .font(.system(size: 12, weight: .semibold))
+                            .rotationEffect(.degrees(pinned ? 0 : 45))
+                            .foregroundStyle(pinned
+                                ? Color(red: settings.accentRGB.r,
+                                        green: settings.accentRGB.g,
+                                        blue: settings.accentRGB.b)
+                                : Color.white.opacity(0.4))
+                    }
+                    .buttonStyle(.plain)
+                    .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
                 }
-                .padding(.horizontal, inset)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .padding(.top, 4)
+                .padding(.trailing, inset)
             }
-            .buttonStyle(.plain)
-
-            // 顶部工具栏：已读按钮（左上）+ 钉住开关（右上）
-            HStack {
-                Button(action: onMarkRead) {
-                    Text("已读")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.white.opacity(0.08),
-                                    in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .help("标记为已读（不跳转）")
-
-                Spacer()
-
-                Button(action: onTogglePin) {
-                    Image(systemName: pinned ? "pin.fill" : "pin")
-                        .font(.system(size: 12, weight: .semibold))
-                        .rotationEffect(.degrees(pinned ? 0 : 45))
-                        .foregroundStyle(pinned
-                            ? Color(red: settings.accentRGB.r,
-                                    green: settings.accentRGB.g,
-                                    blue: settings.accentRGB.b)
-                            : Color.white.opacity(0.4))
-                }
-                .buttonStyle(.plain)
-                .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
-            }
-            .padding(.top, 4)
-            .padding(.horizontal, inset)
+            // ── 抽屉效果：内容向右偏移 + 可见区域从左侧收缩 ──
+            .frame(width: visW, alignment: .trailing)
+            .offset(x: drawerOffset)
+            .clipped()
+            // 向右拖动视为已读并关闭（左拖无效果）
+            .gesture(
+                DragGesture(minimumDistance: 10)
+                    .onChanged { value in
+                        let dx = max(0, value.translation.width)  // 只允许向右
+                        drawerOffset = dx
+                        drawerVisibleWidth = max(0, fullW - dx)
+                    }
+                    .onEnded { value in
+                        let dx = max(0, value.translation.width)
+                        if dx > swipeDismissThreshold {
+                            // 超过阈值：动画收入右侧抽屉后标记已读
+                            withAnimation(.easeIn(duration: 0.22)) {
+                                drawerOffset = fullW
+                                drawerVisibleWidth = 0
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                                drawerOffset = 0
+                                drawerVisibleWidth = nil
+                                onMarkRead()
+                            }
+                        } else {
+                            // 未达阈值：弹回原位
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                drawerOffset = 0
+                                drawerVisibleWidth = nil
+                            }
+                        }
+                    }
+            )
+            .onAppear { startBellSwing() }
+            .onChange(of: bellSwingStart) { startBellSwing() }
         }
-        // 拖动关闭手势：左右滑动超过阈值视为已读并关闭
-        .offset(x: dragOffset)
-        .rotationEffect(.degrees(Double(dragOffset) / 20))
-        .opacity(1.0 - min(abs(dragOffset) / (swipeDismissThreshold * 2), 0.6))
-        .gesture(
-            DragGesture(minimumDistance: 10)
-                .onChanged { value in
-                    // 只跟踪水平拖动
-                    dragOffset = value.translation.width
-                }
-                .onEnded { value in
-                    if abs(value.translation.width) > swipeDismissThreshold {
-                        // 超过阈值：标记已读并关闭
-                        let direction: CGFloat = value.translation.width > 0 ? 1 : -1
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            dragOffset = direction * 300
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                            dragOffset = 0
-                            onMarkRead()
-                        }
-                    } else {
-                        // 未达阈值：弹回原位
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            dragOffset = 0
-                        }
-                    }
-                }
-        )
-        .onAppear { startBellSwing() }
-        .onChange(of: bellSwingStart) { startBellSwing() }
     }
     
     /// 铃铛摆动：1.2 秒内 4 个正弦周期，幅度 20° 衰减到 0，缩放从 1.35 衰减到 1.0
@@ -191,7 +203,7 @@ struct NotchNoticeView_Previews: PreviewProvider {
             fromCLI: false
         )
         let ctrl = NoticeController()
-        NotchNoticeView(controller: ctrl, notice: mock, onTap: {})
+        NotchNoticeView(controller: ctrl, notice: mock, onTap: {}, onMarkRead: {})
             .frame(width: 380)
             .padding()
             .preferredColorScheme(.dark)
