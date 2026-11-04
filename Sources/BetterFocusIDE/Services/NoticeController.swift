@@ -24,6 +24,8 @@ final class NoticeController: ObservableObject {
     private var lastNoticeAt: [String: Date] = [:]
     /// 等待展示的通知队列；当前通知展示期间新到的通知排入此队列。
     private var queue: [TurnNotice] = []
+    /// 自动收起时保存的通知，供用户点击气泡时重新展示（而非直接打开历史）。
+    private var lastDismissedNotice: TurnNotice?
 
     var hasActiveNotice: Bool { notice != nil }
     /// 总数（当前 + 队列）——驱动收起态的待处理圆点。
@@ -136,13 +138,15 @@ final class NoticeController: ObservableObject {
 
     // MARK: - 展示 / 消失
 
-    private func show(_ newNotice: TurnNotice) {
+    /// 展示一条通知：设置 notice 并触发 onPresent 回调。
+    func show(_ newNotice: TurnNotice) {
         // 已有通知在屏时，新通知入队等待。
         if notice != nil {
             queue.append(newNotice)
             return
         }
         notice = newNotice
+        lastDismissedNotice = nil  // 新通知取代旧的未恢复通知
         onPresent?()
         FeedbackService.onArrive()
         // 自动收起由 NotchService 的悬停计时器统一管理。
@@ -187,5 +191,19 @@ final class NoticeController: ObservableObject {
             IDELauncher.activateAsync(provider: notice.provider, host: notice.host)
         }
         dismiss()
+    }
+
+    // MARK: - 自动收起恢复
+
+    /// 保存当前通知供后续恢复展示（自动收起时调用，在 dismiss 之前）。
+    func saveForRestore() {
+        lastDismissedNotice = notice
+    }
+
+    /// 恢复上次自动收起的通知：取出并清除缓存。
+    func restoreLastDismissed() -> TurnNotice? {
+        let n = lastDismissedNotice
+        lastDismissedNotice = nil
+        return n
     }
 }
