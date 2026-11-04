@@ -21,17 +21,45 @@ struct DoctorCheck {
 enum Doctor {
     /// 依次执行所有检查，返回结果列表。
     static func run() -> [DoctorCheck] {
-        var checks: [DoctorCheck] = []
-        checks.append(socketAlive())
-        checks.append(installedFile(label: "Qoder Hook 脚本",
-                                    path: InstallerPaths.qoderScriptPath))
-        checks.append(installedFile(label: "Qoder Helper",
-                                    path: InstallerPaths.qoderHelperPath))
-        checks.append(installedFile(label: "OpenCode Plugin",
-                                    path: InstallerPaths.opencodePluginPath))
-        checks.append(hookRegistered())
+        var checks: [DoctorCheck] = [socketAlive()]
+        // 四个宿主各自独立检查；宿主配置目录不存在时视为「没装这个宿主」，不算失败。
+        checks.append(contentsOf: hostIntegration(
+            label: "Qoder", hostDir: InstallerPaths.qoderDir,
+            script: InstallerPaths.qoderScriptPath, helper: InstallerPaths.qoderHelperPath,
+            registered: hookRegistered))
+        checks.append(contentsOf: hostIntegration(
+            label: "OpenCode", hostDir: InstallerPaths.opencodePluginsDir,
+            script: InstallerPaths.opencodePluginPath, helper: nil,
+            registered: { true }))
+        checks.append(contentsOf: hostIntegration(
+            label: "Cursor", hostDir: InstallerPaths.cursorDir,
+            script: InstallerPaths.cursorScriptPath, helper: InstallerPaths.cursorHelperPath,
+            registered: { CursorHookInstaller.isRegistered }))
+        checks.append(contentsOf: hostIntegration(
+            label: "WorkBuddy", hostDir: InstallerPaths.workbuddyDir,
+            script: InstallerPaths.workbuddyScriptPath, helper: InstallerPaths.workbuddyHelperPath,
+            registered: { WorkBuddyHookInstaller.isRegistered }))
         checks.append(answerDirWritable())
         checks.append(settingsReadable())
+        return checks
+    }
+
+    /// 单个宿主的集成状态：脚本 / helper 文件与宿主配置登记情况。
+    static func hostIntegration(label: String, hostDir: String, script: String,
+                                helper: String?, registered: () -> Bool) -> [DoctorCheck] {
+        guard InstallerPaths.hostDirectoryExists(hostDir) else {
+            return [DoctorCheck(ok: true, label: "\(label) 集成",
+                                detail: "本机未检测到该宿主，跳过", hint: nil)]
+        }
+        var checks = [installedFile(label: "\(label) Hook 脚本", path: script)]
+        if let helper {
+            checks.append(installedFile(label: "\(label) Helper", path: helper))
+        }
+        checks.append(registered()
+            ? DoctorCheck(ok: true, label: "\(label) Hook 开关", detail: "已登记", hint: nil)
+            : DoctorCheck(ok: false, label: "\(label) Hook 开关",
+                          detail: "未在宿主配置中登记",
+                          hint: "菜单 → 一键安装 Hook / Plugin"))
         return checks
     }
 
@@ -70,22 +98,15 @@ enum Doctor {
                            hint: "菜单 → 一键安装 Hook / Plugin")
     }
 
-    /// 检查 Qoder settings.json 的 PermissionRequest 是否登记了带我们标记的分组。
-    static func hookRegistered() -> DoctorCheck {
+    /// Qoder settings.json 的 PermissionRequest 是否登记了带我们标记的分组。
+    static func hookRegistered() -> Bool {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: InstallerPaths.qoderSettingsPath)),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let hooks = json["hooks"] as? [String: Any] else {
-            return DoctorCheck(ok: false, label: "Hook 开关", detail: "settings.json 无 hooks",
-                               hint: "菜单 → 一键安装 Hook / Plugin")
-        }
+              let hooks = json["hooks"] as? [String: Any] else { return false }
         let permission = hooks["PermissionRequest"] as? [[String: Any]] ?? []
-        let registered = permission.contains {
+        return permission.contains {
             ($0["_betterfocus_marker"] as? String) == InstallerPaths.marker
         }
-        return registered
-            ? DoctorCheck(ok: true, label: "Hook 开关", detail: "已登记", hint: nil)
-            : DoctorCheck(ok: false, label: "Hook 开关", detail: "未在 settings.json 登记",
-                          hint: "菜单 → 一键安装 Hook / Plugin")
     }
 
     /// 检查应答目录是否可写：实际写一个探针文件再删除。

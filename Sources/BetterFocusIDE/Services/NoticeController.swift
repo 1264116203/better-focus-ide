@@ -106,7 +106,8 @@ final class NoticeController: ObservableObject {
         let detail = resources.first ?? ""
         let action = PermissionRequest.actionFromToolName(toolName)
         let title = "Agent 请求执行「\(PermissionRequest.actionLabel(action))」"
-        let body = detail.isEmpty ? "请在 Qoder 对话框中做出决策" : detail
+        let hostLabel = AgentProvider.effectiveName(provider: providerEnum, hostName: host.name)
+        let body = detail.isEmpty ? "请在 \(hostLabel) 对话框中做出决策" : detail
         let project = host.cwd.isEmpty ? "" : (host.cwd as NSString).lastPathComponent
 
         Log.info("handlePermissionNotice: notice title='\(title)', host=\(host.name), tool=\(toolName)", topic: "permission")

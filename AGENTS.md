@@ -106,6 +106,11 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gateke
 
 **关键约束**：切换、自定义命中测试、逐帧弹簧动画都无法用纯 SwiftUI 完成。AppKit 薄外壳 + SwiftUI 内容是强制要求。
 
+**层级职责（2026-11 重构后）**：轮廓遮罩已从 canvas 根层下沉到 `body`（`PassthroughView`）——黑底、磨砂 glass、暗层 dim、SwiftUI host、发丝描边 edge 全部在 body 内，被 `silhouette` mask 裁剪；canvas 根层保持透明且**不带**轮廓 mask，辉光层（`glowLayer`）直接挂在根层以绕过裁剪。两条隐式不变量：
+- `body`（`PassthroughView`）必须 `isFlipped = true`，与 `NotchCanvas` 翻转坐标系一致，否则 body 内所有层被垂直翻转（黑色气泡跑到屏幕下方、肩部朝向反了），而挂在 canvas 层的辉光位置正常——两层错位。
+- `PassthroughView.hitTest` 必须让落在自身范围内的点返回 `nil`，否则 body 会拦截画布自身的 hover/右键鼠标事件链路。
+- 越界特效（辉光/投影）**不能**靠 `zPosition` 或兄弟视图逃逸父层 mask——mask 裁剪作用于整棵子树，唯一出路是把特效移到不含该 mask 的祖先层。`NSPanel` 本身无 `.layer`，只有 `contentView?.layer`。
+
 ### 卡片状态机
 
 四种卡片类型，各有一个专用控制器：
@@ -119,6 +124,63 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gateke
 
 卡片支持**钉住模式**（保持展开）与**自动消失**（超时后收拢）。0.5 秒的点击守卫可防止卡片切换过程中误触键盘输入。
 
+### 辉光渲染
+
+外发光（呼吸辉光）采用**单层 CALayer + CPU 预渲染位图**方案：
+- `glowLayer.contents` 是一张 `CGContext` + `CIFilter(CIGaussianBlur)` 预渲染的 `CGImage`：源形状先向外膨胀 `inflate ≈ range × 0.5`，再以 `σ = range × 0.5` 模糊。
+- 该层插在 `body` 之下（canvas 根层 `at: 0`），内部被不透明的岛面盖住，只露出向外扩散的渐变光晕——因此**不需要**额外遮罩挖洞。
+- 窗口 `shadowPad` 必须跟随辉光范围动态扩大（`max(原下限, glowRadius × 扩散系数 + 安全余量)`），否则扩散会被窗口边缘裁平。
+
+**已证伪的方案**（不要再尝试）：
+- `CAShapeLayer.shadow`（`shadowRadius`/`shadowOpacity`）：在透明无边框 NSPanel 中只渲染出一圈紧贴轮廓的硬描边，`radius` 从 9 调到 40 视觉几乎无变化。
+- `CALayer.filters` 挂 `CIGaussianBlur`：对 `CAShapeLayer` 的矢量绘制内容整层不输出（截图只见纯黑气泡、完全无光晕）。
+- 多层同心描边（宽度递增、alpha 递减）：相邻层肉眼可见分层台阶。
+- `panel.hasShadow = true`：系统按整窗 alpha 生成投影，会把半透明辉光自身压暗并在衰减末段造出假性"分层线"——必须 `hasShadow = false`，主体投影改由 `body.layer.shadow*` 自绘。
+
+**浓度调节**：浓度必须做进模糊之前的源形状（膨胀宽度），而非模糊后的像素。对预乘位图做通道增益（`CIColorMatrix` 四通道同乘）或多次叠印会导致 RGB 钳到 255 变白雾 + 放大量化台阶产生等高线带状条纹。
+
+### 呼吸动画
+
+呼吸灯（辉光 opacity 循环）的三条不变量：
+
+1. **时间域**：用 `CAKeyframeAnimation` + `calculationMode = .cubic`，关键帧按余弦采样、`duration` 等于完整周期（不再除 2），首尾同值使接缝值与斜率连续。**禁用** `easeInEaseOut` + `autoreverses`——两端各产生约 0.3s 零速度驻留平台，变化被挤进中段。
+2. **感知域**：在 CIE L* 感知空间做余弦插值，再用 sRGB 反变换解出每帧 opacity。直接对物理量 opacity 做线性余弦会让约 72% 周期停在 `L* > 85` 的近不可见区。
+3. **空间域**：膨胀系数 `inflate = range × 0.5`、模糊 `σ = range × 0.5`（峰值梯度 0.017/pt），使衰减带变宽、台阶不可见。默认值：`glowRadius = 6pt`、`glowBreathAmplitude = 0.65`。
+
+**画布锚点不对称性**：`panelFrame` 高度 = `base.height + shadowPad`（留白仅加在底部），宽度 = `base.width + shadowPad × 2`（两侧对称）。`glowLayer` 默认 `anchorPoint(0.5, 0.5)` 的几何中心位于岛视觉中心正下方约 `shadowPad/2`。对 `glowLayer` 施加 `transform.scale` 时，两侧（距锚点 ≈ 104pt）的径向位移远大于底部（距锚点 ≈ 7–13pt），表现为"两侧鼓动明显而下方几乎不动"。结论：辉光呼吸应只用 opacity 动画（各向同性）。
+
+### 刘海尺寸检测与自适应布局
+
+物理刘海尺寸的公开 API（macOS 12+，项目 target 14+ 无需可用性守卫）：
+- **刘海高度** = `NSScreen.safeAreaInsets.top`（14" MBP 实测 32pt）
+- **刘海宽度** = `screen.frame.width - auxiliaryTopLeftArea.width - auxiliaryTopRightArea.width`（两属性返回摄像头左右两侧「顶部辅助安全区」`NSRect?`，需解包判 `isEmpty`；14" MBP 实测 185pt）
+- 无刘海屏（外接显示器）`safeAreaTop = 0`、辅助区为 `nil`，回退手动值
+- 注意：`NSScreen.auxiliaryAreas` / `cameraHousing` 这类 API **不存在**，不要臆造
+
+实现落点（单一源，避免逻辑漂移）：
+- `NotchLayout.physicalNotchWidth(of:)` 是刘海宽检测的唯一 helper；`NotchService.detectCameraWidth` 委托它
+- **气泡肩部补偿**：`bubbleBase` 跟随模式 `width = cameraWidth + 2 × shoulder(cameraHeight)`，使渲染主体恰好与刘海齐平（不补偿则主体缩在刘海内，左右辉光被挤在刘海硬件上看不见）；高度不补偿
+- **卡片黄金分割**：`resolvedCardWidth = notch × goldenSectionMultiplier ÷ goldenSectionDivisor`（当前 1.5:0.618 ≈ 449pt，机型自适应）。用户口中的「X 倍」沿用 `X:0.618` 公式（即 `×X÷0.618`），不是单纯 `×X`
+- 两个跟随开关 `bubbleFollowsNotch` / `cardFollowsNotch` 默认开启，开启时对应的手动滑块经 `enabledBy`/`enabledWhen` 置灰
+
+### Product 来源识别
+
+消息来源标识（`product`）由 hook 侧 `_identify_product()` 依据环境变量决策树推导，而非从事件 JSON 或 transcript 中提取：
+
+| 优先级 | 条件 | 结果 |
+|--------|------|------|
+| 1 | `QODER_PROJECT_DIR` 存在且无 `QODER_SESSION_ID` | `qoder_cli` |
+| 2a | 有 `QODER_SESSION_ID` + `QODER_STANDALONE=1` | `qoder` |
+| 2b | Bundle ID 含 `jetbrains`/`intellij` | `jetbrains_plugin` |
+| 2c | Bundle ID 含 `qoder` | `qoder_ide` |
+| 2d | Bundle 缺失但有 `QODER_TRANSCRIPT_PATH` | `qoder_ide`（兜底） |
+| 3 | 均不满足 | `unknown` |
+
+- **状态持久化**：`SessionStart` 时识别结果写入会话 state 落盘；后续事件优先读 state，state 缺失才降级重新识别
+- **竞态处理**：`_merge_state()` 处理 IDE 双 `SessionStart` 同毫秒到达——新值为空或 `unknown` 时保留磁盘已有值
+- **修改来源识别逻辑须同步核对**：`HelperTemplate.swift`（hook 模板）与 `~/.qoder/hooks/betterfocus-hook.py`（已安装 hook）两处
+- Swift 侧 `AgentSocketMessage.resolvedProvider` 优先取 `product`、缺失才回退 `provider`
+
 ### 进程间通信
 
 ```
@@ -131,6 +193,24 @@ OpenCode Plugin (JS) ─┘                          │                    │
 - **入站**：`~/Library/Application Support/BetterFocusIDE/agent-events.sock` 上的换行分隔 JSON
 - **出站**：应答文件写入 `~/Library/Application Support/BetterFocusIDE/answers/`
 - **协议**：线格式见 `AgentSocketMessage` 与 `SocketEvent`
+
+### Socket 注入测试
+
+无需真实 IDE 插件，可直接用脚本向 socket 注入测试事件：
+
+```bash
+SOCKET=~/Library/Application\ Support/BetterFocusIDE/agent-events.sock
+
+# 最小可用报文（无需 transcript 文件也能产出完整历史行）
+echo '{"provider":"qoder","event":"turn_finished","session_id":"test-'$(date +%s)'","payload":{"cwd":"/tmp"},"host":{"name":"Qoder","bundle_id":"com.qoder.ide"}}' | nc -U "$SOCKET"
+```
+
+**关键注意事项**：
+- **连接保持**：`nc` 默认等待对端关闭（不会过早 RST），可直接用。若用 Python `socket.sendall()` 后必须 `sleep ≥ 1.5s` 再 `close()`，否则服务器在 backlog 中的连接被内核 abort，收不到任何数据且日志无记录（静默丢失）。
+- **换行分帧**：`AgentEventSocketServer` 按"一行一个 JSON + `\n`"分帧。`echo ... | nc` 末尾自带换行所以可用；若用 Python 须显式 `sendall((msg + '\n').encode())`。
+- **核对点**：`betterfocus.log` 出现 `socket: event=turn_finished provider=qoder session=...` 即代表事件已被接收并入历史。
+- **Product 字段**：手工注入报文若要验证来源展示，须显式带上 `product` 字段（如 `"product":"jetbrains_plugin"`），否则仍走旧的 `provider` 回退路径。
+- **OpenCode 插件热重载陷阱**：OpenCode 的文件 watcher 在插件文件变化时重新执行 `setup`，而上一次 `setup` 的 `for await (const event of ctx.event.subscribe(...))` 循环未被取消，导致多个循环同时消费同一事件流——一次回合结束在日志出现 3 条完全相同的 `turn_finished`。正确做法：每次 `setup` 开头 `abort` 上一实例遗留的 controller。
 
 ### IDE 跳转与二级定位
 
@@ -191,6 +271,9 @@ Unix socket 文件本身就是锁锚点：
 2. 用 `connect()` 探测检查是否已有另一个实例在监听
 3. 返回 `StartOutcome`：`.started`、`.alreadyRunning`、`.failed`
 4. 重复启动必须静默 `NSApp.terminate(nil)` —— **绝不**使用 `NSAlert().runModal()`（会阻塞主线程 → 僵尸进程）
+5. `bindAndListen()` 绝不能无条件删除 socket 文件（会从运行中的实例手里抢夺 socket 变幽灵）
+
+**重启陷阱**：`.build/debug` 是指向 `arm64-apple-macosx/debug` 的符号链接，旧实例存活时新进程发现 socket 被占用会静默 terminate，反复 `open` 看似"改动没生效"。正确重启：`pkill -f BetterFocusIDEApp; sleep 1; open .build/debug/BetterFocusIDE.app`
 
 ### 设置系统
 
@@ -201,6 +284,20 @@ Unix socket 文件本身就是锁锚点：
 - **向后兼容**：`Settings.load()` 对缺失键使用 `??` 回退，因此新字段可与旧 JSON 共存
 
 **关键不变量**：`handleSettingsChanged()` 绝不能写回任何 Settings 字段 —— 那会形成反馈回路。
+
+**新增/修改设置项默认值的 4 处同步落点**（缺一即出现"初始值/恢复默认/面板回退值"不一致）：
+1. `Settings.swift` 的 `@Published` 属性初值
+2. `Settings.swift` 的 `resetAll()`
+3. `SettingCatalog.swift` 对应 `SettingDefinition` 的 `defaultValue`
+4. `SettingCatalog.swift` 对应 `SettingDefinition` 的 `defaultValue`（滑块以 UI 单位表达时需折算）
+
+**`SettingDefinition` 参数顺序约束**：`enabledBy` / `enabledWhen`（联动置灰条件）必须排在 `keywords` 之前，否则 `swiftc` 报「argument 'enabledBy' must precede argument 'keywords'」而整个 `SettingCatalog` 编译失败。
+
+**`needsReinstall` 项的生效前提**：`QoderHookInstaller`/`OpenCodePluginInstaller` 是幂等的（内容相同即跳过写入），因此 `InstallerPaths.hookTimeoutSeconds` 等必须实际读取 `Settings.agentWaitLimit`（+ 60s hook 余量），OpenCode 插件模板 `ANSWER_TIMEOUT_MS` 必须以占位符注入；若仍硬编码旧值，则改 `agentWaitLimit` 触发的 `install()` 写回将是空操作。
+
+**持久化边界**：全部设置项落盘于 `settings.json`，重装 app（删除 `.app` bundle 或重新 `build.sh`）不会重置任何参数；仅手动删该文件或在 app 内"恢复默认"(`resetAll`) 才会重置。改代码默认值不会影响已保存 `settings.json` 的用户实值，验证前必须先读 `settings.json` 取实际值。
+
+**置顶状态（pinned）链路**：`NotchService` 只保留单一 `userPinned: Bool?`（四类卡片共享，`nil` = 用户从未手动切换），`refreshPinned()` 统一解析 `userPinned ?? Settings.shared.pinByDefault`，接入点为 `showHistory`/`showNoticeBanner`/`showCard`/`handleSettingsChanged`。语义保持进程内记忆、重启回落默认。
 
 ### 安装器系统
 
@@ -249,6 +346,10 @@ Unix socket 文件本身就是锁锚点：
 6. **点击守卫**：卡片在出现后 `clickGuard` 秒内、"其他…"文本输入期间、淡出期间、以及收拢进气泡时都忽略输入
 7. **刘海屏幕锚定**：始终 targeting `safeAreaInsets.top > 0` 的显示器，绝不用 `NSScreen.main`
 8. **遮罩对齐**：`Shape.path(in:)` 忽略 `rect.origin` —— 遮罩必须感知偏移，否则会偏离居中的宿主
+9. **body 坐标系**：`PassthroughView`（body 容器）必须 `isFlipped = true` 与 `NotchCanvas` 一致，否则 body 内 silhouette/host 被垂直翻转，黑色气泡跑到屏幕下方而辉光位置正常——两层错位
+10. **辉光层归属**：辉光层必须挂在**不带轮廓 mask 的祖先层**（canvas 根层），不能靠 `zPosition` 或兄弟视图逃逸 body 的 mask 裁剪
+11. **CLI 会话判据**：`Transcript.Session.fromCLI = (entrypoint == "cli") && !hasHumanInput`，其中 `hasHumanInput` 取首条 user 记录的 `humanInput` 字段。单纯 `entrypoint == "cli"` 会误伤 GUI 会话（新版 Qoder 内核把 GUI transcript 也写入 `.jsonl` 并统一标 `entrypoint: "cli"`）
+12. **卡片视觉一致性**：四类卡片的图钉 (`pin.fill`) 颜色统一取 `Settings.shared.accentRGB`（主题色），不再使用 `AgentProvider.tint`；`provider.tint` 仍用于徽章/来源标识等强调色
 
 ## 数据文件
 
@@ -312,6 +413,24 @@ ls -la ~/Library/Application\ Support/BetterFocusIDE/agent-events.sock
 # 状态栏 → 自检 (Doctor)…
 ```
 
+**环境变量生效的正确方式**：需要让 `BETTERFOCUS_*` 等调试环境变量生效时**不能用 `open`**——`open` 由 `launchd` 派生进程，shell 前缀的环境变量不会传进 app。必须直接执行二进制：
+```bash
+BETTERFOCUS_LOG_STDERR=1 BETTERFOCUS_LOG_LEVEL=debug \
+  .build/debug/BetterFocusIDE.app/Contents/MacOS/BetterFocusIDE
+```
+
+**干净重建**：只 `rm -rf .build/debug` 后 `swift build` 可能在 0.25s 内报 "Build complete" 而并未真正重编。确证干净重建应删除整个 `.build` 目录（全量重建约 60s）。
+
+**双屏截图坐标**：开发机为双屏时（外接 + 内置刘海），`screencapture -R x,y,w,h` 的坐标是全局点坐标（原点在左上角、y 向下），内置屏顶部在主屏底部之下，灵动岛区域约在 `y ≈ 1150~1250`。**每次取证前必须先枚举 `NSScreen.screens` 打印 frame/safeAreaInsets 重新确定截图区域**——外接屏断开后坐标完全不同。配合 `CGWindowListCopyWindowInfo` 可先确认窗口是否真的在屏。
+
+**裁切排查方法论**：内容"疑似被边缘裁切"时，**不可靠**的方式是 `screencapture` + PIL 放大裁剪后肉眼估像素（深色卡片叠在深色桌面上无法区分边界）。正确的取证顺序：
+1. 先加临时日志打印 `target` / `host.frame` / `mask.bounds`（silhouette box）三者真实尺寸与 origin
+2. 尺寸相同仍被裁时，把对比维度从 width/height 扩展到 **origin**（mask 路径 `boundingBoxOfPath.origin` 与 `host.frame.origin` 必须相等）
+3. origin 已对齐仍显示不全，才查行内布局（greedy title 与 fixed meta 在 HStack 争抢空间的压缩歧义）
+4. 验证通过后移除临时日志
+
+**特效范围设置不生效的排查**：先做两步——①打印运行时窗口 frame 与画布 bounds 是否随设置值同步变大；②检查是否有硬编码的 `shadowPad`/留白常量封顶了扩散范围。不要先去怀疑设置订阅链路。
+
 ## 测试
 
 没有自动化测试套件。手动测试流程：
@@ -344,4 +463,74 @@ echo '{"provider":"qoder","product":"qoder_ide","event":"turn_finished","session
 - `已用 code -r 定位 Qoder 窗口` → VS Code 系成功
 - `已激活 ...` → 回退到 App 级激活
 
+## 经验教训
 
+从开发过程中提炼的常见陷阱与排查方法论，按领域分组。
+
+### 窗口与图层
+
+- **透明窗口系统投影**：`panel.hasShadow = true` 时系统按整窗 alpha 生成投影，会把半透明辉光自身压暗并在衰减末段造出假性"分层线"。解决：`hasShadow = false`，主体投影下沉到 `body.layer.shadow*` 自绘。
+- **越界特效不能靠 zPosition 逃逸父层 mask**：`CALayer.mask` 裁剪作用于整棵子树。唯一出路是把特效移到不含该 mask 的祖先层。
+- **悬浮窗特效范围设置不生效**：先查固定窗口留白（`shadowPad`）是否封顶了扩散，再查 `masksToBounds` 双重裁剪——不要先怀疑设置订阅链路。
+- **NSPanel 无 `.layer`**：只有 `contentView?.layer` 存在。
+
+### SwiftUI 命中测试
+
+- **透明装饰层 + `contentShape` 会吞掉下层按钮点击**：`bubbleWithGlow` 在 ZStack 中位于 `expandedContent` 之后（渲染在上层），若设 `.contentShape(Rectangle()) + .onTapGesture{collapse()}`，气泡高度调大后透明矩形向下延伸盖住按钮。解决：纯装饰层用 `.allowsHitTesting(false)`。
+- **含 `disabled` 子视图的 HStack 行需 `contentShape`**：被 `disabled()` 置灰的控件会吞掉自身区域的鼠标事件，导致整行 `.help()` tooltip 悬停不弹出。解决：`.contentShape(Rectangle())` 把整行纳入统一命中区。
+
+### 图像后处理
+
+- **预乘位图乘增益或叠印提浓会钳成白雾**：高斯模糊输出是预乘 alpha（RGB ≤ alpha），对整张位图做通道增益会把 RGB 钳到 255 变白雾 + 放大量化台阶产生等高线。解决：浓度做进模糊之前的源形状膨胀宽度。
+- **循环呼吸动画禁用极值零速度缓动**：`easeInEaseOut` + `autoreverses` 在两端各产生约 0.3s 驻留平台。解决：余弦关键帧 + `CAKeyframeAnimation(.cubic)`，在 L* 感知空间插值。
+
+### 内嵌脚本模板
+
+- **Swift 内嵌 Python 模板的三引号转义**：`HelperTemplate.swift` 用 `"""..."""` 承载 Python 源码，Python docstring 三引号必须写成 `\"""`。离线部署手工重写 hook 时必须先还原 Swift 转义再替换占位符，并立刻用 `py_compile.compile(doraise=True)` 校验。
+- **shell 可见的环境变量不代表 Python 子进程能读到**：`echo "$KEY"` 在 shell 层返回 YES 不保证子进程继承了该变量（可能未 export、被 `uv tool` 隔离环境屏蔽）。解决：在目标解释器内验证或直接降级为宿主内联。
+- **整文件复制参考工程源码会因依赖闭包过大编译失败**：大型参考工程的单文件内部引用大量同工程其他模块类型。解决：按最小可运行子集手写裁剪。
+
+### 排查方法论
+
+- **裁切排查必须以运行时尺寸与 origin 日志替代肉眼估图**：`screencapture` + PIL 放大裁图在深色背景下极不可靠。先打印 `target`/`host.frame`/`mask.bounds` 三者真实尺寸与 origin。
+- **修 UI 表现前必须先确认"用户看到的是哪一层"**：BetterFocusIDE 采用 AppKit 画形状 + SwiftUI 叠内容双层结构，症状可能来自任一层。
+- **回滚后必须立刻 `swift build` 验证**：手写 `SearchReplace` 容易引入语法错误，不能仅凭 diff 目测。
+- **面板内容水平 inset 必须 ≥ shoulder(14)**：`NotchShape` 轮廓在中间段按 `shoulder` 内缩，inset 小于 shoulder 的内容会被黑 mask 裁掉行边缘。
+
+## 重要决策
+
+从技术选型中提炼的关键决策记录。
+
+### 外发光方案选型
+
+**结论**：单层 CALayer + CPU 预渲染位图（`CGContext` + `CIGaussianBlur`），插在 body 之下。
+**否决方案**：`CAShapeLayer.shadow`（透明窗口只出硬描边）、`CALayer.filters`（对矢量内容整层不输出）、多层同心描边（肉眼可见台阶）。
+**适用边界**：borderless/透明/无系统阴影的合成环境。若改用有正常背景的常规窗口或 Apple 提供可用的 `layer.shadow` 合成条件，可重新评估。
+
+### 提问拦截策略
+
+**结论**：用 `PermissionRequest` 而非 `PreToolUse` 拦截 `AskUserQuestion`。
+**理由**：`PermissionRequest` 是阻塞式（Qoder 等待 hook 返回决策后再继续），`PreToolUse` 是 fire-and-forget（Qoder 不等待响应）。
+**适用范围**：仅 `AskUserQuestion` 提问接管。权限申请不能照此阻塞——Qoder 不采信 hook 返回的 allow/deny，且阻塞把工具挂起最长约 600s。正确策略是只发 `permission_notice` 通知、立即 `emit("ask")` 让 Qoder 弹原生框。
+
+### 布局参照基准
+
+**结论**：灵动岛各卡片的尺寸与行布局一律以 Python 原工程 `dynamic-Island-python-validate` 的 `config.py` 常量与显式矩形绘制算法为权威参照。
+**否决方案**：凭 SwiftUI 自适应直觉自拟数值（`maxWidth: .infinity` + `fixedSize` + `layoutPriority` 组合调参），对 greedy/fixed 混合行的压缩顺序不确定，肉眼难判定且反复返工。
+**适用边界**：只要目标是与 Python 原版逐像素对齐的迁移即成立。若未来脱离原设计做全新 UI 风格，需重新评估。
+
+## Qoder 记忆同步约定
+
+本文件与 Qoder 记忆系统保持同步。以下规则 govern 同步行为：
+
+1. **同步方向**：Qoder 记忆 → AGENTS.md（单向）。记忆系统是开发过程中的实时记录，AGENTS.md 是沉淀后的权威文档。
+2. **同步时机**：当记忆系统中积累了新的经验教训、架构决策或关键不变量时，应将其精炼后整合到本文件对应章节。
+3. **去重原则**：若记忆内容与 AGENTS.md 已有内容重叠，合并而非重复——保留更完整或更新的版本。
+4. **精炼要求**：记忆原文可能包含具体会话上下文和临时验证细节，整合时应提炼为通用、可操作的条目，去除特定于某次会话的冗余信息。
+5. **章节映射**：
+   - 架构类记忆 → 「架构」下对应小节或新增小节
+   - 不变量类记忆 → 「关键不变量」追加编号条目
+   - 陷阱类记忆 → 「经验教训」按领域分组
+   - 决策类记忆 → 「重要决策」记录结论与理由
+   - 调试技巧类记忆 → 「常见任务 > 调试」
+6. **记忆中的 Notes 更正**：若记忆的 Notes 部分推翻了 AGENTS.md 中的旧描述（如"2026-11 更正"），应同步更新 AGENTS.md 正文以反映最新实现。
