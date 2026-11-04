@@ -6,15 +6,11 @@ import SwiftUI
 /// IDE 图标提供者：根据宿主应用名称返回对应的图标 Image。
 ///
 /// 支持真实图标的 IDE（从 Resources/IDE-Icons 加载）：
-/// - IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider, CLion, PhpStorm, RubyMine
-/// - VS Code（用于 Qoder IDE 等 VS Code 系 fork）
+/// - JetBrains: IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider, CLion, PhpStorm, RubyMine
+/// - VS Code 系: VS Code, Cursor, Qoder IDE, Qoder CN IDE
+/// - 其他: OpenCode, Claude Code, Qoder, Qoder Work, Qoder CN, Qoder CN Work
 ///
-/// 其他 IDE 使用带品牌色的文字徽章：
-/// - Cursor（青色）
-/// - Claude Code（橙色）
-/// - Codex / OpenAI（绿色）
-/// - Qoder（紫色）
-/// - OpenCode（蓝绿色）
+/// 无真实图标的 IDE 使用带品牌色的文字徽章作为回退。
 enum IDEIconProvider {
     /// IDE 名称到图标文件名的映射（小写匹配）
     private static let iconMapping: [String: String] = [
@@ -29,12 +25,27 @@ enum IDEIconProvider {
         "clion": "clion",
         "phpstorm": "phpstorm",
         "rubymine": "rubymine",
-        // VS Code 系（Qoder IDE, Qoder CN IDE, Cursor 等都是 VS Code fork）
+        // VS Code 及衍生
         "visual studio code": "vscode",
         "vscode": "vscode",
-        "qoder ide": "vscode",
-        "qoder cn ide": "vscode",
-        "cursor": "vscode",  // Cursor 也是 VS Code fork
+        "code": "vscode",
+        // Cursor
+        "cursor": "cursor",
+        // OpenCode
+        "opencode": "opencode",
+        // Claude Code
+        "claude code": "claude-code",
+        "claude": "claude-code",
+        "anthropic": "claude-code",
+        // Qoder 系列（英文）
+        "qoder ide": "qoder-ide",
+        "qoder work": "qoder-work",
+        "qoder": "qoder",
+        // Qoder 系列（中文）
+        "qoder cn ide": "qoder-cn-ide",
+        "qoder cn work": "qoder-cn-work",
+        "qoder cn": "qoder-cn",
+        "通义灵码": "qoder-cn",
     ]
 
     /// IDE 名称到品牌色的映射（用于文字徽章背景）
