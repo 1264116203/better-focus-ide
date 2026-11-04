@@ -6,6 +6,8 @@ import SwiftUI
 /// 智能体提问时在灵动岛上展示的交互式问题卡片。
 struct NotchAgentQuestionView: View {
     @ObservedObject var controller: QuestionController
+    /// 观察 Settings 单例，使设置变更时视图能自动重新渲染（字号、间距等即时生效）。
+    @ObservedObject private var settings = Settings.shared
     var pinned = false
     var onTogglePin: () -> Void = {}
     @FocusState private var otherFocused: Bool
@@ -13,11 +15,11 @@ struct NotchAgentQuestionView: View {
     private var prompt: AgentQuestionPrompt? { controller.prompt }
     private var currentQuestion: AgentQuestion? { prompt?.question }
 
-    // 实时字号（Python body_font / option_font / desc_font），渲染时读取，
-    // 使面板改动无需重启即生效。
-    private var bodyFontSize: CGFloat { CGFloat(Settings.shared.bodyFont) }
-    private var optionFontSize: CGFloat { CGFloat(Settings.shared.optionFont) }
-    private var descFontSize: CGFloat { CGFloat(Settings.shared.descFont) }
+    // 字号（硬编码默认值，不再从 Settings 读取）
+    private var bodyFontSize: CGFloat { 12 }
+    private var optionFontSize: CGFloat { 12 }
+    private var descFontSize: CGFloat { 10.5 }
+    /// 卡片内边距（实时取自 Settings，改动即时生效）
     private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
     /// 来源展示名：优先使用 hook 上报的真实 IDE 名称，否则回退到提供方名。
@@ -28,39 +30,57 @@ struct NotchAgentQuestionView: View {
 
     var body: some View {
         if let prompt = prompt, let question = currentQuestion {
-            VStack(alignment: .leading, spacing: 8) {
-                header(prompt: prompt, question: question)
-                if !question.question.isEmpty {
-                    Text(question.question)
-                        .font(.system(size: bodyFontSize))
-                        .foregroundStyle(.white.opacity(0.92))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                ScrollView {
-                    VStack(spacing: 6) {
-                        optionsView(question: question)
-                        otherRow(question: question)
+            ZStack(alignment: .topTrailing) {
+                VStack(alignment: .leading, spacing: 8) {
+                    header(prompt: prompt, question: question)
+                    if !question.question.isEmpty {
+                        Text(question.question)
+                            .font(.system(size: bodyFontSize))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    ScrollView {
+                        VStack(spacing: 6) {
+                            optionsView(question: question)
+                            otherRow(question: question)
+                        }
+                    }
+                    sendButton(prompt: prompt)
                 }
-                sendButton(prompt: prompt)
+                .padding(.horizontal, inset)
+                .padding(.vertical, 10)
+
+                // 钉住开关：ZStack 覆盖层，统一使用主题色
+                Button(action: onTogglePin) {
+                    Image(systemName: pinned ? "pin.fill" : "pin")
+                        .font(.system(size: 12, weight: .semibold))
+                        .rotationEffect(.degrees(pinned ? 0 : 45))
+                        .foregroundStyle(pinned
+                            ? Color(red: settings.accentRGB.r,
+                                    green: settings.accentRGB.g,
+                                    blue: settings.accentRGB.b)
+                            : Color.white.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 6)
+                .padding(.trailing, inset)
+                .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
             }
-            .padding(.horizontal, inset)
-            .padding(.vertical, 10)
         }
     }
 
     // MARK: - 头部
 
-    /// 头部：提供方徽章 + "来源 · 问题标题" + 多问翻页步进器 + 钉住按钮。
+    /// 头部：提供方徽章 + "来源 · 问题标题" + 多问翻页步进器。
     private func header(prompt: AgentQuestionPrompt, question: AgentQuestion) -> some View {
         HStack(spacing: 8) {
             // 提供方徽章（首字母取自来源名）
             Text(String(sourceName.prefix(1)))
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 18, height: 18)
+                .frame(width: 24, height: 24)
                 .background(prompt.provider.tint.opacity(0.9),
-                            in: RoundedRectangle(cornerRadius: 4))
+                            in: RoundedRectangle(cornerRadius: 6))
                 .layoutPriority(1)
             Text("\(sourceName) · \(question.header)")
                 .font(.system(size: 11, weight: .medium))
@@ -92,17 +112,6 @@ struct NotchAgentQuestionView: View {
                 .foregroundStyle(.white.opacity(0.85))
                 .layoutPriority(1)
             }
-            // 钉住图标（固定模式）：点击或 ⌘⇧P 在 固定 ⇄ 按需 间切换。
-            Button(action: onTogglePin) {
-                Image(systemName: pinned ? "pin.fill" : "pin")
-                    .font(.system(size: 12, weight: .semibold))
-                    .rotationEffect(.degrees(pinned ? 0 : 45))
-                    .foregroundStyle(pinned ? AnyShapeStyle(prompt.provider.tint)
-                                     : AnyShapeStyle(.secondary))
-            }
-            .buttonStyle(.plain)
-            .layoutPriority(1)
-            .help(pinned ? "取消固定（按需收起）" : "固定（保持展开）")
         }
     }
 

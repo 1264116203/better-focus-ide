@@ -25,8 +25,8 @@ enum NotchLayout {
     /// 通知横幅宽高（Python EXPANDED_WIDTH × EXPANDED_HEIGHT）。
     static var expandedWidth: CGFloat { CGFloat(Settings.shared.notifyWidth) }
     static var expandedHeight: CGFloat { CGFloat(Settings.shared.notifyHeight) }
-    /// 问题 / 权限卡片宽度（Python QUESTION_CARD_WIDTH）。
-    static var questionCardWidth: CGFloat { CGFloat(Settings.shared.cardWidth) }
+    /// 问题 / 权限卡片宽度（统一为 380pt，与通知横幅一致）。
+    static var questionCardWidth: CGFloat { CGFloat(Settings.shared.notifyWidth) }
     /// 历史面板宽度（Python HISTORY_WIDTH = EXPANDED_WIDTH）。
     static var historyWidth: CGFloat { CGFloat(Settings.shared.notifyWidth) }
     
@@ -135,7 +135,7 @@ struct NotchGeometry: Equatable {
     var floats: Bool { floatingGap != nil }
     
     /// 内容顶部安全区：悬浮形态用底部内收，刘海形态避开摄像头。
-    var safeContentTop: CGFloat { floats ? NotchLayout.bottomInset : cameraHeight + 10 }
+    var safeContentTop: CGFloat { floats ? NotchLayout.bottomInset : cameraHeight + CGFloat(Settings.shared.notchTopPadding) }
     
     var stripHeight: CGFloat { cameraHeight }
     

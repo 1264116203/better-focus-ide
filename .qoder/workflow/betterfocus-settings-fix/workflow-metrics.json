@@ -1,0 +1,47 @@
+{
+  "workflow": "wf-bug-fix",
+  "slug": "betterfocus-settings-fix",
+  "started_at": "2026-11-04T10:29:59",
+  "completed_at": "2026-11-04T10:35:00",
+  "total_duration": "0h 5m 1s",
+  "phases": [
+    {
+      "phase": 1,
+      "name": "ss-diag-rootcause",
+      "status": "PASS",
+      "started_at": "2026-11-04T10:29:59",
+      "completed_at": "2026-11-04T10:35:00",
+      "duration": "0h 5m 1s",
+      "outputs": ["01-rootcause.md"]
+    },
+    {
+      "phase": 2,
+      "name": "ss-tdd-cycle",
+      "status": "PASS",
+      "started_at": "2026-11-04T10:32:00",
+      "completed_at": "2026-11-04T10:34:00",
+      "duration": "0h 2m 0s",
+      "outputs": ["02-test-cases.md", "SettingsTests.swift", "NotchAgentQuestionView.swift", "NotchPermissionView.swift", "Package.swift"]
+    },
+    {
+      "phase": 3,
+      "name": "ss-code-review",
+      "status": "PASS",
+      "started_at": "2026-11-04T10:34:31",
+      "completed_at": "2026-11-04T10:35:00",
+      "duration": "0h 0m 29s",
+      "outputs": ["03-code-review.md", "review-spec.md", "review-standards.md"]
+    }
+  ],
+  "test_results": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "execution_time": "0.014s"
+  },
+  "review_results": {
+    "spec_axis": "PASS",
+    "standards_axis": "PASS",
+    "overall": "PASS"
+  }
+}

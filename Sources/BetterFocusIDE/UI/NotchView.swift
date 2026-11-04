@@ -6,6 +6,9 @@ import SwiftUI
 /// 灵动岛主容器视图：根据展开/收起状态路由到对应内容。
 struct NotchView: View {
     @ObservedObject var service: NotchService
+    /// 直接观察 Settings，确保任何设置变更（包括岛收起时 surfaceSize 不变的情况）
+    /// 都能触发 SwiftUI 重新渲染，让卡片视图采纳新的字号 / 间距 / 颜色等。
+    @ObservedObject private var settings = Settings.shared
     @State private var pulseScale: CGFloat = 1.0
     
     var body: some View {
@@ -92,7 +95,9 @@ struct NotchView: View {
                                     bellSwingStart: service.bellSwingStart)
                 }
             case .history:
-                NotchHistoryView(controller: service.historyController) { entry in
+                NotchHistoryView(controller: service.historyController,
+                                 pinned: service.pinned,
+                                 onTogglePin: { service.togglePin() }) { entry in
                     service.historyController.tapped(entry)
                     service.collapse()
                 }
