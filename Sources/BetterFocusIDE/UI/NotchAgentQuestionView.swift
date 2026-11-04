@@ -92,9 +92,10 @@ struct NotchAgentQuestionView: View {
     /// 头部：提供方徽章 + "来源 · 问题标题" + 多问翻页步进器。
     private func header(prompt: AgentQuestionPrompt, question: AgentQuestion) -> some View {
         HStack(spacing: 8) {
-            // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章
+            // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章；
+            // host 缺失时用 sourceName（统一兜底名）匹配图标
             IDEIconProvider.badgeView(
-                hostName: prompt.host?.name,
+                hostName: prompt.host?.name ?? sourceName,
                 bundleID: prompt.host?.bundle,
                 fallbackText: badgeText,
                 tint: prompt.provider.tint,

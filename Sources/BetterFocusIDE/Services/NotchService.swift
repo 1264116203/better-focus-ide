@@ -59,10 +59,10 @@ final class NotchService: ObservableObject {
     private var isClosing = false
     /// 钉住的卡片保持展开而非自动收起（"固定 ⇄ 按需"）。
     @Published private(set) var pinned = false
-    /// 记住用户对历史面板的置顶偏好（历史面板是瞬态的，收起即消失）
-    private var lastHistoryPinned: Bool
-    /// 记住用户对通知横幅的置顶偏好（通知横幅是瞬态的，到时即消失）
-    private var lastNoticePinned: Bool
+    /// 用户对历史面板的置顶覆盖（nil = 未手动切换，实时跟随设置 pinByDefault）
+    private var lastHistoryPinned: Bool?
+    /// 用户对通知横幅的置顶覆盖（nil = 未手动切换，实时跟随设置 pinByDefault）
+    private var lastNoticePinned: Bool?
     private var keyMonitor: Any?
     /// 由 AppDelegate 接线，使 ⌘, 打开设置窗口。
     var onOpenSettings: (() -> Void)?
@@ -119,11 +119,7 @@ final class NotchService: ObservableObject {
         
         // 以收起尺寸启动
         self.surfaceSize = initialGeometry.restingSize(showsContent: false)
-        
-        // 初始化瞬态卡片的置顶偏好（取自设置默认值）
-        self.lastHistoryPinned = Settings.shared.pinByDefault
-        self.lastNoticePinned = Settings.shared.pinByDefault
-        
+
         // 观察屏幕变化
         observeScreenChanges()
 
@@ -427,11 +423,11 @@ final class NotchService: ObservableObject {
         updateBreathingTint()
         let cardChanged = activeCard != .history
         activeCard = .history
-        // 使用记住的置顶偏好（用户手动切换后再次打开时保留状态）
+        // 置顶偏好：用户手动切换过的以用户为准，否则实时跟随设置（改动即刻生效）
         if cardChanged {
-            pinned = lastHistoryPinned
+            pinned = lastHistoryPinned ?? Settings.shared.pinByDefault
         }
-        Log.info("showHistory: pinned=\(pinned), lastHistoryPinned=\(lastHistoryPinned), cardChanged=\(cardChanged)", topic: "history")
+        Log.info("showHistory: pinned=\(pinned), lastHistoryPinned=\(String(describing: lastHistoryPinned)), cardChanged=\(cardChanged)", topic: "history")
 
         let rows = max(1, historyController.entries.count)
 
@@ -464,9 +460,9 @@ final class NotchService: ObservableObject {
     private func showNoticeBanner() {
         let cardChanged = activeCard != .notice
         activeCard = .notice
-        // 使用记住的置顶偏好（用户手动切换后再次收到通知时保留状态）
+        // 置顶偏好：用户手动切换过的以用户为准，否则实时跟随设置（改动即刻生效）
         if cardChanged {
-            pinned = lastNoticePinned
+            pinned = lastNoticePinned ?? Settings.shared.pinByDefault
         }
         bellSwingStart = Date()  // Trigger bell swing animation.
         let bannerSize = CGSize(width: NotchLayout.expandedWidth,

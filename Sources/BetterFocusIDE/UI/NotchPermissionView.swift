@@ -66,9 +66,10 @@ struct NotchPermissionView: View {
     /// 头部：来源徽章 + "来源 · 动作标题" + 待处理数徽标。
     private func header(_ req: PermissionRequest) -> some View {
         HStack(spacing: 8) {
-            // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章
+            // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章；
+            // host 缺失时用 sourceName（统一兜底名）匹配图标
             IDEIconProvider.badgeView(
-                hostName: req.host?.name,
+                hostName: req.host?.name ?? sourceName,
                 bundleID: req.host?.bundle,
                 fallbackText: badgeText,
                 tint: req.provider.tint,

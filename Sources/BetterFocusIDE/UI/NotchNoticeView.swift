@@ -50,9 +50,11 @@ struct NotchNoticeView: View {
             ZStack(alignment: .topTrailing) {
                 Button(action: onTap) {
                     HStack(spacing: 10) {
-                        // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章
+                        // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章。
+                        // host 缺失时（如 CLI 直发的测试消息）用 providerName 兜底，
+                        // 使 opencode / qoder 等提供方仍能匹配到真实图标。
                         IDEIconProvider.badgeView(
-                            hostName: notice.host?.name,
+                            hostName: notice.host?.name ?? notice.providerName,
                             bundleID: notice.host?.bundle,
                             fallbackText: badgeText,
                             tint: tint,
