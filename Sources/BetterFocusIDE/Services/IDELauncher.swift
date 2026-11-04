@@ -47,6 +47,7 @@ struct HostInfo: Codable, Equatable {
         "org.alacritty": "Alacritty",
         "com.github.wez.wezterm": "WezTerm",
         // 其他
+        "com.tencent.workbuddy.mac": "WorkBuddy",
         "ai.workbuddy": "WorkBuddy",
         "ai.moonshot.kimi": "Kimi",
     ]
@@ -84,14 +85,23 @@ enum IDELauncher {
         // Qoder 家族：独立应用 + VS Code 系 IDE（英文/中文）
         "qoder": ["com.qoder.app", "com.qoder.ide", "com.aliyun.lingma.ide"],
         "opencode": ["ai.opencode.desktop"],
+        // Cursor：ToDesktop 打包的实际 bundle id 在前，官方 id 兜底
+        "cursor": ["com.todesktop.230313mzl4w4u92", "com.cursor"],
+        // WorkBuddy：桌面应用（Electron），无 VS Code 系 CLI
+        "workbuddy": ["com.tencent.workbuddy.mac", "ai.workbuddy"],
     ]
     static let ideNames: [String: [String]] = [
         "qoder": ["Qoder"],
         "opencode": ["OpenCode"],
+        "cursor": ["Cursor"],
+        "workbuddy": ["WorkBuddy"],
     ]
     static let jetbrainsPrefix = "com.jetbrains."
-    /// VS Code 系 Qoder 变体：支持 `code -r <cwd>` 聚焦窗口。
-    static let qoderVSCodeBundles: Set<String> = ["com.qoder.ide", "com.aliyun.lingma.ide"]
+    /// VS Code 系变体：支持 `code -r <cwd>` 精确复用项目窗口。
+    static let vscodeFamilyBundles: Set<String> = [
+        "com.qoder.ide", "com.aliyun.lingma.ide",
+        "com.todesktop.230313mzl4w4u92", "com.cursor",
+    ]
     /// 表示"跑在终端里、没有可跳回的 GUI 窗口"的 bundle 集合。
     static let terminalBundles: Set<String> = [
         "com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty",
@@ -101,13 +111,19 @@ enum IDELauncher {
 
     /// 决定该为这条通知唤起哪个应用；返回 nil 表示没有可跳转的目标。
     static func target(for provider: String, host: HostInfo?) -> (bundles: [String], names: [String])? {
-        // provider 可能是产品值（jetbrains_plugin / qoder_cli 等）或组值（qoder / opencode），
-        // 用 AgentProvider 统一解析后取 providerGroup 作为索引键。
+        // provider 可能是产品值（jetbrains_plugin / qoder_cli 等）或组值
+        // （qoder / opencode / cursor / workbuddy），用 AgentProvider 统一解析后
+        // 取 providerGroup 作为索引键。
         let resolved = AgentProvider(rawValue: provider)
-        let key = resolved?.providerGroup ?? (ideBundles[provider] != nil ? provider : "qoder")
+        var key = resolved?.providerGroup ?? (ideBundles[provider] != nil ? provider : "qoder")
+        let bundle = host?.bundle ?? ""
+        // provider 缺失或 unknown 时用宿主 bundle 反查分组：老 hook 或第三方脚本
+        // 只上报 host 时，Cursor / WorkBuddy 的通知也必须跳回自己的窗口。
+        if (resolved == nil || resolved == .unknown), let inferred = group(for: bundle) {
+            key = inferred
+        }
         let bundles = ideBundles[key] ?? []
         let names = ideNames[key] ?? []
-        let bundle = host?.bundle ?? ""
         if bundle.isEmpty { return (bundles, names) }
         // JetBrains 系：直接用上报的具体 bundle/名字（每个 IDE bundle 各不同）。
         if bundle.hasPrefix(jetbrainsPrefix) {
@@ -118,6 +134,13 @@ enum IDELauncher {
         // Qoder 跑在终端里：无窗口可跳，返回 nil。
         if terminalBundles.contains(bundle) && key == "qoder" { return nil }
         return (bundles, names)
+    }
+
+    /// 由宿主 bundle id 反查它属于哪个提供方组。
+    static func group(for bundle: String) -> String? {
+        guard !bundle.isEmpty else { return nil }
+        for (key, bundles) in ideBundles where bundles.contains(bundle) { return key }
+        return nil
     }
 
     /// 为该通知唤起 IDE。返回是否成功。
@@ -158,18 +181,18 @@ enum IDELauncher {
                     return true
                 }
             }
-            // Qoder IDE（VS Code 系）：code -r + IPC socket 环境变量复用窗口
-            if qoderVSCodeBundles.contains(hostBundle),
+            // VS Code 系（Qoder IDE / Cursor）：code -r + IPC socket 复用窗口
+            if vscodeFamilyBundles.contains(hostBundle),
                let hostPath = host?.path, !hostPath.isEmpty {
                 if focusCodeWindow(hostPath: hostPath, hostBundle: hostBundle, cwd: cwd) {
-                    Log.info("已用 code -r 定位 Qoder IDE 窗口 \(cwd)", topic: "launcher")
+                    Log.info("已用 code -r 定位 \(hostBundle) 窗口 \(cwd)", topic: "launcher")
                     return true
                 }
             }
-            // Qoder IDE 二级定位失败时，回退到 App 级激活
-            if qoderVSCodeBundles.contains(hostBundle) {
+            // VS Code 系二级定位失败时，回退到 App 级激活
+            if vscodeFamilyBundles.contains(hostBundle) {
                 if activateByAppleScript(bundle: hostBundle) {
-                    Log.info("已激活 Qoder IDE \(hostBundle)（App 级回退）", topic: "launcher")
+                    Log.info("已激活 VS Code 系 \(hostBundle)（App 级回退）", topic: "launcher")
                     return true
                 }
             }
@@ -374,6 +397,8 @@ enum IDELauncher {
         let bundleToDataDir: [String: [String]] = [
             "com.qoder.ide": ["Qoder", "Qoder IDE"],
             "com.aliyun.lingma.ide": ["QoderCN", "Qoder CN"],
+            "com.todesktop.230313mzl4w4u92": ["Cursor"],
+            "com.cursor": ["Cursor"],
             "com.microsoft.VSCode": ["Code"],
             "com.visualstudio.code.oss": ["Code - OSS"],
         ]

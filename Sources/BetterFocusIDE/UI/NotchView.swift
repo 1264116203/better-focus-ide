@@ -17,15 +17,14 @@ struct NotchView: View {
             if service.expanded || service.closingCard != nil {
                 expandedContent
                 
-                // 气泡覆盖层：展开时气泡显示在卡片上方，点击可收起
+                // 气泡覆盖层：展开时气泡显示在卡片上方。
+                // 点击收起统一由外层那个带坐标的 onTapGesture 处理。若在这里也挂一个手势，
+                // 同一次点击会先 collapse() 让 expanded 变 false，外层 guard 随即放行
+                // 并 toggle() → expand()，于是「收起 → 立刻弹回」反复闪烁。
                 bubbleWithGlow
                     .frame(width: service.geometry.collapsed.width,
                            height: service.geometry.collapsed.height)
                     .frame(maxWidth: .infinity)  // 水平居中
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        service.collapse()
-                    }
             } else {
                 collapsedContent
             }
@@ -33,12 +32,21 @@ struct NotchView: View {
         .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
         .clipped()  // 防止 SwiftUI 内容在 AppKit 壳布局完成前溢出
         .foregroundStyle(.white)
-        // 表面点击：仅收起态或无卡片时处理；展开的交互式卡片由自身处理交互，
-        // 背景点击不应触发收起（否则点选项间隙会误关卡片）。
+        // 表面点击：整层只用这一个手势，按落点区分。
+        // - 收起态：整块气泡都可点，走常规 toggle（恢复通知 / 展开待处理卡片 / 历史）。
+        // - 展开态：只有顶部气泡区域可收起；卡片内容区留给按钮和选项，
+        //   点选项间隙不会误关卡片。
         .contentShape(Rectangle())
-        .onTapGesture {
-            guard !service.expanded || service.activeCard == .none else { return }
-            service.handleSurfaceTap()
+        .onTapGesture(count: 1, coordinateSpace: .local) { location in
+            if service.expanded || service.closingCard != nil {
+                let w = service.geometry.collapsed.width
+                let h = service.geometry.collapsed.height
+                let bubble = CGRect(x: (service.surfaceSize.width - w) / 2,
+                                    y: 0, width: w, height: h)
+                if bubble.contains(location) { service.collapse() }
+            } else {
+                service.handleSurfaceTap()
+            }
         }
         .environment(\.colorScheme, .dark)
         .tint(.white)

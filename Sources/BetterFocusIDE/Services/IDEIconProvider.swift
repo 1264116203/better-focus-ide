@@ -78,6 +78,9 @@ enum IDEIconProvider {
         "com.jetbrains.rubymine": "rubymine",
         "com.byte-dance.trae": "trae-cn",
         "com.bytedance.trae": "trae-cn",
+        "com.tencent.workbuddy.mac": "workbuddy",
+        "ai.workbuddy": "workbuddy",
+        "ai.moonshot.kimi": "kimi",
     ]
 
     /// IDE 名称到品牌色的映射（用于文字徽章背景）

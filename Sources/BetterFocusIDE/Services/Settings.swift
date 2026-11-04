@@ -67,6 +67,8 @@ final class Settings: ObservableObject {
     @Published var accentColor = "0.29,0.62,1.0"
     @Published var qoderTint = "0.58,0.45,0.82"
     @Published var opencodeTint = "0.06,0.73,0.51"
+    @Published var cursorTint = "0.00,0.55,0.75"
+    @Published var workbuddyTint = "0.85,0.55,0.20"
     @Published var radiusExpanded: Double = 22
     @Published var radiusBubble: Double = 13
     /// 呼吸灯辉光范围（pt）：值越大辉光扩散越远
@@ -138,6 +140,8 @@ final class Settings: ObservableObject {
     var accentRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(accentColor, fallback: (0.29, 0.62, 1.0)) }
     var qoderTintRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(qoderTint, fallback: (0.58, 0.45, 0.82)) }
     var opencodeTintRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(opencodeTint, fallback: (0.06, 0.73, 0.51)) }
+    var cursorTintRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(cursorTint, fallback: (0.00, 0.55, 0.75)) }
+    var workbuddyTintRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(workbuddyTint, fallback: (0.85, 0.55, 0.20)) }
 
     /// 解析后的 reduce-motion 布尔值（三态 → bool）。
     var reduceMotionResolved: Bool {
@@ -208,6 +212,8 @@ final class Settings: ObservableObject {
         accentColor = v["accentColor"]?.stringValue ?? accentColor
         qoderTint = v["qoderTint"]?.stringValue ?? qoderTint
         opencodeTint = v["opencodeTint"]?.stringValue ?? opencodeTint
+        cursorTint = v["cursorTint"]?.stringValue ?? cursorTint
+        workbuddyTint = v["workbuddyTint"]?.stringValue ?? workbuddyTint
         radiusExpanded = v["radiusExpanded"]?.doubleValue ?? radiusExpanded
         radiusBubble = v["radiusBubble"]?.doubleValue ?? radiusBubble
         glowRadius = v["glowRadius"]?.doubleValue ?? glowRadius
@@ -272,6 +278,8 @@ final class Settings: ObservableObject {
         values["accentColor"] = .string(accentColor)
         values["qoderTint"] = .string(qoderTint)
         values["opencodeTint"] = .string(opencodeTint)
+        values["cursorTint"] = .string(cursorTint)
+        values["workbuddyTint"] = .string(workbuddyTint)
         values["radiusExpanded"] = .double(radiusExpanded)
         values["radiusBubble"] = .double(radiusBubble)
         values["glowRadius"] = .double(glowRadius)
@@ -345,6 +353,7 @@ final class Settings: ObservableObject {
         bubbleHorizontalOffset = 0; cardHorizontalOffset = 0
         backgroundColor = "0.05,0.05,0.07"; backgroundAlpha = 0.96
         accentColor = "0.29,0.62,1.0"; qoderTint = "0.58,0.45,0.82"; opencodeTint = "0.06,0.73,0.51"
+        cursorTint = "0.00,0.55,0.75"; workbuddyTint = "0.85,0.55,0.20"
         radiusExpanded = 22; radiusBubble = 13; glowRadius = 6
         glowBreathAmplitude = 0.65; glowBreathPeriod = 2.4
         motionGrowBounce = 0.25; reduceMotion = "system"; animationSpeed = 1.0; animationFps = 0

@@ -58,10 +58,14 @@ final class NotchService: ObservableObject {
     /// 卡片正在淡出时为 true；按键被忽略，应答不会中途被改。
     private var isClosing = false
     /// 钉住的卡片保持展开而非自动收起（"固定 ⇄ 按需"）。
-    @Published private(set) var pinned = false
+    /// 初值必须与设置一致：否则启动后、第一张卡片上屏前，图钉图标会显示成"按需"
+    /// 而设置里其实是"固定"，两者短暂不同步。
+    @Published private(set) var pinned = Settings.shared.pinByDefault
     /// 用户手动置顶偏好（**所有卡片共享一份**；nil = 未手动切换，实时跟随设置 pinByDefault）。
     /// 进程内记忆：重启 app 后回到设置默认值。
     private var userPinned: Bool?
+    /// 上次看到的设置默认值；用于在设置面板切换「卡片默认固定展示」时清除手动覆盖。
+    private var lastPinByDefault = Settings.shared.pinByDefault
     private var keyMonitor: Any?
     /// 由 AppDelegate 接线，使 ⌘, 打开设置窗口。
     var onOpenSettings: (() -> Void)?
@@ -97,6 +101,9 @@ final class NotchService: ObservableObject {
     private var autoCollapseHeld: Date?
     /// 固定模式：手动收起的让位期（在此之前不再自动展开）。
     private var manualCollapseUntil: Date?
+    /// 手动收起时鼠标是否还停在岛上：为真时必须先移出再移入，悬停才允许重开。
+    /// 否则「点气泡收起 → 鼠标没动 → 延迟一到又自己弹开」。
+    private var manualCollapseNeedsMouseExit = false
     private var hoverTimer: Timer?
     /// 周期性陈旧卡片清扫（Python CARD_SWEEP_INTERVAL / CARD_SWEEP_GRACE）。
     private var sweepTimer: Timer?
@@ -202,10 +209,11 @@ final class NotchService: ObservableObject {
         guard expanded else { return }
         expanded = false
         isClosing = true
-        // 固定模式：记录让位期，使自动展开不会立即重开。
-        if pinned {
-            manualCollapseUntil = Date().addingTimeInterval(Self.manualCollapseHold)
-        }
+        // 手动收起后一律记录让位期。原先只有固定模式记录，导致按需模式下
+        // 「用户点气泡收起 → 鼠标还在岛上 → tickHoverTimer 立刻重新展开」，
+        // 表现为卡片反复闪烁、根本收不起来。
+        manualCollapseUntil = Date().addingTimeInterval(Self.manualCollapseHold)
+        manualCollapseNeedsMouseExit = hovering
         cancelAutoCollapse()
         collapseAt = nil
         // 历史与通知是瞬态的：收起即消失。提问与权限持续（卡片仍等用户）。
@@ -392,22 +400,23 @@ final class NotchService: ObservableObject {
 
     // MARK: - Phase 4: Install / history
 
-    /// One-click install of both integrations. Returns a human summary.
+    /// One-click install of all four integrations. Returns a human summary.
+    /// 任一宿主失败不影响其余条目：用户能直接从汇总里看到是哪一项出问题。
     @discardableResult
     func installAll() -> String {
         var lines: [String] = []
-        do {
-            try QoderHookInstaller.install()
-            lines.append("✓ Qoder Hook 已安装")
-        } catch {
-            lines.append("✗ Qoder Hook 失败：\(error.localizedDescription)")
+        func install(_ label: String, _ work: () throws -> Void) {
+            do {
+                try work()
+                lines.append("✓ \(label) 已安装")
+            } catch {
+                lines.append("✗ \(label) 失败：\(error.localizedDescription)")
+            }
         }
-        do {
-            try OpenCodePluginInstaller.install()
-            lines.append("✓ OpenCode Plugin 已安装")
-        } catch {
-            lines.append("✗ OpenCode Plugin 失败：\(error.localizedDescription)")
-        }
+        install("Qoder Hook") { try QoderHookInstaller.install() }
+        install("OpenCode Plugin") { try OpenCodePluginInstaller.install() }
+        install("Cursor Hook") { try CursorHookInstaller.install() }
+        install("WorkBuddy Hook") { try WorkBuddyHookInstaller.install() }
         Log.info("installAll: " + lines.joined(separator: " | "), topic: "install")
         return lines.joined(separator: "\n")
     }
@@ -415,6 +424,8 @@ final class NotchService: ObservableObject {
     func uninstallAll() {
         QoderHookInstaller.uninstall()
         OpenCodePluginInstaller.uninstall()
+        CursorHookInstaller.uninstall()
+        WorkBuddyHookInstaller.uninstall()
     }
 
     /// 显示最近通知历史面板（从空闲状态的灵动岛触发）
@@ -491,33 +502,29 @@ final class NotchService: ObservableObject {
         scheduleAutoCollapse(after: Settings.shared.notifyBannerDuration)
     }
 
+    /// 交互式卡片（提问 / 权限）上屏。
+    ///
+    /// 这两类请求是**阻塞式**的：hook 正同步等用户回答，超时就回落到 IDE 自己的弹窗。
+    /// 因此无论「固定」还是「按需」模式都必须主动展开一次——pinned 只决定展开后
+    /// 是否保持（鼠标移出是否自动收起），不能把卡片吞进队列里只留一个圆点。
+    /// 瞬态的通知 / 历史仍走 showNoticeBanner / showHistory 的按需逻辑。
     private func showCard(_ card: ActiveCard) {
         activeCard = card
         // 置顶状态全局统一：不按卡片重置，从共享偏好解析
         refreshPinned()
         FeedbackService.onArrive()
-        
-        if pinned {
-            // Pinned mode: always expand immediately.
-            if !expanded {
-                expanded = true
-                expandedAt = Date()
-                isClosing = false
-            }
-            animateTo(size: targetSizeForCurrentCard())
-        } else {
-            // On-demand mode: expand only if hovering; otherwise stay collapsed.
-            if hovering {
-                if !expanded {
-                    expanded = true
-                    expandedAt = Date()
-                    isClosing = false
-                }
-                animateTo(size: targetSizeForCurrentCard())
-            }
-            // If not hovering, the card stays queued. Hover-expand will trigger
-            // via tickHoverTimer when the mouse enters.
+
+        // 新请求到达即清掉上一次手动收起的让位期，避免悬停状态机把它压住。
+        manualCollapseUntil = nil
+        manualCollapseNeedsMouseExit = false
+        collapseAt = nil
+        if !expanded {
+            expanded = true
+            expandedAt = Date()
+            isClosing = false
         }
+        animateTo(size: targetSizeForCurrentCard())
+        Log.info("showCard: \(card) 主动弹出, pinned=\(pinned)", topic: "card")
         syncKeyFocus()
         updatePendingTotal()
     }
@@ -778,14 +785,18 @@ final class NotchService: ObservableObject {
         hovering = false
         hoverSince = nil
         hoverExpanded = false
+        // 鼠标已移出，解除「手动收起后需先移出再移入」的限制。
+        manualCollapseNeedsMouseExit = false
         // 恢复自动收起截止时刻。
         if let held = autoCollapseHeld {
             autoCollapseAt = held
             autoCollapseHeld = nil
         }
-        // 按需模式：若因悬停而展开，则安排延迟收起。
+        // 按需模式：鼠标移开后安排延迟收起，交互式卡片也遵循——否则「固定 / 按需」
+        // 对提问卡片毫无区别，图钉看起来就是个不起作用的装饰。收起后气泡仍保留
+        // 待处理圆点，点击即可恢复，不会丢掉等待回答的请求。
         Log.debug("mouseExited: pinned=\(pinned), expanded=\(expanded), activeCard=\(activeCard)", topic: "hover")
-        if !pinned && expanded && activeCard != .question && activeCard != .permission {
+        if !pinned && expanded && activeCard != .none {
             collapseAt = Date().addingTimeInterval(Self.hoverCollapseDelay)
             Log.debug("mouseExited: setting collapseAt", topic: "hover")
         }
@@ -826,7 +837,7 @@ final class NotchService: ObservableObject {
             // 尊重手动收起让位期。
             if let holdUntil = manualCollapseUntil, now < holdUntil {
                 // 仍在让位期内：跳过。
-            } else if !hoverExpanded {
+            } else if !hoverExpanded && !manualCollapseNeedsMouseExit {
                 hoverExpanded = true
                 expand(gentle: true)
             }
@@ -1069,10 +1080,25 @@ final class NotchService: ObservableObject {
     /// 翻转固定模式：钉住的卡片保持展开而非自动收起。
     /// 手动偏好全局共享——在任意卡片上切换，对所有卡片生效。
     func togglePin() {
+        let next = !pinned
         Log.info("togglePin called: before pinned=\(pinned), activeCard=\(activeCard)", topic: "pin")
-        userPinned = !pinned
-        applyPinned(!pinned)
-        Log.info("图钉切换 pinned=\(pinned)", topic: "pin")
+        userPinned = next
+        applyPinned(next)
+        // 切换必须立刻可见。原先只改了一个布尔值，而提问 / 权限卡片从来不会
+        // 自动收起，于是点图钉除了图标换色之外什么都没发生。
+        if next {
+            // 固定模式：正在等待回答却被收起的卡片立即展开。
+            if activeCard != .none, !expanded {
+                manualCollapseUntil = nil
+                manualCollapseNeedsMouseExit = false
+                expand()
+            }
+        } else if expanded, !hovering, activeCard != .none {
+            // 按需模式：鼠标已离开，按悬停延迟收起（气泡保留圆点可恢复）。
+            collapseAt = Date().addingTimeInterval(Self.hoverCollapseDelay)
+            ensureHoverTimer()
+        }
+        Log.info("图钉切换 pinned=\(pinned), expanded=\(expanded)", topic: "pin")
     }
 
     /// 从共享偏好解析置顶状态：用户手动切换过以用户为准，否则实时跟随设置。
@@ -1086,8 +1112,11 @@ final class NotchService: ObservableObject {
         guard pinned != newValue else { return }
         pinned = newValue
         if newValue {
-            // 钉住：取消任何待执行的自动收起。
+            // 钉住：取消任何待执行的自动收起，并作废手动收起的让位期。
             cancelAutoCollapse()
+            collapseAt = nil
+            manualCollapseUntil = nil
+            manualCollapseNeedsMouseExit = false
         } else {
             // 取消钉住：为瞬态内容重新装载自动收起。
             if activeCard == .notice {
@@ -1106,9 +1135,17 @@ final class NotchService: ObservableObject {
     private func handleSettingsChanged() {
         updatePendingTotal()
         restartSweepTimerIfNeeded()
-        // pinByDefault 改动即刻生效：仅当用户未手动切换过（userPinned == nil）
-        // 且有卡片在屏时才重解析；手动偏好优先，设置改动不会覆盖它。
-        if activeCard != .none {
+        // 设置面板切换「卡片默认固定展示」时以设置为准：清掉进程内的手动覆盖，
+        // 否则用户点过一次图钉后，这个开关就永远不起作用了。
+        // 其它设置变更仍按共享偏好重解析（手动偏好优先）。
+        let defaultPinned = Settings.shared.pinByDefault
+        var switchedToFixed = false
+        if defaultPinned != lastPinByDefault {
+            lastPinByDefault = defaultPinned
+            userPinned = nil
+            applyPinned(defaultPinned)
+            switchedToFixed = defaultPinned
+        } else if activeCard != .none {
             refreshPinned()
         }
         guard windowHost != nil else { return }
@@ -1118,6 +1155,12 @@ final class NotchService: ObservableObject {
         // 采纳新的字号 / 颜色。
         surfaceSize = size
         windowHost?.present(size: size, geometry: geometry, animated: false, showsContent: expanded)
+        // 切回「固定」时若正有卡片等待回答却处于收起态，立即展开，保持"改动即刻生效"。
+        if switchedToFixed, activeCard != .none, !expanded {
+            manualCollapseUntil = nil
+            manualCollapseNeedsMouseExit = false
+            expand()
+        }
     }
 
     /// 岛表面被点击。权限提醒可先按需跳回 IDE（permission_notice_jump），再走常规 toggle。
