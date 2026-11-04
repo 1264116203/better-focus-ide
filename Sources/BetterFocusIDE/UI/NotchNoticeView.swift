@@ -38,15 +38,16 @@ struct NotchNoticeView: View {
                     // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章
                     IDEIconProvider.badgeView(
                         hostName: notice.host?.name,
+                        bundleID: notice.host?.bundle,
                         fallbackText: badgeText,
                         tint: tint,
-                        size: 24
+                        size: 28
                     )
                     .rotationEffect(.degrees(bellAngle))
                     .scaleEffect(bellScale)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(notice.title)
+                        Text("任务完成")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.95))
                             .lineLimit(1)
@@ -56,7 +57,7 @@ struct NotchNoticeView: View {
                             .lineLimit(1)
                         if !notice.project.isEmpty {
                             Text(notice.project)
-                                .font(.system(size: 9))
+                                .font(.system(size: 12))
                                 .foregroundStyle(.white.opacity(0.45))
                                 .lineLimit(1)
                         }
@@ -112,9 +113,16 @@ struct NotchNoticeView_Previews: PreviewProvider {
             providerName: "Qoder",
             sessionID: "preview-session",
             title: "预览模式：代码重构已完成",
-            body: "已将所有注释翻译为中文，编译通过。",
+            body: "是否将当前工程拆分为 library + executable 双目标以支持 SwiftUI Preview？",
             project: "better-focus-ide",
-            host: nil,
+            host: {
+                var h = HostInfo()
+                h.bundle = "com.qoder.ide"
+                h.name = "Qoder IDE"
+                h.path = "/Applications/Qoder IDE.app"
+                h.cwd = "/Users/dev/better-focus-ide"
+                return h
+            }(),
             arrivedAt: Date(),
             jumpEnabled: true,
             fromCLI: false

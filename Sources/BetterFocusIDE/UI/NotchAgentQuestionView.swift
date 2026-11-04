@@ -29,6 +29,12 @@ struct NotchAgentQuestionView: View {
         return AgentProvider.effectiveName(provider: prompt.provider, hostName: prompt.host?.name)
     }
 
+    /// 项目名：从 host.cwd 提取末级目录名，用于卡片头部展示。
+    private var projectName: String {
+        guard let cwd = prompt?.host?.cwd, !cwd.isEmpty else { return "" }
+        return (cwd as NSString).lastPathComponent
+    }
+
     /// 徽章文本：取来源展示名的首字母大写。
     private var badgeText: String {
         return String(sourceName.prefix(1)).uppercased()
@@ -39,6 +45,12 @@ struct NotchAgentQuestionView: View {
             ZStack(alignment: .topTrailing) {
                 VStack(alignment: .leading, spacing: 8) {
                     header(prompt: prompt, question: question)
+                    if !projectName.isEmpty {
+                        Text(projectName)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.white.opacity(0.45))
+                            .lineLimit(1)
+                    }
                     if !question.question.isEmpty {
                         Text(question.question)
                             .font(.system(size: bodyFontSize))
@@ -83,6 +95,7 @@ struct NotchAgentQuestionView: View {
             // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章
             IDEIconProvider.badgeView(
                 hostName: prompt.host?.name,
+                bundleID: prompt.host?.bundle,
                 fallbackText: badgeText,
                 tint: prompt.provider.tint,
                 size: 24
@@ -280,11 +293,17 @@ struct NotchAgentQuestionView_Previews: PreviewProvider {
             ],
             multiSelect: false
         )
+        var host = HostInfo()
+        host.bundle = "com.jetbrains.intellij"
+        host.name = "IntelliJ IDEA"
+        host.path = "/Applications/IntelliJ IDEA.app"
+        host.cwd = "/Users/dev/better-focus-ide"
         let prompt = AgentQuestionPrompt(
             provider: .qoder,
             sessionID: "preview-session",
             questions: [question],
-            arrivedAt: Date()
+            arrivedAt: Date(),
+            host: host
         )
         ctrl.present(prompt)
         return NotchAgentQuestionView(controller: ctrl)

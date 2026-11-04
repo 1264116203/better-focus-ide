@@ -55,6 +55,31 @@ enum IDEIconProvider {
         "moonshot": "kimi",
     ]
 
+    /// Bundle ID → 图标文件名直接映射。
+    ///
+    /// 当宿主应用名存在歧义（如 Qoder IDE 的 CFBundleName 也是 "Qoder"，
+    /// 与 Qoder 聊天应用同名）时，用 bundle ID 做精确匹配，避免回退到错误的图标。
+    private static let bundleIconMapping: [String: String] = [
+        "com.qoder.ide": "qoder-ide",
+        "com.aliyun.lingma.ide": "qoder-cn-ide",
+        "com.qoder.app": "qoder",
+        "com.microsoft.VSCode": "vscode",
+        "com.visualstudio.code": "vscode",
+        "com.cursor": "cursor",
+        "com.todesktop.230313mzl4w4u92": "cursor",
+        "ai.opencode.desktop": "opencode",
+        "com.jetbrains.intellij": "intellij-idea",
+        "com.jetbrains.pycharm": "pycharm",
+        "com.jetbrains.webstorm": "webstorm",
+        "com.jetbrains.goland": "goland",
+        "com.jetbrains.rider": "rider",
+        "com.jetbrains.CLion": "clion",
+        "com.jetbrains.PhpStorm": "phpstorm",
+        "com.jetbrains.rubymine": "rubymine",
+        "com.byte-dance.trae": "trae-cn",
+        "com.bytedance.trae": "trae-cn",
+    ]
+
     /// IDE 名称到品牌色的映射（用于文字徽章背景）
     private static let brandColors: [String: (r: Double, g: Double, b: Double)] = [
         // Qoder 系列 - 紫色
@@ -101,7 +126,11 @@ enum IDEIconProvider {
     }()
 
     /// 检查是否有对应 IDE 名称的真实图标
-    static func hasIcon(for hostName: String?) -> Bool {
+    static func hasIcon(for hostName: String?, bundleID: String? = nil) -> Bool {
+        // 优先用 bundle ID 精确匹配
+        if let bundle = bundleID, !bundle.isEmpty, bundleIconMapping[bundle] != nil {
+            return true
+        }
         guard let name = hostName?.lowercased() else { return false }
         for (key, _) in sortedMappings {
             if name.contains(key) { return true }
@@ -110,9 +139,18 @@ enum IDEIconProvider {
     }
 
     /// 获取 IDE 图标（如果有真实图标），否则返回 nil
-    static func icon(for hostName: String?) -> Image? {
+    ///
+    /// 优先用 bundle ID 精确匹配（解决同名歧义，如 Qoder IDE vs Qoder 聊天应用），
+    /// 回退到名称模糊匹配。
+    static func icon(for hostName: String?, bundleID: String? = nil) -> Image? {
+        // 优先用 bundle ID 精确匹配
+        if let bundle = bundleID, !bundle.isEmpty,
+           let iconName = bundleIconMapping[bundle],
+           let image = loadImage(named: iconName) {
+            return image
+        }
+        // 回退到名称模糊匹配
         guard let name = hostName?.lowercased() else { return nil }
-        
         for (key, iconName) in sortedMappings {
             if name.contains(key) {
                 if let image = loadImage(named: iconName) {
@@ -146,12 +184,13 @@ enum IDEIconProvider {
     /// 获取徽章视图：优先使用真实图标，回退到带品牌色的文字徽章
     /// - Parameters:
     ///   - hostName: 宿主应用名称（如 "IntelliJ IDEA"、"Cursor"）
+    ///   - bundleID: 宿主应用 Bundle ID（用于消歧，如区分 Qoder IDE 与 Qoder 聊天应用）
     ///   - fallbackText: 文字徽章内容（首字母）
     ///   - tint: 默认背景色（当无法匹配品牌色时使用）
     ///   - size: 徽章尺寸
     @ViewBuilder
-    static func badgeView(hostName: String?, fallbackText: String, tint: Color, size: CGFloat = 24) -> some View {
-        if let icon = icon(for: hostName) {
+    static func badgeView(hostName: String?, bundleID: String? = nil, fallbackText: String, tint: Color, size: CGFloat = 24) -> some View {
+        if let icon = icon(for: hostName, bundleID: bundleID) {
             // 真实图标
             icon
                 .resizable()

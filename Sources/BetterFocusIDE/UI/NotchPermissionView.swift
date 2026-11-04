@@ -69,9 +69,10 @@ struct NotchPermissionView: View {
             // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章
             IDEIconProvider.badgeView(
                 hostName: req.host?.name,
+                bundleID: req.host?.bundle,
                 fallbackText: badgeText,
                 tint: req.provider.tint,
-                size: 24
+                size: 28
             )
             .layoutPriority(1)
             Text("\(sourceName) · \(req.title)")

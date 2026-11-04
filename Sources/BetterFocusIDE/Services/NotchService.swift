@@ -33,6 +33,8 @@ final class NotchService: ObservableObject {
     @Published private(set) var pendingTint: (r: Double, g: Double, b: Double) = NotchLayout.accentColor
     /// 铃铛摆动动画应开始的时刻（通知到达时）。
     @Published var bellSwingStart: Date?
+    /// 呼吸灯覆盖层的主题色（nil 时不显示，非 nil 时按提供方主题色呼吸）。
+    @Published private(set) var breathingTint: Color?
     /// 正在撤下的卡片（收起动画期间可见，随后清空）。
     @Published private(set) var closingCard: ActiveCard?
 
@@ -667,6 +669,37 @@ final class NotchService: ObservableObject {
             pendingTint = noticeController.pendingTint ?? NotchLayout.accentColor
         } else {
             pendingTint = NotchLayout.accentColor
+        }
+        // 同步更新呼吸灯颜色
+        updateBreathingTint()
+    }
+    
+    /// 更新呼吸灯覆盖层的主题色。
+    ///
+    /// 按当前活动卡片类型取对应提供方的主题色；无卡片时置 nil 关闭呼吸灯。
+    private func updateBreathingTint() {
+        switch activeCard {
+        case .question:
+            if let prompt = questionController.prompt {
+                breathingTint = prompt.provider.tint
+            } else {
+                breathingTint = nil
+            }
+        case .permission:
+            if let request = permissionController.request {
+                breathingTint = request.provider.tint
+            } else {
+                breathingTint = nil
+            }
+        case .notice:
+            if let notice = noticeController.notice {
+                breathingTint = AgentProvider(rawValue: notice.provider)?.tint
+            } else {
+                breathingTint = nil
+            }
+        case .history, .none:
+            // 历史面板和空闲状态不触发呼吸灯
+            breathingTint = nil
         }
     }
     

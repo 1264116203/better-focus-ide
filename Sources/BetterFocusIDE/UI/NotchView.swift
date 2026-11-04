@@ -17,12 +17,30 @@ struct NotchView: View {
         ZStack(alignment: .top) {
             if service.expanded || service.closingCard != nil {
                 expandedContent
+                
+                // 气泡覆盖层：展开时气泡显示在卡片上方，点击可收起
+                bubbleContent
+                    .frame(width: service.geometry.collapsed.width,
+                           height: service.geometry.collapsed.height)
+                    .frame(maxWidth: .infinity)  // 水平居中
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        service.collapse()
+                    }
             } else {
                 collapsedContent
             }
         }
         .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
         .clipped()  // 防止 SwiftUI 内容在 AppKit 壳布局完成前溢出
+        // 呼吸灯覆盖层：卡片出现时沿岛边缘发光
+        .overlay(
+            BreathingGlowOverlay(
+                tint: service.breathingTint,
+                shape: NotchShape.island(height: service.surfaceSize.height, geometry: service.geometry)
+            )
+            .allowsHitTesting(false)
+        )
         .foregroundStyle(.white)
         // 表面点击：仅收起态或无卡片时处理；展开的交互式卡片由自身处理交互，
         // 背景点击不应触发收起（否则点选项间隙会误关卡片）。
@@ -35,8 +53,8 @@ struct NotchView: View {
         .tint(.white)
     }
     
-    private var collapsedContent: some View {
-        // 纯黑胶囊 + 居中圆点（对齐 Python 空闲态）。有待处理项时圆点用提供方主题色并显示计数。
+    /// 气泡内容（圆点 + 计数），提取为独立视图以便在收起态和展开覆盖层中复用
+    private var bubbleContent: some View {
         HStack(spacing: 4) {
             if service.pendingTotal > 0 {
                 Circle()
@@ -70,7 +88,12 @@ struct NotchView: View {
                     .onDisappear { pulseScale = 1.0 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    private var collapsedContent: some View {
+        // 纯黑胶囊 + 居中圆点（对齐 Python 空闲态）。有待处理项时圆点用提供方主题色并显示计数。
+        bubbleContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
     private var expandedContent: some View {
