@@ -159,13 +159,23 @@ final class NotchService: ObservableObject {
         windowHost?.hide(animated: true)
     }
     
-    /// 点击表面的三分支：已展开则收起；有卡片但收起（按需模式）则展开；空闲岛则回顾历史。
+    /// 点击表面的三分支：已展开则收起；有卡片但收起（按需模式）则展开；空闲岛则优先展示未读通知，否则回顾历史。
     func toggle() {
         if expanded {
             collapse()
         } else if activeCard != .none {
             // 有卡片但处于收起态（按需模式）：展开它。
             expand()
+        } else if noticeController.hasQueuedNotices {
+            // 有未读通知排队：弹出下一条，而非打开历史。
+            hasUnprocessedNotice = false
+            unprocessedNoticeTint = nil
+            updateBreathingTint()
+            noticeController.promoteNextFromQueue()
+            if noticeController.hasActiveNotice {
+                activeCard = .notice
+                showNoticeBanner()
+            }
         } else {
             // 空闲岛：点击回顾最近通知。
             showHistory()
@@ -516,6 +526,9 @@ final class NotchService: ObservableObject {
             activeCard = .notice
         } else if noticeController.count > 0 {
             // 通知队列有待展示项（之前因交互卡片在屏而被排队）：弹出下一条。
+            hasUnprocessedNotice = false
+            unprocessedNoticeTint = nil
+            updateBreathingTint()
             noticeController.promoteNextFromQueue()
             if noticeController.hasActiveNotice {
                 activeCard = .notice

@@ -30,6 +30,8 @@ final class NoticeController: ObservableObject {
     var count: Int { (notice != nil ? 1 : 0) + queue.count }
     /// 未读通知总数（含当前展示的），驱动卡片右上角的未读数字徽章。
     var queueCount: Int { (notice != nil ? 1 : 0) + queue.count }
+    /// 队列中是否有等待展示的通知（不含当前展示的）。
+    var hasQueuedNotices: Bool { !queue.isEmpty }
     /// 待处理圆点的提供方主题色。
     var pendingTint: (r: Double, g: Double, b: Double)? {
         guard let p = notice?.provider,
@@ -170,7 +172,12 @@ final class NoticeController: ObservableObject {
         guard notice != nil else { return }
         notice = nil
         onDismiss?()
-        promoteNext()
+        // promoteNext 由 NotchService.handleCardDismissal 统一处理，避免双重弹出。
+    }
+
+    /// 用户点击"已读"按钮：不跳转 IDE，直接标记已读并关闭当前通知。
+    func markRead() {
+        dismiss()
     }
 
     /// 用户点击横幅：先按需跳回 IDE，再消失（并弹出队列中下一条）。
