@@ -22,13 +22,42 @@ enum NotchLayout {
     
     // MARK: - 对齐 Python 的尺寸（实时读 Settings，改动即时生效）
     
+    /// 黄金分割比例：卡片:物理刘海 = 1.5:0.618，故卡片宽 = 刘海宽 × 1.5 ÷ 0.618（≈2.427 倍）。
+    static let goldenSectionDivisor: CGFloat = 0.618
+    static let goldenSectionMultiplier: CGFloat = 1.5
+
+    /// 物理刘海宽度（pt）：用摄像头左右两侧「顶部辅助安全区」反推（屏宽 − 左 − 右），
+    /// 机型自适应。无刘海屏或辅助区不可用时返回 nil。与 NotchService.detectCameraWidth 同源。
+    static func physicalNotchWidth(of screen: NSScreen) -> CGFloat? {
+        guard screen.safeAreaInsets.top > 0,
+              let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea,
+              !left.isEmpty, !right.isEmpty else { return nil }
+        let width = screen.frame.width - left.width - right.width
+        return width > 0 ? width : nil
+    }
+
+    /// 当前刘海屏（safeAreaInsets.top > 0）；无刘海屏返回 nil。
+    static var notchedScreen: NSScreen? {
+        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
+    }
+
+    /// 四类卡片统一宽度：跟随刘海时 = 刘海宽 × 1.5 ÷ 0.618（黄金分割，机型自适应）；
+    /// 否则用手动 notifyWidth。无刘海屏（外接显示器等）即便开启跟随也回退手动值。
+    static var resolvedCardWidth: CGFloat {
+        if Settings.shared.cardFollowsNotch,
+           let screen = notchedScreen, let notch = physicalNotchWidth(of: screen) {
+            return (notch * goldenSectionMultiplier / goldenSectionDivisor).rounded()
+        }
+        return CGFloat(Settings.shared.notifyWidth)
+    }
+
     /// 通知横幅宽高（Python EXPANDED_WIDTH × EXPANDED_HEIGHT）。
-    static var expandedWidth: CGFloat { CGFloat(Settings.shared.notifyWidth) }
+    static var expandedWidth: CGFloat { resolvedCardWidth }
     static var expandedHeight: CGFloat { CGFloat(Settings.shared.notifyHeight) }
-    /// 问题 / 权限卡片宽度（统一为 380pt，与通知横幅一致）。
-    static var questionCardWidth: CGFloat { CGFloat(Settings.shared.notifyWidth) }
+    /// 问题 / 权限卡片宽度（与通知横幅统一）。
+    static var questionCardWidth: CGFloat { resolvedCardWidth }
     /// 历史面板宽度（Python HISTORY_WIDTH = EXPANDED_WIDTH）。
-    static var historyWidth: CGFloat { CGFloat(Settings.shared.notifyWidth) }
+    static var historyWidth: CGFloat { resolvedCardWidth }
     
     // 卡片布局度量（Python config.py）
     static var cardInset: CGFloat { CGFloat(Settings.shared.cardInset) }
@@ -139,26 +168,37 @@ struct NotchGeometry: Equatable {
     
     var stripHeight: CGFloat { cameraHeight }
     
-    /// 收起态尺寸（使用 Settings 中的 bubbleWidth/bubbleHeight 设置）。
+    /// 气泡基础尺寸（不含 padding）：
+    /// 跟随刘海且为刘海屏时取物理摄像头区域（机型自适应）；否则用手动设置。
+    /// 无刘海屏（外接显示器等）即便开启跟随也回退手动值。
+    ///
+    /// 宽度补偿：渲染轮廓 NotchShape(attached:) 两侧各内收 shoulder，若 base 宽直接
+    /// 取刘海宽，黑色主体会比刘海小一圈、缩在刘海内，左右辉光被挤在刘海硬件上看不见。
+    /// 故 base 宽 = 刘海宽 + 2×shoulder，使渲染主体恰好与刘海齐平，左右辉光落到
+    /// 刘海外的菜单栏上清晰可见。高度不补偿（主体高 = 刘海高）。
+    private var bubbleBase: CGSize {
+        if Settings.shared.bubbleFollowsNotch && isNotched {
+            let shoulder = NotchLayout.shoulder(height: cameraHeight)
+            return CGSize(width: cameraWidth + shoulder * 2, height: cameraHeight)
+        }
+        return CGSize(width: CGFloat(Settings.shared.bubbleWidth),
+                      height: CGFloat(Settings.shared.bubbleHeight))
+    }
+
+    /// 收起态尺寸（基础尺寸 + 额外余量）。
     /// bubbleWidthPadding/bubbleHeightPadding 用于增加额外空间以容纳呼吸灯辉光效果
     var collapsed: CGSize {
-        let baseWidth = CGFloat(Settings.shared.bubbleWidth)
-        let baseHeight = CGFloat(Settings.shared.bubbleHeight)
+        let base = bubbleBase
         let widthPadding = CGFloat(Settings.shared.bubbleWidthPadding)
         let heightPadding = CGFloat(Settings.shared.bubbleHeightPadding)
         return CGSize(
-            width: baseWidth + widthPadding,
-            height: baseHeight + heightPadding
+            width: base.width + widthPadding,
+            height: base.height + heightPadding
         )
     }
     
     /// 空闲气泡尺寸（无卡片时刘海处的黑色气泡形状）。
-    /// 直接使用用户设置的 bubbleWidth/bubbleHeight。
-    var idleBubbleSize: CGSize {
-        let width = CGFloat(Settings.shared.bubbleWidth)
-        let height = CGFloat(Settings.shared.bubbleHeight)
-        return CGSize(width: width, height: height)
-    }
+    var idleBubbleSize: CGSize { bubbleBase }
     
     /// 静止尺寸：显示内容时取 collapsed，否则使用空闲气泡尺寸。
     func restingSize(showsContent: Bool) -> CGSize {
@@ -234,32 +274,36 @@ enum NotchMotion {
     static var shrinkingHeight: Spring { Spring(duration: 0.26 * speedScale, bounce: 0.0) }
     /// 超调位移上限（像素）。
     static let overshootLimit: CGFloat = 12
+    /// 悬停重展开的回弹缩放：悬停触发展开用更弱的超调，避免收起后气泡明显"放大再缩小"。
+    static let hoverBounceScale: Double = 0.4
     /// 判定"已落定"的距离阈值。
     static let settledDistance: CGFloat = 0.5
     
     /// 依据增长还是收缩、宽还是高，选出对应弹簧并按上限约束超调。
-    static func spring(from: CGFloat, to: CGFloat, width: Bool) -> Spring {
-        let spring = to > from ? (width ? growingWidth : growingHeight) : (width ? shrinkingWidth : shrinkingHeight)
-        return spring.limited(travel: abs(to - from), limit: overshootLimit)
+    /// `bounceScale` 仅缩放生长回弹（收缩本就临界阻尼无超调）；1 = 正常手感。
+    static func spring(from: CGFloat, to: CGFloat, width: Bool, bounceScale: Double = 1) -> Spring {
+        let base = to > from ? (width ? growingWidth : growingHeight) : (width ? shrinkingWidth : shrinkingHeight)
+        let scaled = to > from ? Spring(duration: base.duration, bounce: base.bounce * bounceScale) : base
+        return scaled.limited(travel: abs(to - from), limit: overshootLimit)
     }
     
     /// 在给定时刻插值出的尺寸（宽高各按自己的弹簧独立推进）。
-    static func size(at time: TimeInterval, from: CGSize, to: CGSize) -> CGSize {
+    static func size(at time: TimeInterval, from: CGSize, to: CGSize, bounceScale: Double = 1) -> CGSize {
         func side(_ start: CGFloat, _ end: CGFloat, width: Bool) -> CGFloat {
             guard start != end else { return end }
-            let spring = spring(from: start, to: end, width: width)
+            let spring = spring(from: start, to: end, width: width, bounceScale: bounceScale)
             return max(0, start + (end - start) * CGFloat(spring.progress(at: time)))
         }
         return CGSize(width: side(from.width, to.width, width: true), height: side(from.height, to.height, width: false))
     }
     
     /// 以 240Hz 步长扫描，找出宽高都落定到目标所需的时长。
-    static func settlingTime(from: CGSize, to: CGSize) -> TimeInterval {
+    static func settlingTime(from: CGSize, to: CGSize, bounceScale: Double = 1) -> TimeInterval {
         let step = 1.0 / 240
         var settled = step
         var time = step
         while time < 2 {
-            let size = size(at: time, from: from, to: to)
+            let size = size(at: time, from: from, to: to, bounceScale: bounceScale)
             if abs(size.width - to.width) > settledDistance || abs(size.height - to.height) > settledDistance {
                 settled = time + step
             }
@@ -269,20 +313,20 @@ enum NotchMotion {
     }
     
     /// 生成逐帧尺寸与 keyTimes（供 CAKeyframeAnimation 驱动遮罩路径形变）。
-    static func frames(from: CGSize, to: CGSize) -> (sizes: [CGSize], keyTimes: [Double], duration: TimeInterval) {
-        let duration = settlingTime(from: from, to: to)
+    static func frames(from: CGSize, to: CGSize, bounceScale: Double = 1) -> (sizes: [CGSize], keyTimes: [Double], duration: TimeInterval) {
+        let duration = settlingTime(from: from, to: to, bounceScale: bounceScale)
         // 采样率 = animation_fps（0 = 自动 → 120Hz，匹配 ProMotion）。
         let fps = Settings.shared.animationFps > 0 ? Double(Settings.shared.animationFps) : 120
         let count = max(1, Int((duration * fps).rounded(.up)))
         let keyTimes = (0...count).map { Double($0) / Double(count) }
-        let sizes = keyTimes.map { $0 == 1 ? to : size(at: duration * $0, from: from, to: to) }
+        let sizes = keyTimes.map { $0 == 1 ? to : size(at: duration * $0, from: from, to: to, bounceScale: bounceScale) }
         return (sizes, keyTimes, duration)
     }
     
     /// 动画期间尺寸可能达到的最大包络（含超调），供窗口预留足够空间避免裁切。
-    static func envelope(from: CGSize, to: CGSize) -> CGSize {
+    static func envelope(from: CGSize, to: CGSize, bounceScale: Double = 1) -> CGSize {
         func side(_ start: CGFloat, _ end: CGFloat, width: Bool) -> CGFloat {
-            let swing = end > start ? spring(from: start, to: end, width: width).overshoot : 0
+            let swing = end > start ? spring(from: start, to: end, width: width, bounceScale: bounceScale).overshoot : 0
             guard swing > 0 else { return max(start, end) }
             return (end + (end - start) * CGFloat(swing)).rounded(.up)
         }

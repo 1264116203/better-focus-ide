@@ -59,10 +59,9 @@ final class NotchService: ObservableObject {
     private var isClosing = false
     /// 钉住的卡片保持展开而非自动收起（"固定 ⇄ 按需"）。
     @Published private(set) var pinned = false
-    /// 用户对历史面板的置顶覆盖（nil = 未手动切换，实时跟随设置 pinByDefault）
-    private var lastHistoryPinned: Bool?
-    /// 用户对通知横幅的置顶覆盖（nil = 未手动切换，实时跟随设置 pinByDefault）
-    private var lastNoticePinned: Bool?
+    /// 用户手动置顶偏好（**所有卡片共享一份**；nil = 未手动切换，实时跟随设置 pinByDefault）。
+    /// 进程内记忆：重启 app 后回到设置默认值。
+    private var userPinned: Bool?
     private var keyMonitor: Any?
     /// 由 AppDelegate 接线，使 ⌘, 打开设置窗口。
     var onOpenSettings: (() -> Void)?
@@ -184,14 +183,14 @@ final class NotchService: ObservableObject {
         }
     }
     
-    /// 展开到当前卡片的目标尺寸。
-    func expand() {
+    /// 展开到当前卡片的目标尺寸。`gentle` = 悬停重展开，用更弱回弹避免明显超调。
+    func expand(gentle: Bool = false) {
         guard !expanded else { return }
         expanded = true
         expandedAt = Date()
         isClosing = false
         let newSize = targetSizeForCurrentCard()
-        animateTo(size: newSize)
+        animateTo(size: newSize, gentle: gentle)
         syncKeyFocus()
     }
     
@@ -284,14 +283,15 @@ final class NotchService: ObservableObject {
         startHoverTimer()
     }
     
-    private func animateTo(size: CGSize) {
+    private func animateTo(size: CGSize, gentle: Bool = false) {
         surfaceSize = size
         Log.debug("NotchService.animateTo: surfaceSize=\(size), expanded=\(expanded), activeCard=\(activeCard)", topic: "layout")
         windowHost?.present(
             size: size,
             geometry: geometry,
             animated: true,
-            showsContent: expanded
+            showsContent: expanded,
+            gentle: gentle
         )
     }
     
@@ -341,14 +341,10 @@ final class NotchService: ObservableObject {
     }
 
     private static func detectCameraWidth(screen: NSScreen) -> CGFloat {
-        // Try to read camera width from safe area
-        let safeAreaTop = screen.safeAreaInsets.top
-        if safeAreaTop > 0 {
-            // Has notch - estimate camera width
-            return 180
-        }
-        // No notch - use simulated width
-        return 150
+        // 真实刘海宽与卡片宽度同源（NotchLayout.physicalNotchWidth），避免两处逻辑漂移。
+        if let width = NotchLayout.physicalNotchWidth(of: screen) { return width }
+        // 兜底：刘海屏但辅助区不可用时估 180；无刘海屏用模拟宽 150。
+        return screen.safeAreaInsets.top > 0 ? 180 : 150
     }
 
     // MARK: - Controller wiring
@@ -440,13 +436,10 @@ final class NotchService: ObservableObject {
         hasUnprocessedNotice = false
         unprocessedNoticeTint = nil
         updateBreathingTint()
-        let cardChanged = activeCard != .history
         activeCard = .history
-        // 置顶偏好：用户手动切换过的以用户为准，否则实时跟随设置（改动即刻生效）
-        if cardChanged {
-            pinned = lastHistoryPinned ?? Settings.shared.pinByDefault
-        }
-        Log.info("showHistory: pinned=\(pinned), lastHistoryPinned=\(String(describing: lastHistoryPinned)), cardChanged=\(cardChanged)", topic: "history")
+        // 置顶状态全局统一：不按卡片重置，从共享偏好解析
+        refreshPinned()
+        Log.info("showHistory: pinned=\(pinned), userPinned=\(String(describing: userPinned))", topic: "history")
 
         let rows = max(1, historyController.entries.count)
 
@@ -477,15 +470,12 @@ final class NotchService: ObservableObject {
 
     /// Show the transient turn-finished banner at a compact height.
     private func showNoticeBanner() {
-        let cardChanged = activeCard != .notice
         activeCard = .notice
         // 新通知上屏：清除旧的未处理标记（呼吸灯随之关闭）
         hasUnprocessedNotice = false
         unprocessedNoticeTint = nil
-        // 置顶偏好：用户手动切换过的以用户为准，否则实时跟随设置（改动即刻生效）
-        if cardChanged {
-            pinned = lastNoticePinned ?? Settings.shared.pinByDefault
-        }
+        // 置顶状态全局统一：不按卡片重置，从共享偏好解析
+        refreshPinned()
         bellSwingStart = Date()  // Trigger bell swing animation.
         let bannerSize = CGSize(width: NotchLayout.expandedWidth,
                                 height: NotchLayout.expandedHeight)
@@ -502,12 +492,9 @@ final class NotchService: ObservableObject {
     }
 
     private func showCard(_ card: ActiveCard) {
-        let cardChanged = activeCard != card
         activeCard = card
-        // 只在卡片类型变化时重置置顶状态
-        if cardChanged {
-            pinned = Settings.shared.pinByDefault
-        }
+        // 置顶状态全局统一：不按卡片重置，从共享偏好解析
+        refreshPinned()
         FeedbackService.onArrive()
         
         if pinned {
@@ -741,8 +728,8 @@ final class NotchService: ObservableObject {
     /// 正式逻辑：只有当通知卡片未操作自动收起后（hasUnprocessedNotice = true），
     /// 才显示呼吸灯提醒，颜色取该通知的提供方主题色。
     ///
-    /// 辉光由 AppKit 画布层（glowShape）绘制，而非 SwiftUI 层——因为黑色岛面轮廓
-    /// 由 AppKit 遮罩裁剪，SwiftUI 内容无法越出气泡外缘。
+    /// 辉光由 AppKit 画布层（NotchCanvas.glowLayer：单层位图 = 轮廓填充 + 高斯模糊 + 描边芯）
+    /// 绘制，而非 SwiftUI 层——因为黑色岛面轮廓由 AppKit 遮罩裁剪，SwiftUI 内容无法越出气泡外缘。
     private func updateBreathingTint() {
         // 测试模式：总是显示主题色辉光
         let accent = NotchLayout.accentColor
@@ -841,7 +828,7 @@ final class NotchService: ObservableObject {
                 // 仍在让位期内：跳过。
             } else if !hoverExpanded {
                 hoverExpanded = true
-                expand()
+                expand(gentle: true)
             }
         }
         if hovering { needsTimer = true }
@@ -1080,17 +1067,25 @@ final class NotchService: ObservableObject {
     }
 
     /// 翻转固定模式：钉住的卡片保持展开而非自动收起。
+    /// 手动偏好全局共享——在任意卡片上切换，对所有卡片生效。
     func togglePin() {
         Log.info("togglePin called: before pinned=\(pinned), activeCard=\(activeCard)", topic: "pin")
-        pinned.toggle()
+        userPinned = !pinned
+        applyPinned(!pinned)
         Log.info("图钉切换 pinned=\(pinned)", topic: "pin")
-        // 记住用户对瞬态卡片（历史/通知）的置顶偏好
-        if activeCard == .history {
-            lastHistoryPinned = pinned
-        } else if activeCard == .notice {
-            lastNoticePinned = pinned
-        }
-        if pinned {
+    }
+
+    /// 从共享偏好解析置顶状态：用户手动切换过以用户为准，否则实时跟随设置。
+    private func refreshPinned() {
+        applyPinned(userPinned ?? Settings.shared.pinByDefault)
+    }
+
+    /// 置顶状态的唯一落点：写 published 值并同步自动收起调度。
+    /// 四类卡片共用这一份状态，切换卡片不再各自重置。
+    private func applyPinned(_ newValue: Bool) {
+        guard pinned != newValue else { return }
+        pinned = newValue
+        if newValue {
             // 钉住：取消任何待执行的自动收起。
             cancelAutoCollapse()
         } else {
@@ -1111,6 +1106,11 @@ final class NotchService: ObservableObject {
     private func handleSettingsChanged() {
         updatePendingTotal()
         restartSweepTimerIfNeeded()
+        // pinByDefault 改动即刻生效：仅当用户未手动切换过（userPinned == nil）
+        // 且有卡片在屏时才重解析；手动偏好优先，设置改动不会覆盖它。
+        if activeCard != .none {
+            refreshPinned()
+        }
         guard windowHost != nil else { return }
         let size = expanded ? targetSizeForCurrentCard()
                             : geometry.restingSize(showsContent: true)  // 收起态也使用 bubbleWidth/bubbleHeight

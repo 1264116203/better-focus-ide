@@ -41,11 +41,18 @@ final class Settings: ObservableObject {
     @Published var optionRowMin: Double = 30
     @Published var bubbleWidth: Double = 44
     @Published var bubbleHeight: Double = 26
+    /// 气泡尺寸跟随物理刘海：开启时收起态气泡 = 摄像头区域宽×高（机型自适应），
+    /// 此时 bubbleWidth/bubbleHeight 手动值不生效；关闭后用手动值。无刘海屏恒用手动值。
+    @Published var bubbleFollowsNotch = true
     /// 气泡宽度额外余量（用于呼吸灯辉光等效果）
     @Published var bubbleWidthPadding: Double = 0
     /// 气泡高度额外余量（用于呼吸灯辉光等效果）
     @Published var bubbleHeightPadding: Double = 0
     @Published var notifyWidth: Double = 380
+    /// 卡片宽度跟随物理刘海（黄金分割）：开启时统一卡片宽 = 刘海宽 × 1.5 ÷ 0.618
+    /// （卡片:刘海 = 1.5:0.618，机型自适应），此时 notifyWidth 手动值不生效；
+    /// 关闭后用手动值。无刘海屏恒用手动值。
+    @Published var cardFollowsNotch = true
     @Published var notifyHeight: Double = 74
     /// 刘海屏下卡片内容到摄像头区域的额外间距（pt），可为负值使内容更贴近刘海
     @Published var notchTopPadding: Double = 4
@@ -63,7 +70,12 @@ final class Settings: ObservableObject {
     @Published var radiusExpanded: Double = 22
     @Published var radiusBubble: Double = 13
     /// 呼吸灯辉光范围（pt）：值越大辉光扩散越远
-    @Published var glowRadius: Double = 12
+    @Published var glowRadius: Double = 6
+    /// 呼吸灯幅度（0…1）：辉光不透明度在 `1-幅度 … 1` 之间往返；
+    /// 0 = 恒亮不呼吸，值越大明暗差越明显。
+    @Published var glowBreathAmplitude: Double = 0.65
+    /// 呼吸灯周期（秒）：一次完整的一亮一暗耗时。
+    @Published var glowBreathPeriod: Double = 2.4
 
     // MARK: - 动画 (motion)
     @Published var motionGrowBounce: Double = 0.25
@@ -182,9 +194,11 @@ final class Settings: ObservableObject {
         optionRowMin = v["optionRowMin"]?.doubleValue ?? optionRowMin
         bubbleWidth = v["bubbleWidth"]?.doubleValue ?? bubbleWidth
         bubbleHeight = v["bubbleHeight"]?.doubleValue ?? bubbleHeight
+        bubbleFollowsNotch = v["bubbleFollowsNotch"]?.boolValue ?? bubbleFollowsNotch
         bubbleWidthPadding = v["bubbleWidthPadding"]?.doubleValue ?? bubbleWidthPadding
         bubbleHeightPadding = v["bubbleHeightPadding"]?.doubleValue ?? bubbleHeightPadding
         notifyWidth = v["notifyWidth"]?.doubleValue ?? notifyWidth
+        cardFollowsNotch = v["cardFollowsNotch"]?.boolValue ?? cardFollowsNotch
         notifyHeight = v["notifyHeight"]?.doubleValue ?? notifyHeight
         notchTopPadding = v["notchTopPadding"]?.doubleValue ?? notchTopPadding
         bubbleHorizontalOffset = v["bubbleHorizontalOffset"]?.doubleValue ?? bubbleHorizontalOffset
@@ -197,6 +211,8 @@ final class Settings: ObservableObject {
         radiusExpanded = v["radiusExpanded"]?.doubleValue ?? radiusExpanded
         radiusBubble = v["radiusBubble"]?.doubleValue ?? radiusBubble
         glowRadius = v["glowRadius"]?.doubleValue ?? glowRadius
+        glowBreathAmplitude = v["glowBreathAmplitude"]?.doubleValue ?? glowBreathAmplitude
+        glowBreathPeriod = v["glowBreathPeriod"]?.doubleValue ?? glowBreathPeriod
         motionGrowBounce = v["motionGrowBounce"]?.doubleValue ?? motionGrowBounce
         reduceMotion = v["reduceMotion"]?.stringValue ?? reduceMotion
         animationSpeed = v["animationSpeed"]?.doubleValue ?? animationSpeed
@@ -242,9 +258,11 @@ final class Settings: ObservableObject {
         values["optionRowMin"] = .double(optionRowMin)
         values["bubbleWidth"] = .double(bubbleWidth)
         values["bubbleHeight"] = .double(bubbleHeight)
+        values["bubbleFollowsNotch"] = .bool(bubbleFollowsNotch)
         values["bubbleWidthPadding"] = .double(bubbleWidthPadding)
         values["bubbleHeightPadding"] = .double(bubbleHeightPadding)
         values["notifyWidth"] = .double(notifyWidth)
+        values["cardFollowsNotch"] = .bool(cardFollowsNotch)
         values["notifyHeight"] = .double(notifyHeight)
         values["notchTopPadding"] = .double(notchTopPadding)
         values["bubbleHorizontalOffset"] = .double(bubbleHorizontalOffset)
@@ -257,6 +275,8 @@ final class Settings: ObservableObject {
         values["radiusExpanded"] = .double(radiusExpanded)
         values["radiusBubble"] = .double(radiusBubble)
         values["glowRadius"] = .double(glowRadius)
+        values["glowBreathAmplitude"] = .double(glowBreathAmplitude)
+        values["glowBreathPeriod"] = .double(glowBreathPeriod)
         values["motionGrowBounce"] = .double(motionGrowBounce)
         values["reduceMotion"] = .string(reduceMotion)
         values["animationSpeed"] = .double(animationSpeed)
@@ -319,12 +339,14 @@ final class Settings: ObservableObject {
         turnNotifyJump = true; permissionNoticeJump = true
         cardWidth = 540; cardMinHeight = 0; cardInset = 32; bodyFont = 12
         optionFont = 12; descFont = 10.5; optionRowMin = 30
-        bubbleWidth = 44; bubbleHeight = 26; bubbleWidthPadding = 0; bubbleHeightPadding = 0
-        notifyWidth = 380; notifyHeight = 100; notchTopPadding = 4
+        bubbleWidth = 44; bubbleHeight = 26; bubbleFollowsNotch = true
+        bubbleWidthPadding = 0; bubbleHeightPadding = 0
+        notifyWidth = 380; cardFollowsNotch = true; notifyHeight = 100; notchTopPadding = 4
         bubbleHorizontalOffset = 0; cardHorizontalOffset = 0
         backgroundColor = "0.05,0.05,0.07"; backgroundAlpha = 0.96
         accentColor = "0.29,0.62,1.0"; qoderTint = "0.58,0.45,0.82"; opencodeTint = "0.06,0.73,0.51"
-        radiusExpanded = 22; radiusBubble = 13; glowRadius = 12
+        radiusExpanded = 22; radiusBubble = 13; glowRadius = 6
+        glowBreathAmplitude = 0.65; glowBreathPeriod = 2.4
         motionGrowBounce = 0.25; reduceMotion = "system"; animationSpeed = 1.0; animationFps = 0
         hoverExpandDelay = 0.18; hoverCollapseDelay = 0.35
         notifyBannerDuration = 5.0; historyDuration = 8; idlePulsePeriod = 2.4
