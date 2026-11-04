@@ -62,6 +62,8 @@ final class Settings: ObservableObject {
     @Published var opencodeTint = "0.06,0.73,0.51"
     @Published var radiusExpanded: Double = 22
     @Published var radiusBubble: Double = 13
+    /// 呼吸灯辉光范围（pt）：值越大辉光扩散越远
+    @Published var glowRadius: Double = 12
 
     // MARK: - 动画 (motion)
     @Published var motionGrowBounce: Double = 0.25
@@ -194,6 +196,7 @@ final class Settings: ObservableObject {
         opencodeTint = v["opencodeTint"]?.stringValue ?? opencodeTint
         radiusExpanded = v["radiusExpanded"]?.doubleValue ?? radiusExpanded
         radiusBubble = v["radiusBubble"]?.doubleValue ?? radiusBubble
+        glowRadius = v["glowRadius"]?.doubleValue ?? glowRadius
         motionGrowBounce = v["motionGrowBounce"]?.doubleValue ?? motionGrowBounce
         reduceMotion = v["reduceMotion"]?.stringValue ?? reduceMotion
         animationSpeed = v["animationSpeed"]?.doubleValue ?? animationSpeed
@@ -253,6 +256,7 @@ final class Settings: ObservableObject {
         values["opencodeTint"] = .string(opencodeTint)
         values["radiusExpanded"] = .double(radiusExpanded)
         values["radiusBubble"] = .double(radiusBubble)
+        values["glowRadius"] = .double(glowRadius)
         values["motionGrowBounce"] = .double(motionGrowBounce)
         values["reduceMotion"] = .string(reduceMotion)
         values["animationSpeed"] = .double(animationSpeed)
@@ -320,7 +324,7 @@ final class Settings: ObservableObject {
         bubbleHorizontalOffset = 0; cardHorizontalOffset = 0
         backgroundColor = "0.05,0.05,0.07"; backgroundAlpha = 0.96
         accentColor = "0.29,0.62,1.0"; qoderTint = "0.58,0.45,0.82"; opencodeTint = "0.06,0.73,0.51"
-        radiusExpanded = 22; radiusBubble = 13
+        radiusExpanded = 22; radiusBubble = 13; glowRadius = 12
         motionGrowBounce = 0.25; reduceMotion = "system"; animationSpeed = 1.0; animationFps = 0
         hoverExpandDelay = 0.18; hoverCollapseDelay = 0.35
         notifyBannerDuration = 5.0; historyDuration = 8; idlePulsePeriod = 2.4

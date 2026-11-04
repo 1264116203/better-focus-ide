@@ -212,6 +212,11 @@ enum SettingCatalog {
         SettingDefinition(key: "radiusBubble", label: "气泡圆角", kind: .slider, group: "外观",
             min: 6, max: 22, step: 1, unit: "pt", digits: 0,
             defaultValue: .double(13), get: getD(\.radiusBubble), set: setD(\.radiusBubble)),
+        SettingDefinition(key: "glowRadius", label: "呼吸灯范围", kind: .slider, group: "外观",
+            min: 3, max: 40, step: 1, unit: "pt", digits: 0,
+            note: "气泡外缘辉光的扩散范围，值越大光晕越宽越淡",
+            keywords: ["呼吸灯", "辉光", "范围", "glow", "radius", "光晕"],
+            defaultValue: .double(12), get: getD(\.glowRadius), set: setD(\.glowRadius)),
 
         // ---------------- 动画 ----------------
         SettingDefinition(key: "motionGrowBounce", label: "弹簧回弹（展开）", kind: .slider, group: "动画",
