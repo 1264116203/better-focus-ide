@@ -29,10 +29,12 @@ enum IDEIconProvider {
         "clion": "clion",
         "phpstorm": "phpstorm",
         "rubymine": "rubymine",
-        // VS Code 系（Qoder IDE, Qoder CN IDE 等）
+        // VS Code 系（Qoder IDE, Qoder CN IDE, Cursor 等都是 VS Code fork）
         "visual studio code": "vscode",
         "vscode": "vscode",
-        "code": "vscode",
+        "qoder ide": "vscode",
+        "qoder cn ide": "vscode",
+        "cursor": "vscode",  // Cursor 也是 VS Code fork
     ]
 
     /// IDE 名称到品牌色的映射（用于文字徽章背景）
@@ -122,7 +124,9 @@ enum IDEIconProvider {
         } else {
             // 带品牌色的文字徽章
             let bgColor = hasBrandColor(for: hostName) ? brandColor(for: hostName) : tint
-            Text(fallbackText)
+            // 确保文字不为空
+            let displayText = fallbackText.isEmpty ? "?" : fallbackText
+            Text(displayText)
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: size, height: size)
@@ -143,17 +147,34 @@ enum IDEIconProvider {
     /// 从 Resources 目录加载图片
     private static func loadImage(named: String) -> Image? {
         #if canImport(AppKit)
-        // SwiftPM 资源访问：Bundle.module 指向 BetterFocusIDE_BetterFocusIDE.bundle
-        if let bundleURL = Bundle.module.url(forResource: named, withExtension: "png", subdirectory: "IDE-Icons"),
-           let nsImage = NSImage(contentsOf: bundleURL) {
-            return Image(nsImage: nsImage)
+        // 方式1：尝试从 BetterFocusIDE_BetterFocusIDE.bundle 加载
+        let bundleName = "BetterFocusIDE_BetterFocusIDE.bundle"
+        var searchPaths: [URL] = []
+        
+        // SwiftPM build 时的路径
+        if let path = Bundle.main.resourceURL?.appendingPathComponent(bundleName) {
+            searchPaths.append(path)
         }
-        // 回退：尝试从主 Bundle 加载（app 打包后）
-        if let appBundle = Bundle.main.resourceURL?.appendingPathComponent("BetterFocusIDE_BetterFocusIDE.bundle"),
-           let bundleURL = appBundle.appendingPathComponent("IDE-Icons").appendingPathComponent(named).appendingPathExtension("png") as URL?,
-           FileManager.default.fileExists(atPath: bundleURL.path),
-           let nsImage = NSImage(contentsOf: bundleURL) {
-            return Image(nsImage: nsImage)
+        // App 打包后的路径
+        searchPaths.append(Bundle.main.bundleURL.appendingPathComponent("Contents/Resources").appendingPathComponent(bundleName))
+        // Bundle.module（SwiftPM 资源包）
+        searchPaths.append(Bundle.module.bundleURL)
+        
+        for basePath in searchPaths {
+            let iconPath = basePath.appendingPathComponent("IDE-Icons").appendingPathComponent(named).appendingPathExtension("png")
+            if FileManager.default.fileExists(atPath: iconPath.path),
+               let nsImage = NSImage(contentsOf: iconPath) {
+                return Image(nsImage: nsImage)
+            }
+        }
+        
+        // 方式2：直接在资源路径中搜索
+        if let resourcePath = Bundle.main.resourcePath {
+            let directPath = (resourcePath as NSString).appendingPathComponent("IDE-Icons/\(named).png")
+            if FileManager.default.fileExists(atPath: directPath),
+               let nsImage = NSImage(contentsOfFile: directPath) {
+                return Image(nsImage: nsImage)
+            }
         }
         #endif
         return nil
