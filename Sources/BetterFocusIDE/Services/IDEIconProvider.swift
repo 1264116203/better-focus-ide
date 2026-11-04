@@ -203,13 +203,18 @@ enum IDEIconProvider {
     @ViewBuilder
     static func badgeView(hostName: String?, bundleID: String? = nil, fallbackText: String, tint: Color, size: CGFloat = badgeSize) -> some View {
         let radius = size * 0.22
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         if let icon = icon(for: hostName, bundleID: bundleID) {
             // 真实图标：加载时已裁到内容包围盒，.fit 后各图标视觉等大。
             icon
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .clipShape(shape)
+                // 极淡的内描边：深色图标（Cursor 方块平均亮度 0.23）压在深色
+                // 面板（0.28）上时边缘会糊掉，只剩内部图形可见，看起来「更小」。
+                // 有了这圈 0.5pt 的亮边，方块边界才重新对齐到 30pt 框。
+                .overlay(shape.strokeBorder(rimColor, lineWidth: rimWidth))
         } else {
             // 带品牌色的文字徽章
             let bgColor = hasBrandColor(for: hostName) ? brandColor(for: hostName) : tint
@@ -219,10 +224,19 @@ enum IDEIconProvider {
                 .font(.system(size: size * 0.42, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: size, height: size)
-                .background(bgColor.opacity(0.9),
-                            in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+                .background(bgColor.opacity(0.9), in: shape)
+                .overlay(shape.strokeBorder(rimColor, lineWidth: rimWidth))
         }
     }
+
+    /// 图标外圈的亮边：把深色图标的方块边界从深色面板里「勾」出来。
+    ///
+    /// 强度是按「压过面板底色」定的：历史面板底色亮度约 0.28，Cursor 的近黑
+    /// 方块只有 0.07，白 28% 的描边叠上去约 0.33，刚好比面板亮一档，方形轮廓
+    /// 才立得住。再淡（16%）就只有图标内部变亮、整体仍暗于面板，等于没描。
+    /// 统一处理，不用为每个图标维护「光学补偿系数」。
+    static let rimColor = Color.white.opacity(0.28)
+    static let rimWidth: CGFloat = 0.6
 
     /// 检查是否有对应的品牌色
     private static func hasBrandColor(for hostName: String?) -> Bool {
