@@ -5,9 +5,9 @@ import SwiftUI
 import AppKit
 
 /// 灵动岛设置面板 —— 对 Python 参考实现 `settings_window.py` 的 SwiftUI 重建：
-/// 顶部搜索栏、七大分类侧边栏、分组详情页（头部 + 提示 + 小节 + 行）、
+/// 顶部搜索栏、七大分类侧边栏、分组详情页（头部 + 恢复默认按钮 + 提示 + 小节 + 行）、
 /// 每行等宽字体读数、声音 / 震动的试听按钮、`enabled_when` 未满足时置灰，
-/// 以及底部「恢复默认」按钮与实时状态行。
+/// 以及底部「恢复默认」按钮与实时状态行。点击恢复默认会弹出确认对话框。
 ///
 /// `Settings` 是唯一的实时配置源，因此每次编辑都即时生效（灵动岛在调用时读取）；
 /// 落盘写入做了 0.5 秒防抖，标注 `needs=reinstall` 的项会在 0.8 秒后重新安装
@@ -19,6 +19,7 @@ struct SettingsView: View {
     @State private var query = ""
     @State private var status = "所有改动即时生效"
     @State private var writebackWork: DispatchWorkItem?
+    @State private var showResetConfirmation = false
 
     // MARK: - 布局常量（对齐 Python settings_window.py）
 
@@ -74,6 +75,12 @@ struct SettingsView: View {
         }
         .frame(minWidth: 620, idealWidth: 760, minHeight: 420, idealHeight: 620)
         .onDisappear { flushOnClose() }
+        .alert("恢复默认设置", isPresented: $showResetConfirmation) {
+            Button("取消", role: .cancel) { }
+            Button("恢复", role: .destructive) { resetDefaults() }
+        } message: {
+            Text("这将把所有设置恢复为默认值。此操作不可撤销。")
+        }
     }
 
     // MARK: - 搜索栏
@@ -190,8 +197,15 @@ struct SettingsView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Metric.rowGap) {
-                        Text(selectedGroup)
-                            .font(.system(size: 13, weight: .semibold))
+                        HStack {
+                            Text(selectedGroup)
+                                .font(.system(size: 13, weight: .semibold))
+                            Spacer()
+                            // 内容区域的恢复默认按钮（更显眼）
+                            Button("恢复默认设置") { showResetConfirmation = true }
+                                .controlSize(.small)
+                                .foregroundStyle(.red)
+                        }
                         if let hint = SettingCatalog.groupHints[selectedGroup], !hint.isEmpty {
                             Text(hint)
                                 .font(.system(size: 11))
@@ -427,7 +441,7 @@ struct SettingsView: View {
     /// 底部操作栏：「恢复默认」按钮 + 实时状态行。
     private var bottomBar: some View {
         HStack(spacing: 12) {
-            Button("恢复默认") { resetDefaults() }
+            Button("恢复默认") { showResetConfirmation = true }
                 .controlSize(.small)
             Text(status)
                 .font(.system(size: 11))

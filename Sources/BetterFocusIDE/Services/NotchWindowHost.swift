@@ -50,6 +50,20 @@ final class NotchHostingView: NSHostingView<AnyView> {
 
 // MARK: - NotchCanvas
 
+/// 鼠标穿透的容器视图：自身不吞噬事件（不在子视图上命中时返回 nil），
+/// 让事件继续落到下层 NotchCanvas 处理，同时其子视图（SwiftUI 内容）照常接收点击。
+///
+/// 关键：必须 `isFlipped = true`，与 NotchCanvas 的翻转坐标系保持一致，否则挂在它
+/// 下面的轮廓遮罩（silhouette）会被垂直翻转，气泡跑到下方、方向与辉光相反。
+private final class PassthroughView: NSView {
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
+}
+
 /// 窗口的内容视图。一层被裁成灵动岛轮廓的黑色底、一层在卡片展开时淡入的磨砂玻璃
 /// `NSVisualEffectView`、以及叠在最上的 SwiftUI 内容——全部裁切到随帧形变的轮廓内。
 ///
@@ -65,6 +79,17 @@ final class NotchCanvas: NSView {
     /// 往往是（偏亮的）菜单栏，会把整张卡片冲成浅灰。这层恒定暗化把磨砂拉回深邃、
     /// 含蓄的暗色。收起时玻璃透明，暗层直接落在黑色底上、保持纯黑。
     private let dim = NSView()
+    /// 承载被轮廓遮罩裁剪的岛面内容（黑底 / 磨砂 / 暗层 / SwiftUI / 发丝描边）。
+    ///
+    /// 关键：遮罩（silhouette）只作用在这一层，而非 canvas 根层，于是独立加在根层上的
+    /// 辉光层（glowShape）不会被裁成轮廓，得以向气泡外缘扩散。
+    private let body = PassthroughView()
+    /// 气泡外缘呼吸辉光层：沿轮廓描边 + shadow 外发光，独立于遮罩。
+    private let glowShape = CAShapeLayer()
+    /// 辉光期望颜色（nil = 关闭）。由 NotchService 经 setGlow 注入。
+    private var glowColor: NSColor?
+    /// 辉光是否呼吸（reduce motion 关闭时为静态）。
+    private var glowBreathing = false
     /// 岛正在趋向 / 静止于的尺寸（内容尺寸）。
     private var contentSize: CGSize
     private var trackingArea: NSTrackingArea?
@@ -89,9 +114,16 @@ final class NotchCanvas: NSView {
         super.init(frame: CGRect(origin: .zero, size: size))
         autoresizesSubviews = false
         wantsLayer = true
-        applyBaseColor()
+        // 根层保持透明且不被轮廓裁剪：遮罩改由 body 承担，使辉光层能越出轮廓。
+        layer?.backgroundColor = NSColor.clear.cgColor
         layer?.masksToBounds = true
-        layer?.mask = silhouette
+
+        // body：承载全部被轮廓裁剪的岛面内容。遮罩只作用于此层。
+        body.wantsLayer = true
+        body.frame = bounds
+        body.layer?.masksToBounds = true
+        body.layer?.mask = silhouette
+        addSubview(body)
 
         // 内容之后的暗色磨砂材质。它模糊窗口后面的东西，故只在展开卡片时才显现；
         // 收起的细条保持纯黑以融入物理刘海。
@@ -101,20 +133,31 @@ final class NotchCanvas: NSView {
         glass.appearance = NSAppearance(named: .darkAqua)
         glass.wantsLayer = true
         glass.alphaValue = 0
-        addSubview(glass, positioned: .below, relativeTo: host)
-        addSubview(host)
+        body.addSubview(glass, positioned: .below, relativeTo: host)
+        body.addSubview(host)
 
         // 暗色洗色层：在玻璃之上、内容之下（恒定 alpha）。
         dim.wantsLayer = true
         dim.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
-        addSubview(dim, positioned: .below, relativeTo: host)
+        body.addSubview(dim, positioned: .below, relativeTo: host)
 
         edge.fillColor = nil
         edge.lineWidth = 0.75
         edge.zPosition = 2
-        layer?.addSublayer(edge)
+        body.layer?.addSublayer(edge)
+
+        // 辉光层：独立于 body 的遮罩，直接挂在根层上，可向气泡外缘扩散。
+        glowShape.fillColor = nil
+        glowShape.lineWidth = 2
+        glowShape.zPosition = 3
+        glowShape.opacity = 0
+        glowShape.shadowOffset = .zero
+        glowShape.shadowRadius = 9
+        glowShape.shadowOpacity = 0
+        layer?.addSublayer(glowShape)
 
         setContentSize(size)
+        applyBaseColor()
         updateContrast()
     }
 
@@ -159,6 +202,7 @@ final class NotchCanvas: NSView {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        body.frame = bounds
         let rect = islandRect(for: contentSize)
         host.frame = rect
         glass.frame = rect
@@ -166,6 +210,7 @@ final class NotchCanvas: NSView {
         let path = morphPath(for: contentSize)
         if silhouette.path != path { silhouette.path = path }
         edge.path = path
+        glowShape.path = path
         applyBaseColor()
         updateContrast()
         CATransaction.commit()
@@ -173,10 +218,11 @@ final class NotchCanvas: NSView {
 
     /// 从 Settings 取岛底色（background_color × background_alpha），取代固定刘海黑，
     /// 使外观改动实时生效。每次 layout 都重读，而设置变更会触发重新 present。
+    /// 底色设在 body 层上（受轮廓遮罩裁剪），根层保持透明。
     private func applyBaseColor() {
         let c = Settings.shared.backgroundRGB
         let alpha = CGFloat(min(1, max(0, Settings.shared.backgroundAlpha)))
-        layer?.backgroundColor = NSColor(
+        body.layer?.backgroundColor = NSColor(
             srgbRed: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: alpha
         ).cgColor
     }
@@ -195,6 +241,68 @@ final class NotchCanvas: NSView {
         }
         if glass.layer?.animation(forKey: "fade") == nil {
             glass.alphaValue = expanded ? 1 : 0
+        }
+        // 呼吸辉光只在收起态气泡上出现（展开卡片时隐藏）。
+        applyGlow()
+    }
+
+    // MARK: 呼吸辉光
+
+    /// 设置 / 清除气泡外缘辉光。`color` = nil 时关闭；`breathing` = true 时做呼吸动画，
+    /// false 时静态显示（reduce motion）。
+    func setGlow(color: NSColor?, breathing: Bool) {
+        glowColor = color
+        glowBreathing = breathing
+        applyGlow()
+    }
+
+    /// 依据当前期望（颜色 + 呼吸）与展开状态，把辉光层落到正确外观。
+    /// 展开态（大尺寸卡片）隐藏辉光，仅收起态气泡显示。
+    private func applyGlow() {
+        let visible = glowColor != nil && contentSize.height <= 60
+        guard let color = glowColor, visible else {
+            glowShape.removeAnimation(forKey: "breathe")
+            glowShape.removeAnimation(forKey: "breatheShadow")
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            glowShape.opacity = 0
+            glowShape.shadowOpacity = 0
+            CATransaction.commit()
+            return
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        glowShape.strokeColor = color.cgColor
+        glowShape.shadowColor = color.cgColor
+        CATransaction.commit()
+
+        if glowBreathing {
+            guard glowShape.animation(forKey: "breathe") == nil else { return }
+            let opacity = CABasicAnimation(keyPath: "opacity")
+            opacity.fromValue = 0.35
+            opacity.toValue = 1.0
+            opacity.duration = 0.9
+            opacity.autoreverses = true
+            opacity.repeatCount = .infinity
+            opacity.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            glowShape.add(opacity, forKey: "breathe")
+
+            let shadow = CABasicAnimation(keyPath: "shadowOpacity")
+            shadow.fromValue = 0.25
+            shadow.toValue = 0.95
+            shadow.duration = 0.9
+            shadow.autoreverses = true
+            shadow.repeatCount = .infinity
+            shadow.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            glowShape.add(shadow, forKey: "breatheShadow")
+        } else {
+            glowShape.removeAnimation(forKey: "breathe")
+            glowShape.removeAnimation(forKey: "breatheShadow")
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            glowShape.opacity = 0.7
+            glowShape.shadowOpacity = 0.7
+            CATransaction.commit()
         }
     }
 
@@ -250,12 +358,19 @@ final class NotchCanvas: NSView {
         dim.frame = host.frame
         silhouette.path = final
         edge.path = final
+        glowShape.path = final
         silhouette.add(animation, forKey: "morph")
         if let edgeAnim = animation.copy() as? CAKeyframeAnimation {
             edgeAnim.delegate = nil
             edge.add(edgeAnim, forKey: "morph")
         }
+        if let glowAnim = animation.copy() as? CAKeyframeAnimation {
+            glowAnim.delegate = nil
+            glowShape.add(glowAnim, forKey: "morph")
+        }
         CATransaction.commit()
+        // 按新尺寸决定辉光显隐（展开卡片时隐藏辉光）。
+        applyGlow()
 
         // 内容与玻璃随生长形状揭幕（展开），或先于收缩形状离场（收起），使飞行途中
         // 没有任何东西被挤压。淡入淡出窗口对齐 Python：展开 p=0.15→0.65，收起 p=0.40→0.06。
@@ -316,6 +431,7 @@ final class NotchCanvas: NSView {
         CATransaction.setDisableActions(true)
         silhouette.removeAnimation(forKey: "morph")
         edge.removeAnimation(forKey: "morph")
+        glowShape.removeAnimation(forKey: "morph")
         host.layer?.removeAnimation(forKey: "fade")
         host.layer?.opacity = 1
         glass.layer?.removeAnimation(forKey: "fade")
@@ -326,6 +442,7 @@ final class NotchCanvas: NSView {
         let path = morphPath(for: size)
         silhouette.path = path
         edge.path = path
+        glowShape.path = path
         updateContrast()
         CATransaction.commit()
     }
@@ -360,6 +477,13 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         canvas.onMouseExit = exit
         canvas.onMouseMove = move
         canvas.onRightClick = rightClick
+    }
+
+    /// 设置 / 清除气泡外缘呼吸辉光（转发到画布的 AppKit 辉光层）。
+    ///
+    /// `color` = nil 关闭；`breathing` = true 呼吸，false 静态（reduce motion）。
+    func setGlow(color: NSColor?, breathing: Bool) {
+        canvas.setGlow(color: color, breathing: breathing)
     }
 
     init(content: AnyView, geometry: NotchGeometry, size: CGSize) {

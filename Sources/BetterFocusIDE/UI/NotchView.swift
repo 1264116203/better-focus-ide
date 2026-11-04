@@ -9,20 +9,11 @@ struct NotchView: View {
     /// 直接观察 Settings，确保任何设置变更（包括岛收起时 surfaceSize 不变的情况）
     /// 都能触发 SwiftUI 重新渲染，让卡片视图采纳新的字号 / 间距 / 颜色等。
     @ObservedObject private var settings = Settings.shared
-    @State private var pulseScale: CGFloat = 1.0
     
     var body: some View {
         // 黑色岛面及其形变轮廓由 AppKit 画布（一层遮罩层）绘制；SwiftUI 层只承载
         // 内容，保持透明，绝不与形状形变争抢。
         ZStack(alignment: .top) {
-            // 呼吸灯辉光层（在最底层，超出气泡范围）
-            // 使用固定蓝色测试渲染
-            Rectangle()
-                .fill(Color.blue)
-                .frame(width: 200, height: 100)
-                .blur(radius: 30)
-                .opacity(0.8)
-            
             if service.expanded || service.closingCard != nil {
                 expandedContent
                 
@@ -53,7 +44,7 @@ struct NotchView: View {
         .tint(.white)
     }
     
-    /// 气泡内容（圆点 + 计数），提取为独立视图以便在收起态和展开覆盖层中复用
+    /// 气泡内容（仅有待处理项时显示圆点 + 计数）
     private var bubbleContent: some View {
         HStack(spacing: 4) {
             if service.pendingTotal > 0 {
@@ -70,49 +61,16 @@ struct NotchView: View {
                                                green: service.pendingTint.g,
                                                blue: service.pendingTint.b))
                 }
-            } else {
-                // 空闲强调圆点 + 呼吸脉冲（Python IDLE_PULSE_PERIOD=2.4s）。
-                Circle()
-                    .fill(Color(red: NotchLayout.accentColor.r,
-                                green: NotchLayout.accentColor.g,
-                                blue: NotchLayout.accentColor.b))
-                    .frame(width: NotchLayout.idleDotRadius * 2,
-                           height: NotchLayout.idleDotRadius * 2)
-                    .scaleEffect(pulseScale)
-                    .onAppear {
-                        withAnimation(.easeInOut(duration: NotchLayout.idlePulsePeriod / 2)
-                            .repeatForever(autoreverses: true)) {
-                            pulseScale = 1.0 + NotchLayout.idleDotPulse / NotchLayout.idleDotRadius
-                        }
-                    }
-                    .onDisappear { pulseScale = 1.0 }
             }
+            // 空闲状态不显示任何内容，仅靠外缘呼吸灯提示
         }
     }
     
-    /// 气泡 + 呼吸灯辉光覆盖层。
-    ///
-    /// 有未处理通知时 breathingTint 非 nil，气泡周围会出现呼吸辉光；否则无辉光。
+    /// 气泡内容。外缘呼吸辉光由 AppKit 画布层绘制（NotchCanvas.glowShape），
+    /// 不再在 SwiftUI 层渲染——因为黑色岛面轮廓由 AppKit 遮罩裁剪，SwiftUI 内容
+    /// 无法越出气泡外缘。
     private var bubbleWithGlow: some View {
-        ZStack {
-            // 气泡内容
-            bubbleContent
-        }
-    }
-    
-    /// 呼吸灯辉光覆盖层（独立于气泡，渲染在更大区域内）
-    /// 使用 scaleEffect 放大辉光，使其超出气泡外沿，形成更明显的发光效果
-    private var breathingGlowLayer: some View {
-        BreathingGlowOverlay(
-            tint: service.breathingTint,
-            shape: NotchShape.island(
-                height: service.geometry.collapsed.height,
-                geometry: service.geometry
-            )
-        )
-        // 放大辉光形状，使其超出气泡边界，形成更明显的外发光效果
-        .scaleEffect(2.0)
-        .allowsHitTesting(false)
+        bubbleContent
     }
     
     private var collapsedContent: some View {
