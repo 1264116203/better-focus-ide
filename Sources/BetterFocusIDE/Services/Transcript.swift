@@ -148,7 +148,7 @@ enum Transcript {
     /// 逆序扫描给定行，返回第一条非空用户提问（截断后）。
     private static func scanReversed(_ lines: [Data], limit: Int, provider: String?) -> String? {
         for line in lines.reversed() where !line.isEmpty {
-            let (prompt, _) = lineUser(line, provider: provider)
+            let (prompt, _, _) = lineUser(line, provider: provider)
             if !prompt.isEmpty { return shorten(prompt, limit: limit) }
         }
         return nil
@@ -184,13 +184,15 @@ enum Transcript {
 
     // MARK: - 记录解析
 
-    /// 一行 jsonl →（用户提问，entrypoint）。跳过超大行、块边界处的畸形 JSON，
-    /// 以及一切并非人类发言的内容。
-    private static func lineUser(_ raw: Data, provider: String?) -> (String, String) {
-        if raw.isEmpty || raw.count > maxLineBytes { return ("", "") }
+    /// 一行 jsonl →（用户提问，entrypoint，人类输入标记）。跳过超大行、块边界处的
+    /// 畸形 JSON，以及一切并非人类发言的内容。
+    private static func lineUser(_ raw: Data, provider: String?) -> (String, String, Bool) {
+        if raw.isEmpty || raw.count > maxLineBytes { return ("", "", false) }
         guard let obj = try? JSONSerialization.jsonObject(with: raw),
-              let record = obj as? [String: Any] else { return ("", "") }
-        return (prompt(of: record, provider: provider), entrypoint(of: record))
+              let record = obj as? [String: Any] else { return ("", "", false) }
+        return (prompt(of: record, provider: provider),
+                entrypoint(of: record),
+                hasHumanInput(of: record))
     }
 
     /// 按提供方选择解析器：cursor 走 Cursor 形态，其余走 Qoder 形态。
@@ -234,6 +236,14 @@ enum Transcript {
     private static func entrypoint(of record: [String: Any]) -> String {
         guard record["type"] as? String == "user" else { return "" }
         return record["entrypoint"] as? String ?? ""
+    }
+
+    /// 用户轮次记录是否带 `humanInput` 标记。新版 Qoder 内核给真人 UI 输入（含粘贴）
+    /// 写这个字段；`qodercli -p` 管道输入没有，显式 null 同样视为无。
+    private static func hasHumanInput(of record: [String: Any]) -> Bool {
+        guard record["type"] as? String == "user" else { return false }
+        guard let value = record["humanInput"] else { return false }
+        return !(value is NSNull)
     }
 
     // MARK: - Cursor 噪声正则
