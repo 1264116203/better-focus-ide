@@ -1,0 +1,95 @@
+@startuml
+' ============================================================
+' 时序图模板 — AI 结构约束（Role Constraint Template）
+' 使用方式：AI 读取本模板后，按章节结构填充实际设计内容
+' {{placeholder}} 为占位符，<!-- 指令: ... --> 为 AI 行为指令
+' ============================================================
+
+title {{sequence_title}}
+
+' <!-- 指令: 声明所有参与者，使用英文标识符 + 中文别名 -->
+' <!-- 指令: 按调用链从左到右排列 -->
+
+actor "{{actor_name}}" as Actor
+participant "{{service_a_cn}}" as ServiceA
+participant "{{service_b_cn}}" as ServiceB
+participant "{{service_c_cn}}" as ServiceC
+database "{{database_cn}}" as DB
+queue "{{mq_cn}}" as MQ
+
+' <!-- 指令: 必须启用分级自动编号（hierarchical autonumber） -->
+' <!-- 指令: 编号格式为 X.Y.Z，其中： -->
+' <!--   X = 阶段号（每个 == 分隔符对应一个阶段，通过 autonumber inc A 递增） -->
+' <!--   Y = 子阶段号（阶段内子分组，通过 autonumber inc B 递增） -->
+' <!--   Z = 消息序号（每条消息自动递增） -->
+' <!-- 指令: 每遇到一个 == 分隔符，必须先执行 autonumber inc A 再开始该阶段的消息 -->
+' <!-- 指令: 阶段内若有子分组（如 alt/else、loop），可用 autonumber inc B 细分子阶段 -->
+' <!-- 指令: 返回消息（虚线箭头 -->）不计入编号时，使用 autonumber stop / resume 控制 -->
+
+autonumber 1.1.1
+
+' <!-- 指令: 描述主流程（Happy Path） -->
+
+== {{phase_1_name}} ==
+
+Actor -> ServiceA : {{request_1_description}}
+activate ServiceA
+
+ServiceA -> ServiceB : {{sync_call_description}}
+activate ServiceB
+
+ServiceB -> DB : {{db_operation}}
+activate DB
+DB --> ServiceB : {{db_response}}
+deactivate DB
+
+ServiceB --> ServiceA : {{sync_response}}
+deactivate ServiceB
+
+' <!-- 指令: 异步消息使用 ->> 箭头 -->
+ServiceA ->> MQ : {{async_message_description}}
+
+ServiceA --> Actor : {{final_response}}
+deactivate ServiceA
+
+' <!-- 指令: 必须包含异常分支（alt/else） -->
+' <!-- 指令: 新阶段开始前必须执行 autonumber inc A 递增阶段号 -->
+
+autonumber inc A
+
+== {{phase_2_name}}（异常处理） ==
+
+Actor -> ServiceA : {{request_2_description}}
+activate ServiceA
+
+alt {{success_condition}}
+    ServiceA -> ServiceC : {{normal_path_call}}
+    ServiceC --> ServiceA : {{normal_response}}
+else {{failure_condition}}
+    ' <!-- 指令: else 分支可使用 autonumber inc B 细分子阶段 -->
+    autonumber inc B
+    ServiceA -> ServiceC : {{fallback_call}}
+    ServiceC --> ServiceA : {{error_response}}
+    ' <!-- 指令: 说明降级/补偿策略 -->
+    ServiceA ->> MQ : {{compensation_message}}
+end
+
+ServiceA --> Actor : {{result}}
+deactivate ServiceA
+
+' <!-- 指令: 必须包含 note 说明核心业务规则 -->
+
+note over ServiceA, ServiceB
+  {{core_business_rule_or_constraint}}
+end note
+
+note right of MQ
+  {{async_processing_note}}
+end note
+
+' <!-- 指令: 如涉及循环/批量处理，使用 loop 块 -->
+' loop {{loop_condition}}
+'     ServiceA -> DB : {{batch_operation}}
+' end
+
+@enduml

@@ -1,0 +1,62 @@
+# ws-system 项目级配置（ss-wf-system）
+# 覆盖全局 ~/.qoder/wf-dev.yaml 中的对应字段
+
+# --- 规则加载（项目级覆盖） ---
+# wf-dev 规则位于 .qoder/wf-rules/（独立于框架 rules/ 目录，避免被框架 always_on 自动加载）
+# 工作流启动时，从 rules.files 读取所有规则文件作为上下文（而非按需读取）
+rules:
+  files:
+    - .qoder/wf-rules/coding-standards.md
+    - .qoder/wf-rules/review-checklist.md
+    - .qoder/wf-rules/orchestrator-behavior.md
+    - .qoder/wf-rules/unittest-java.md
+    
+# --- Profile ---
+profile:
+  default: enhanced
+
+# --- Slug ---
+slug:
+  pattern: "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+  min_length: 3
+  max_length: 50
+  auto_generate: true
+
+# --- 覆盖率 ---
+coverage:
+  new_code: 100
+  overall: 70
+
+# --- 产物目录 ---
+workflow_dir:
+  global: "knowledge/technologies/"
+  active: "knowledge/technologies/active/sprint<YYMM>/<slug>"
+  archives: "knowledge/technologies/archives/<YYYY>/sprint<YYMM>/<slug>"
+
+# --- 项目知识库目录 ---
+# 凡涉及获取当前项目背景知识的操作前，必须先读取对应知识库根目录下的 global/INDEX.md 索引文件
+# （编排器在工作流启动时统一加载，见 orchestrator-behavior.md「知识库索引加载协议」）
+knowledge_base:
+  business: "knowledge/requirements/global"   # 业务相关知识库（需求/业务域背景）
+  technology: "knowledge/technologies/global" # 技术相关知识库（数据库/API/中间件等技术资产，wf-dev-knowledge 输出根）
+  applevel:
+    - "knowledge/applevel/requirements/global"
+    - "knowledge/applevel/technologies/global"
+  index_file: "INDEX.md"                      # 知识库索引文件名，位于各知识库 global/ 目录下
+
+# --- HARD-GATE 注册表 ---
+hard_gates:
+  design_review:
+    description: 设计评审未 APPROVED 不进入开发
+    trigger: "ss-design-review 返回 BLOCKING"
+    fallback: "回退 ss-design-tech / ss-design-plan 修订后重审"
+    workflows: [wf-feature-large]
+  rootcause:
+    description: 未定位根因不进入修复
+    trigger: "ss-diag-rootcause 未产出有证据的 rootcause.md"
+    fallback: "重新执行 ss-diag-rootcause，禁止修改代码"
+    workflows: [wf-bug-fix]
+
+# --- 通用升级规则 ---
+escalation:
+  rule: "同一根因修复 3 次仍失败 → 回退上一设计阶段复审；若无可回退则暂停上报用户"

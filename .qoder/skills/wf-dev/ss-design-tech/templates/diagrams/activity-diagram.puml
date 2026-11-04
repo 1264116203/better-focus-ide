@@ -1,0 +1,73 @@
+@startuml
+' ============================================================
+' 活动图模板 — AI 结构约束（Role Constraint Template）
+' 适用场景：业务流程、审批流、状态机转换
+' {{placeholder}} 为占位符，<!-- 指令: ... --> 为 AI 行为指令
+' ============================================================
+
+title {{activity_title}}
+
+' <!-- 指令: 使用泳道区分不同角色/系统 -->
+' <!-- 指令: 泳道名称使用中文，表示责任主体 -->
+
+|{{swimlane_1_name}}|
+start
+
+:{{step_1_description}};
+
+:{{step_2_description}};
+
+' <!-- 指令: 条件分支必须覆盖所有路径 -->
+
+if ({{condition_1}}?) then ({{branch_yes}})
+    |{{swimlane_2_name}}|
+    :{{step_3_description}};
+
+    if ({{condition_2}}?) then ({{branch_yes}})
+        :{{step_4_description}};
+    else ({{branch_no}})
+        :{{step_4_alt_description}};
+    endif
+
+    |{{swimlane_1_name}}|
+    :{{step_5_description}};
+
+else ({{branch_no}})
+    :{{step_3_alt_description}};
+    stop
+endif
+
+' <!-- 指令: 如涉及并行处理，使用 fork/join -->
+
+' fork
+'     :{{parallel_task_1}};
+' fork again
+'     :{{parallel_task_2}};
+' end fork
+
+' <!-- 指令: 如涉及异常/超时处理 -->
+
+|{{swimlane_2_name}}|
+:{{step_6_description}};
+
+if ({{success_check}}?) then (成功)
+    :{{success_action}};
+else (失败/超时)
+    :{{failure_action}};
+    ' <!-- 指令: 说明重试/补偿/告警策略 -->
+    :{{retry_or_compensate}};
+endif
+
+|{{swimlane_1_name}}|
+:{{final_step}};
+
+' <!-- 指令: 必须包含 note 说明核心业务规则 -->
+
+note right
+  {{core_business_rule}}
+  {{constraint_or_sla}}
+end note
+
+stop
+
+@enduml

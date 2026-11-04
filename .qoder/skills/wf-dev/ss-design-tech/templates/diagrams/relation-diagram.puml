@@ -1,0 +1,185 @@
+@startuml user-service-relation-trade
+
+' ---- 全局样式 ----
+skinparam linetype ortho
+skinparam nodesep 60
+skinparam ranksep 80
+skinparam wrapWidth 160
+
+skinparam entity {
+    BackgroundColor #FFFFFF
+    BorderColor #555555
+    BorderThickness 1.5
+    FontName Arial
+    FontSize 12
+    StereotypeFontSize 10
+}
+
+skinparam package {
+    BackgroundColor #F5F5F5
+    BorderColor #CCCCCC
+    BorderThickness 1
+    FontStyle plain
+    FontSize 13
+}
+
+hide circle
+hide methods
+
+title <size:16>**用户服务 — 交易领域关联关系**</size>\n<size:12>交易、订单、评价、售后</size>\n
+
+' ============================================
+' 共享根表（与 account 领域共享）
+' ============================================
+package "共享根表" as pkg_shared #FCE4EC {
+
+    entity "**user**\n<size:10>用户主表</size>" as user {
+        * id : <size:10>BIGINT PK</size>
+    }
+
+    entity "**merchant**\n<size:10>商户主表</size>" as merchant {
+        * id : <size:10>BIGINT PK</size>
+    }
+}
+
+' ============================================
+' 订单核心
+' ============================================
+package "订单核心" as pkg_order #E8F4FD {
+
+    entity "user_order\n<size:10>用户订单</size>" as user_order {
+        * id : <size:10>BIGINT PK</size>
+        --
+        * user_id : <size:10>BIGINT → user.id</size>
+        * merchant_id : <size:10>BIGINT → merchant.id</size>
+    }
+
+    entity "order_item\n<size:10>订单商品明细</size>" as order_item {
+        * id : <size:10>BIGINT PK</size>
+        --
+        * order_id : <size:10>BIGINT → user_order.id</size>
+    }
+}
+
+' ============================================
+' 支付与退款
+' ============================================
+package "支付与退款" as pkg_pay #FFF3E0 {
+
+    entity "payment\n<size:10>支付记录</size>" as payment {
+        * id : <size:10>BIGINT PK</size>
+        --
+        * order_id : <size:10>BIGINT → user_order.id</size>
+        * user_id : <size:10>BIGINT → user.id</size>
+    }
+
+    entity "payment_refund\n<size:10>退款记录</size>" as payment_refund {
+        * id : <size:10>BIGINT PK</size>
+        --
+        * payment_id : <size:10>BIGINT → payment.id</size>
+        * order_id : <size:10>BIGINT → user_order.id</size>
+    }
+}
+
+' ============================================
+' 评价体系
+' ============================================
+package "评价体系" as pkg_review #E8F5E9 {
+
+    entity "user_review\n<size:10>用户评价</size>" as user_review {
+        * id : <size:10>BIGINT PK</size>
+        --
+        * user_id : <size:10>BIGINT → user.id</size>
+        * order_id : <size:10>BIGINT → user_order.id</size>
+        * merchant_id : <size:10>BIGINT → merchant.id</size>
+    }
+
+    entity "review_reply\n<size:10>评价回复</size>" as review_reply {
+        * id : <size:10>BIGINT PK</size>
+        --
+        * review_id : <size:10>BIGINT → user_review.id</size>
+    }
+}
+
+' ============================================
+' 优惠券
+' ============================================
+package "优惠券" as pkg_coupon #EDE7F6 {
+
+    entity "coupon\n<size:10>优惠券定义</size>" as coupon {
+        * id : <size:10>BIGINT PK</size>
+        --
+        * merchant_id : <size:10>BIGINT → merchant.id</size>
+    }
+
+    entity "user_coupon\n<size:10>用户优惠券</size>" as user_coupon {
+        * id : <size:10>BIGINT PK</size>
+        --
+        * user_id : <size:10>BIGINT → user.id</size>
+        * coupon_id : <size:10>BIGINT → coupon.id</size>
+    }
+}
+
+' ============================================
+' 售后与收藏
+' ============================================
+package "售后与收藏" as pkg_misc #FFFDE7 {
+
+    entity "after_sale\n<size:10>售后工单</size>" as after_sale {
+        * id : <size:10>BIGINT PK</size>
+        --
+        * user_id : <size:10>BIGINT → user.id</size>
+        * order_id : <size:10>BIGINT → user_order.id</size>
+    }
+
+    entity "user_favorite\n<size:10>用户收藏</size>" as user_favorite {
+        * id : <size:10>BIGINT PK</size>
+        --
+        * user_id : <size:10>BIGINT → user.id</size>
+        * merchant_id : <size:10>BIGINT → merchant.id</size>
+    }
+}
+
+' ============================================
+' 关联关系
+' ============================================
+
+' -- user 为中心的关联 --
+user ||--down-o{ user_order : "user_id"
+user ||--down-o{ payment : "user_id"
+user ||--down-o{ user_review : "user_id"
+user ||--down-o{ user_coupon : "user_id"
+user ||--down-o{ after_sale : "user_id"
+user ||--down-o{ user_favorite : "user_id"
+
+' -- merchant 为中心的关联 --
+merchant ||--down-o{ user_order : "merchant_id"
+merchant ||--down-o{ user_review : "merchant_id"
+merchant ||--down-o{ coupon : "merchant_id"
+merchant ||--down-o{ user_favorite : "merchant_id"
+
+' -- order 为中心的关联 --
+user_order ||--right-o{ order_item : "order_id"
+user_order ||--down-o{ payment : "order_id"
+user_order ||--down-o{ payment_refund : "order_id"
+user_order ||--down-o{ user_review : "order_id"
+user_order ||--down-o{ after_sale : "order_id"
+
+' -- payment 的关联 --
+payment ||--right-o{ payment_refund : "payment_id"
+
+' -- review 的关联 --
+user_review ||--right-o{ review_reply : "review_id"
+
+' -- coupon 的关联 --
+coupon ||--down-o{ user_coupon : "coupon_id"
+
+' ============================================
+' 备注
+' ============================================
+legend right
+  → 表示逻辑关联字段（非数据库外键约束）
+  应用层负责数据一致性校验
+endlegend
+
+@enduml

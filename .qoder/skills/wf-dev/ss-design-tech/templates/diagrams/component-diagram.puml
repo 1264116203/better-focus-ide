@@ -1,0 +1,76 @@
+@startuml
+' ============================================================
+' 组件图模板 — AI 结构约束（Role Constraint Template）
+' 适用场景：系统架构、模块依赖、部署拓扑
+' {{placeholder}} 为占位符，<!-- 指令: ... --> 为 AI 行为指令
+' ============================================================
+
+title {{component_title}}
+
+' <!-- 指令: 使用 package 对组件进行逻辑分组 -->
+' <!-- 指令: 组件命名使用英文标识符 + 中文别名 -->
+
+package "{{layer_1_name}}" {
+    [{{component_a_cn}}] as CompA
+    [{{component_b_cn}}] as CompB
+}
+
+package "{{layer_2_name}}" {
+    [{{component_c_cn}}] as CompC
+    [{{component_d_cn}}] as CompD
+}
+
+package "{{layer_3_name}}" {
+    [{{component_e_cn}}] as CompE
+}
+
+' <!-- 指令: 外部系统/中间件使用 node 或独立 package -->
+
+node "{{infra_node_name}}" {
+    database "{{database_cn}}" as DB
+    queue "{{mq_cn}}" as MQ
+    collections "{{cache_cn}}" as Cache
+}
+
+cloud "{{external_system_name}}" {
+    [{{external_service_cn}}] as ExtSvc
+}
+
+' <!-- 指令: 定义组件间依赖关系 -->
+' <!-- 指令: 使用接口符号区分提供/需求 -->
+
+CompA -down-> CompC : {{dependency_1_desc}}
+CompB -down-> CompD : {{dependency_2_desc}}
+CompC -down-> DB : {{db_access_desc}}
+CompC -right-> MQ : {{mq_publish_desc}}
+CompD -down-> Cache : {{cache_access_desc}}
+CompA .right.> ExtSvc : {{external_call_desc}}
+
+' <!-- 指令: 使用接口（provide/require）表达契约 -->
+
+
+' <!-- 指令: 必须包含 note 说明架构决策 -->
+
+note top of CompA
+  {{architecture_decision_1}}
+end note
+
+note bottom of DB
+  {{data_storage_note}}
+end note
+
+note right of MQ
+  {{async_communication_note}}
+end note
+
+' <!-- 指令: 如涉及部署视图，使用 node 嵌套 -->
+' node "K8s Cluster" {
+'     node "Pod-1" {
+'         [Service Instance 1]
+'     }
+'     node "Pod-2" {
+'         [Service Instance 2]
+'     }
+' }
+
+@enduml
