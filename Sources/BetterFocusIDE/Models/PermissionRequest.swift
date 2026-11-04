@@ -171,6 +171,20 @@ struct PermissionRequest: Equatable, Identifiable {
         return mapping[trimmed] ?? trimmed
     }
 
+    /// 从人类可读文案里抠出工具名。
+    ///
+    /// `Notification` 类权限提醒（WorkBuddy / Claude 风格，matcher=permission_prompt）
+    /// 只带一句 "…needs your permission to use Bash"，没有 `tool_name` 字段，
+    /// 标题就会退化成泛泛的「操作」。这里把句中的工具名取出来，复用同一套映射。
+    static func toolNameHint(from text: String) -> String {
+        guard let range = text.range(of: "permission to use ", options: .caseInsensitive)
+        else { return "" }
+        let name = text[range.upperBound...].prefix {
+            $0.isLetter || $0.isNumber || $0 == "_" || $0 == "." || $0 == "-"
+        }
+        return name.isEmpty ? "" : String(name)
+    }
+
     /// 从 tool_input 的键存在性反推动作（有 command→shell、有 url→webfetch 等）。
     private static func actionFromToolInput(_ input: [String: AnyCodableValue]?) -> String? {
         guard let input else { return nil }
