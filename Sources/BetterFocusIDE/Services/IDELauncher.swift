@@ -11,15 +11,62 @@ struct HostInfo: Codable, Equatable {
     var path: String = ""
     var cwd: String = ""
 
+    /// 已知 bundle ID → 展示名称映射（internal 以便 HistoryEntry 解码时复用）。
+    ///
+    /// 当 hook 上报的 `host.name` 为空（某些 IDE 的 Info.plist 中 `CFBundleName` 缺失）
+    /// 时，用此表回退填充，确保图标匹配与历史来源展示正确。
+    static let bundleIdDisplayName: [String: String] = [
+        // JetBrains
+        "com.jetbrains.intellij": "IntelliJ IDEA",
+        "com.jetbrains.pycharm": "PyCharm",
+        "com.jetbrains.webstorm": "WebStorm",
+        "com.jetbrains.goland": "GoLand",
+        "com.jetbrains.rider": "Rider",
+        "com.jetbrains.CLion": "CLion",
+        "com.jetbrains.PhpStorm": "PhpStorm",
+        "com.jetbrains.rubymine": "RubyMine",
+        "com.jetbrains.datagrip": "DataGrip",
+        "com.jetbrains.fleet": "Fleet",
+        // VS Code 系
+        "com.microsoft.VSCode": "Visual Studio Code",
+        "com.visualstudio.code": "Visual Studio Code",
+        "com.qoder.ide": "Qoder IDE",
+        "com.aliyun.lingma.ide": "Qoder CN IDE",
+        "com.qoder.app": "Qoder",
+        "com.cursor": "Cursor",
+        "com.todesktop.230313mzl4w4u92": "Cursor",
+        "ai.opencode.desktop": "OpenCode",
+        "com.byte-dance.trae": "Trae",
+        "com.bytedance.trae": "Trae",
+        // 终端
+        "com.apple.Terminal": "Terminal",
+        "com.googlecode.iterm2": "iTerm",
+        "dev.warp.Warp-Stable": "Warp",
+        "com.mitchellh.ghostty": "Ghostty",
+        "net.kovidgoyal.kitty": "Kitty",
+        "org.alacritty": "Alacritty",
+        "com.github.wez.wezterm": "WezTerm",
+        // 其他
+        "ai.workbuddy": "WorkBuddy",
+        "ai.moonshot.kimi": "Kimi",
+    ]
+
     init() {}
 
     /// 从 socket 消息的 host 字典 + 可选 cwd 构造；缺失字段留空。
+    ///
+    /// 当 `name` 为空但 `bundle` 非空时，用已知 bundle ID 映射表回退填充名称，
+    /// 确保图标匹配与历史来源展示不受 `CFBundleName` 缺失影响。
     init(from dict: [String: AnyCodableValue]?, cwd: String? = nil) {
         guard let dict else { return }
         bundle = dict["bundle"]?.stringValue ?? ""
         name = dict["name"]?.stringValue ?? ""
         path = dict["path"]?.stringValue ?? ""
         self.cwd = cwd ?? dict["cwd"]?.stringValue ?? ""
+        // name 缺失时，用 bundle ID 映射表回退
+        if name.isEmpty && !bundle.isEmpty {
+            name = Self.bundleIdDisplayName[bundle] ?? ""
+        }
     }
 
     /// bundle/name/path 全空视为无有效宿主信息。

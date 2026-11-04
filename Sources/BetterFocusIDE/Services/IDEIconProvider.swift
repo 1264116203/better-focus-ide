@@ -7,10 +7,11 @@ import SwiftUI
 ///
 /// 支持真实图标的 IDE（从 Resources/IDE-Icons 加载）：
 /// - JetBrains: IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider, CLion, PhpStorm, RubyMine
-/// - VS Code 系: VS Code, Cursor, Qoder IDE, Qoder CN IDE
-/// - 其他: OpenCode, Claude Code, Qoder, Qoder Work, Qoder CN, Qoder CN Work
+/// - VS Code 系: VS Code, Cursor, Qoder IDE, Qoder CN IDE, Trae CN
+/// - 终端: Warp, iTerm
+/// - 其他: OpenCode, Qoder, Qoder Work, Qoder CN, Qoder CN Work, WorkBuddy, Kimi
 ///
-/// 无真实图标的 IDE 使用带品牌色的文字徽章作为回退。
+/// 无真实图标的 IDE（如 Claude Code）使用带品牌色的文字徽章作为回退。
 enum IDEIconProvider {
     /// IDE 名称到图标文件名的映射（小写匹配）
     private static let iconMapping: [String: String] = [
@@ -33,10 +34,6 @@ enum IDEIconProvider {
         "cursor": "cursor",
         // OpenCode
         "opencode": "opencode",
-        // Claude Code
-        "claude code": "claude-code",
-        "claude": "claude-code",
-        "anthropic": "claude-code",
         // Qoder 系列（英文）
         "qoder ide": "qoder-ide",
         "qoder work": "qoder-work",
@@ -46,6 +43,16 @@ enum IDEIconProvider {
         "qoder cn work": "qoder-cn-work",
         "qoder cn": "qoder-cn",
         "通义灵码": "qoder-cn",
+        // Trae（字节跳动 VS Code 系 fork）
+        "trae cn": "trae-cn",
+        "trae": "trae-cn",
+        // 终端
+        "warp": "warp",
+        "iterm": "iterm",
+        // 其他应用
+        "workbuddy": "workbuddy",
+        "kimi": "kimi",
+        "moonshot": "kimi",
     ]
 
     /// IDE 名称到品牌色的映射（用于文字徽章背景）
@@ -69,6 +76,14 @@ enum IDEIconProvider {
         "openai": (0.15, 0.65, 0.45),
         // OpenCode - 蓝绿色
         "opencode": (0.06, 0.73, 0.51),
+        // Trae - 蓝色（字节跳动）
+        "trae": (0.25, 0.48, 0.95),
+        "trae cn": (0.25, 0.48, 0.95),
+        // Kimi / Moonshot - 深蓝紫色
+        "kimi": (0.35, 0.30, 0.75),
+        "moonshot": (0.35, 0.30, 0.75),
+        // WorkBuddy - 暖橙色
+        "workbuddy": (0.85, 0.55, 0.20),
         // 终端/CLI - 灰色
         "terminal": (0.4, 0.4, 0.45),
         "iterm": (0.4, 0.4, 0.45),
@@ -79,10 +94,16 @@ enum IDEIconProvider {
         "wezterm": (0.4, 0.4, 0.45),
     ]
 
+    /// 按 key 长度降序排列的映射条目，确保更精确的匹配优先
+    /// （例如 "qoder cn ide" 优先于 "qoder cn" 优先于 "qoder"）
+    private static let sortedMappings: [(key: String, value: String)] = {
+        iconMapping.sorted { $0.key.count > $1.key.count }
+    }()
+
     /// 检查是否有对应 IDE 名称的真实图标
     static func hasIcon(for hostName: String?) -> Bool {
         guard let name = hostName?.lowercased() else { return false }
-        for (key, _) in iconMapping {
+        for (key, _) in sortedMappings {
             if name.contains(key) { return true }
         }
         return false
@@ -92,7 +113,7 @@ enum IDEIconProvider {
     static func icon(for hostName: String?) -> Image? {
         guard let name = hostName?.lowercased() else { return nil }
         
-        for (key, iconName) in iconMapping {
+        for (key, iconName) in sortedMappings {
             if name.contains(key) {
                 if let image = loadImage(named: iconName) {
                     return image
@@ -102,13 +123,18 @@ enum IDEIconProvider {
         return nil
     }
 
+    /// 按 key 长度降序排列的品牌色条目
+    private static let sortedBrandColors: [(key: String, value: (r: Double, g: Double, b: Double))] = {
+        brandColors.sorted { $0.key.count > $1.key.count }
+    }()
+
     /// 获取 IDE 的品牌色
     static func brandColor(for hostName: String?) -> Color {
         guard let name = hostName?.lowercased() else {
             return Color(red: 0.5, green: 0.5, blue: 0.5)
         }
         
-        for (key, color) in brandColors {
+        for (key, color) in sortedBrandColors {
             if name.contains(key) {
                 return Color(red: color.r, green: color.g, blue: color.b)
             }
@@ -149,7 +175,7 @@ enum IDEIconProvider {
     /// 检查是否有对应的品牌色
     private static func hasBrandColor(for hostName: String?) -> Bool {
         guard let name = hostName?.lowercased() else { return false }
-        for (key, _) in brandColors {
+        for (key, _) in sortedBrandColors {
             if name.contains(key) { return true }
         }
         return false
