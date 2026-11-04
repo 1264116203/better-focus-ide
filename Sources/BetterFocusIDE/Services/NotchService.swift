@@ -213,10 +213,21 @@ final class NotchService: ObservableObject {
         if activeCard == .history {
             activeCard = .none
         } else if activeCard == .notice {
+            // 手动收起通知前，先保存通知数据供气泡点击恢复
+            let savedTint = noticeController.notice.flatMap {
+                AgentProvider(rawValue: $0.provider)?.tint
+            }
+            let saved = noticeController.saveForRestore()
             noticeController.dismiss()
             // 如果队列中有下一条通知，promoteNext 已在 onDismiss→handleCardDismissal 中触发，
             // 此时 hasActiveNotice 为 true，不应收起——让 showNoticeBanner 接管。
             if noticeController.hasActiveNotice { return }
+            // 保存成功且队列空：标记未处理以驱动呼吸灯
+            if saved {
+                hasUnprocessedNotice = true
+                unprocessedNoticeTint = savedTint
+                updateBreathingTint()
+            }
             activeCard = .none
         }
         let newSize = geometry.restingSize(showsContent: false)
