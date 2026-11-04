@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-BetterFocusIDE 是一款 macOS 14+ 的附属应用（accessory app，LSUIElement，无 Dock 图标），把 MacBook 的刘海变成面向 AI 编码智能体的"灵动岛"通知助手。它通过 Unix 域套接字接收来自 **Qoder**（Python hook）和 **OpenCode**（JavaScript 插件）的事件，在刘海区域展示可交互卡片（提问、权限请求、回合完成通知），并把用户的回答回传给发起请求的智能体。
+BetterFocusIDE 是一款 macOS 14+ 的附属应用（accessory app，LSUIElement，无 Dock 图标），把 MacBook 的刘海变成面向 AI 编码智能体的"灵动岛"通知助手。它通过 Unix 域套接字接收来自 **Qoder**（Python hook）、**OpenCode**（JavaScript 插件）、**Cursor**（`~/.cursor/hooks.json`）和 **WorkBuddy**（`~/.workbuddy/settings.json`）的事件，在刘海区域展示可交互卡片（提问、权限请求、回合完成通知），并把用户的回答回传给发起请求的智能体。
 
 - **许可证**：GPL-3.0-or-later
 - **来源**：由 Python 项目 `dynamic-Island-python-validate` 迁移为 Swift（动画 / UI 参考 Vorssaint 的实现）
@@ -43,7 +43,7 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gateke
 │   ├── App/
 │   │   └── main.swift                     # 瘦入口：import BetterFocusIDE; run()
 │   ├── Models/                            # 纯数据类型（不含业务逻辑）
-│   │   ├── AgentProvider.swift            # Qoder 与 OpenCode 的身份 + 主题色
+│   │   ├── AgentProvider.swift            # 四个宿主的身份 + 主题色 + 跳转分组
 │   │   ├── AgentQuestion.swift            # 提问卡片模型（多选、选项）
 │   │   ├── AgentSocketMessage.swift       # 线协议：Unix socket 上的 JSON
 │   │   ├── HistoryEntry.swift             # 通知历史记录
@@ -53,10 +53,13 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gateke
 │   │   ├── Socket/
 │   │   │   └── AgentEventSocketServer.swift   # Unix socket 监听器（DispatchSourceRead）
 │   │   ├── Installer/
-│   │   │   ├── HelperTemplate.swift           # 内嵌的 Python hook 模板
+│   │   │   ├── HelperTemplate.swift           # 内嵌的 Qoder Python hook 模板
+│   │   │   ├── HostHookTemplate.swift         # Cursor / WorkBuddy 共用 hook 正文 + 文件/JSON 工具
 │   │   │   ├── InstallerPaths.swift           # hook/插件安装所用的文件路径
+│   │   │   ├── CursorHookInstaller.swift      # Cursor hooks.json 安装/卸载（观测型）
 │   │   │   ├── OpenCodePluginInstaller.swift  # JS 插件安装/卸载
-│   │   │   └── QoderHookInstaller.swift       # Python hook 安装/卸载
+│   │   │   ├── QoderHookInstaller.swift       # Python hook 安装/卸载
+│   │   │   └── WorkBuddyHookInstaller.swift   # WorkBuddy settings.json hooks 安装/卸载
 │   │   ├── NotchService.swift             # ★ 中央编排器（约 960 行）
 │   │   ├── NotchSupport.swift              # 布局常量 + 几何 + 弹簧物理
 │   │   ├── NotchWindowHost.swift           # 承载 SwiftUI 内容的 AppKit 视图
@@ -181,13 +184,36 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gateke
 - **修改来源识别逻辑须同步核对**：`HelperTemplate.swift`（hook 模板）与 `~/.qoder/hooks/betterfocus-hook.py`（已安装 hook）两处
 - Swift 侧 `AgentSocketMessage.resolvedProvider` 优先取 `product`、缺失才回退 `provider`
 
+### 宿主接入矩阵
+
+四个宿主的 hook 都是「stdin 收 JSON、stdout 回 JSON」的 command hook，差异只在事件方言与可用事件面：
+
+| 宿主 | 配置文件 | 事件方言 | 注册的事件 | 能力 |
+|------|----------|----------|------------|------|
+| **Qoder** | `~/.qoder/settings.json` | PascalCase | `PermissionRequest` / `PreToolUse` / `Stop` / `SessionEnd` | 提问卡、权限提醒、回合完成、会话结束 |
+| **OpenCode** | 无需配置（插件目录） | JS 事件流 | `session.idle` 等 | 回合完成、会话结束 |
+| **Cursor** | `~/.cursor/hooks.json` | camelCase | `stop` / `sessionEnd` | **仅**回合完成、会话结束（观测型） |
+| **WorkBuddy** | `~/.workbuddy/settings.json` 的 `hooks` | PascalCase | `PreToolUse` / `Notification` / `PermissionRequest` / `Stop` / `SessionEnd` | 提问卡、权限提醒、回合完成、会话结束 |
+
+**Cursor 为什么只做观测**：Cursor 的权限类 hook（`preToolUse` / `beforeShellExecution` / `beforeReadFile` 等）必须在 stdout 返回 `permission: allow|deny`。返回 `deny` 等于替用户拦掉工具，返回 `allow` 等于绕过用户审批，输出非法 JSON 还会直接阻塞调用。因此 Cursor 侧只注册 `stop` / `sessionEnd`，且恒回 `{}`（合法空对象，不携带 `followup_message`，Agent 循环正常停止）。
+
+**WorkBuddy 的事件选择**：
+- 提问走 `PreToolUse` + matcher `AskUserQuestion`，用 `hookSpecificOutput.permissionDecision = "deny"` 拦掉宿主原生提问框，并把岛上答案写进 `permissionDecisionReason` 回灌给 Agent（与 Qoder hook 同一手法）。
+- 权限提醒同时挂 `Notification`（matcher `permission_prompt`，官方文档入口）与 `PermissionRequest`（27+ 事件族，带 `tool_name` / `tool_input`）。两条都只发 `permission_notice`、**stdout 保持静默**，审批仍由宿主原生对话框完成；重复横幅由 `NoticeController.handlePermissionNotice` 的去抖吸收。
+- `Stop` / `SessionEnd` 不使用 matcher，安装器直接省略该字段。
+
+**WorkBuddy 不热加载**：官方文档明确 settings.json 的 hook 改动不会热生效（CLI 会提示在 `/hooks` 面板复核）。安装/卸载后需要重启对应会话，或到 `/hooks` 确认注册。
+
+**共用模板**：`HostHookTemplate.body` 一份 Python 正文，安装时按 `__EVENT_STYLE__`（`cursor` / `claude`）与 `__PROVIDER__` 分流；`HookInstallerSupport` 提供幂等写文件、原子写 JSON、权限位保留与"只删自己条目"的识别逻辑。
+
 ### 进程间通信
 
 ```
-Qoder Hook (Python) ──┐
-                      ├── Unix Socket ──→ AgentEventSocketServer ──→ NotchService
-OpenCode Plugin (JS) ─┘                          │                    │
-                      ←── Answer Files ←── AnswerDispatcher ←────────┘
+Qoder Hook (Python) ─────┐
+OpenCode Plugin (JS) ────┤
+Cursor Hook (Python) ────┼── Unix Socket ──→ AgentEventSocketServer ──→ NotchService
+WorkBuddy Hook (Python) ─┘                          │                    │
+                      ←── Answer Files ←── AnswerDispatcher ←────────────┘
 ```
 
 - **入站**：`~/Library/Application Support/BetterFocusIDE/agent-events.sock` 上的换行分隔 JSON
@@ -234,14 +260,15 @@ echo '{"provider":"qoder","event":"turn_finished","session_id":"test-'$(date +%s
 | IDE 类型 | 定位方式 | 回退链 |
 |----------|----------|--------|
 | **JetBrains** | ① CLI 直达 → ② AXRaise → ③ Window 菜单 | ① `<binary> <cwd>` 让 IDE 自聚焦 → ② System Events `AXRaise` 按窗口标题匹配 → ③ 点击 Window 菜单项（跨 Space 可靠，有闪烁） |
-| **Qoder IDE / CN IDE** | `code -r <cwd>` + IPC socket | VS Code 系 fork，通过 `VSCODE_IPC_HOOK_CLI` 环境变量指向运行中实例的 IPC socket（`*-main.sock`），复用已打开的 workspace 窗口 |
+| **Qoder IDE / CN IDE / Cursor** | `code -r <cwd>` + IPC socket | VS Code 系 fork，通过 `VSCODE_IPC_HOOK_CLI` 环境变量指向运行中实例的 IPC socket（`*-main.sock`），复用已打开的 workspace 窗口 |
 | **Qoder.app** | App 级激活 | 独立桌面应用，无 `code` 二进制，直接激活应用 |
-| **OpenCode** | App 级激活 | 按 bundle id 或应用名激活 |
+| **OpenCode / WorkBuddy** | App 级激活 | 按 bundle id 或应用名激活 |
 
 **关键实现细节**：
-- **IPC socket 查找**：`findCodeIPCSocket()` 通过 bundle ID 映射到数据目录名（如 `com.qoder.ide` → `Qoder`，`com.aliyun.lingma.ide` → `QoderCN`），在 `~/Library/Application Support/<dir>/` 下查找 `*-main.sock` 文件
+- **IPC socket 查找**：`findCodeIPCSocket()` 通过 bundle ID 映射到数据目录名（如 `com.qoder.ide` → `Qoder`，`com.aliyun.lingma.ide` → `QoderCN`，`com.todesktop.230313mzl4w4u92` → `Cursor`），在 `~/Library/Application Support/<dir>/` 下查找 `*-main.sock` 文件
 - **环境变量设置**：调用 `code -r` 前必须设置 `VSCODE_IPC_HOOK_CLI` 指向找到的 socket 路径，否则 CLI 无法连接运行中实例而会打开新窗口
 - **应用名 ≠ 数据目录名**：Qoder IDE.app 的数据目录是 `Qoder`（不是 `Qoder IDE`），因此不能从应用名直接推导
+- **provider 兜底反查**：hook 只上报 `host.bundle` 时（老 hook / 第三方脚本），`target(for:host:)` 会用 bundle 反查 `ideBundles` 分组，确保 Cursor / WorkBuddy 的通知也能跳回自己的窗口
 
 #### 支持的应用 Bundle ID 对照表
 
@@ -254,13 +281,15 @@ echo '{"provider":"qoder","event":"turn_finished","session_id":"test-'$(date +%s
 | **PyCharm** | `com.jetbrains.pycharm` | ✅ CLI/AXRaise/Menu | JetBrains IDE |
 | **GoLand** | `com.jetbrains.goland` | ✅ CLI/AXRaise/Menu | JetBrains IDE |
 | **其他 JetBrains** | `com.jetbrains.*` | ✅ CLI/AXRaise/Menu | 所有 JetBrains IDE 均支持 |
+| **Cursor.app** | `com.todesktop.230313mzl4w4u92` | ✅ `code -r` | ToDesktop 打包的实际 bundle id；`com.cursor` 为兜底 |
 | **OpenCode** | `ai.opencode.desktop` | ❌ | 仅 App 级激活 |
+| **WorkBuddy** | `com.tencent.workbuddy.mac` | ❌ | Electron 桌面应用，仅 App 级激活（`ai.workbuddy` 兜底） |
 | **终端** | `com.apple.Terminal` 等 | ⛔ 不可跳转 | CLI 模式无 GUI 窗口 |
 
 #### 关键实现文件
 
 - `IDELauncher.swift`：跳转逻辑主入口，包含 `activate(provider:host:)` 和各定位方法
-- `HelperTemplate.swift`：Python hook 模板，`host_app()` 沿父进程链识别宿主应用
+- `HelperTemplate.swift` / `HostHookTemplate.swift`：Python hook 模板，`host_app()` 沿父进程链识别宿主应用
 - `AgentSocketMessage.swift`：消息模型，解析顶层 `cwd` 字段
 - `HostInfo`：宿主信息结构体，承载 `bundle`/`name`/`path`/`cwd`
 
@@ -301,7 +330,12 @@ Unix socket 文件本身就是锁锚点：
 
 ### 安装器系统
 
-`QoderHookInstaller` 与 `OpenCodePluginInstaller` 是**幂等的**：它们写入带 `betterfocus` 标记的文件，若内容未变则跳过。设置了 `needsReinstall: true` 的项（如 `agentWaitLimit`）会触发重新安装，但安装器必须实际读取当前的设置值，否则写回将成为空操作。
+四个安装器（`QoderHookInstaller` / `OpenCodePluginInstaller` / `CursorHookInstaller` / `WorkBuddyHookInstaller`）都是**幂等的**：写入带 `betterfocus` 标识的文件，内容未变则跳过。设置了 `needsReinstall: true` 的项（如 `agentWaitLimit`）会触发重新安装，但安装器必须实际读取当前的设置值，否则写回将成为空操作。
+
+改宿主配置时的不变量：
+- **只增删自己的条目**。Qoder 靠分组里的 `_betterfocus_marker` 识别；WorkBuddy 直接靠 `command` 是否指向 `betterfocus-notify.sh`（不写自定义字段，避免宿主 schema 拒绝）；Cursor 同样靠 `command`。删除时**扫描全部事件**，避免升级后旧事件残留。
+- **保留其他键与权限位**。`HookInstallerSupport.writeJSON` 原子写回并 `chmod` 回原权限（WorkBuddy 的 `settings.json` 通常为 0600，不能放宽成 0644）。
+- **不产生副作用输出**。Shell 启动器在 `python3` 缺失时直接 `exit 0`；WorkBuddy 侧 stdout 静默 = 「无决策」，Cursor 侧恒回 `{}`。
 
 ## 编码规范
 
@@ -371,6 +405,12 @@ Unix socket 文件本身就是锁锚点：
 | `~/.qoder/hooks/betterfocus-hook.py` | Qoder hook 主体 |
 | `~/.qoder/settings.json` | Qoder hook 注册（带 `betterfocus` 标记） |
 | `~/.config/opencode/plugins/betterfocus-notify.js` | OpenCode 插件 |
+| `~/.cursor/hooks/betterfocus-notify.sh` | Cursor hook 启动器 |
+| `~/.cursor/hooks/betterfocus-hook.py` | Cursor hook 主体（观测型） |
+| `~/.cursor/hooks.json` | Cursor hook 注册（`version` + `hooks`，保留其他条目） |
+| `~/.workbuddy/hooks/betterfocus-notify.sh` | WorkBuddy hook 启动器 |
+| `~/.workbuddy/hooks/betterfocus-hook.py` | WorkBuddy hook 主体 |
+| `~/.workbuddy/settings.json` | WorkBuddy hook 注册（只动 `hooks`，其余设置原样保留） |
 
 ## 常见任务
 

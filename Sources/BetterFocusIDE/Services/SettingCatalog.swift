@@ -132,7 +132,7 @@ enum SettingCatalog {
     static let all: [SettingDefinition] = [
         // ---------------- 提醒 ----------------
         SettingDefinition(key: "permissionEnabled", label: "权限申请提醒", kind: .toggle, group: "提醒",
-            note: "Qoder：只弹提醒，去哪审批看 IDE 自己的弹窗（岛不再代拍板）；OpenCode：仍可在岛上直接审批。关掉后两者都不弹",
+            note: "Qoder / Cursor / WorkBuddy：只弹提醒，审批看宿主自己的弹窗（岛不代拍板）；OpenCode：仍可在岛上直接审批。关掉后都不弹",
             keywords: ["权限", "授权", "permission", "approve", "allow", "提醒"],
             defaultValue: .bool(true), get: getB(\.permissionEnabled), set: setB(\.permissionEnabled)),
         SettingDefinition(key: "questionEnabled", label: "用户提问弹窗", kind: .toggle, group: "提醒",

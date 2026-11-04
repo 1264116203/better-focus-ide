@@ -111,37 +111,40 @@ final class SettingsTests: XCTestCase {
     // MARK: - SettingCatalog 测试
     
     /// 测试：SettingCatalog.byKey 能正确查找设置定义。
+    ///
+    /// 字号已改为视图内硬编码（见 `NotchAgentQuestionView`），因此改用仍可配置的
+    /// `cardInset` 验证查找逻辑。
     func testSettingCatalogByKey() {
-        let bodyFontDef = SettingCatalog.byKey("bodyFont")
-        XCTAssertNotNil(bodyFontDef, "Should find bodyFont definition")
-        XCTAssertEqual(bodyFontDef?.key, "bodyFont")
-        XCTAssertEqual(bodyFontDef?.label, "问题正文字号")
+        let cardInsetDef = SettingCatalog.byKey("cardInset")
+        XCTAssertNotNil(cardInsetDef, "Should find cardInset definition")
+        XCTAssertEqual(cardInsetDef?.key, "cardInset")
+        XCTAssertEqual(cardInsetDef?.label, "卡片内边距")
     }
     
     /// 测试：SettingCatalog 的 get/set 闭包能正确读写 Settings。
     func testSettingCatalogGetSet() {
-        guard let bodyFontDef = SettingCatalog.byKey("bodyFont") else {
-            XCTFail("bodyFont definition not found")
+        guard let cardInsetDef = SettingCatalog.byKey("cardInset") else {
+            XCTFail("cardInset definition not found")
             return
         }
         
-        let originalValue = Settings.shared.bodyFont
+        let originalValue = Settings.shared.cardInset
         
         // 通过 catalog 的 set 闭包修改
-        bodyFontDef.set(.double(originalValue + 2))
+        cardInsetDef.set(.double(originalValue + 2))
         
         // 验证 Settings 已更新
-        XCTAssertEqual(Settings.shared.bodyFont, originalValue + 2, "Settings should be updated via catalog")
+        XCTAssertEqual(Settings.shared.cardInset, originalValue + 2, "Settings should be updated via catalog")
         
         // 通过 catalog 的 get 闭包读取
-        if case .double(let value) = bodyFontDef.get() {
+        if case .double(let value) = cardInsetDef.get() {
             XCTAssertEqual(value, originalValue + 2, "Catalog get should return updated value")
         } else {
             XCTFail("Expected double value")
         }
         
         // 恢复原值
-        bodyFontDef.set(.double(originalValue))
+        cardInsetDef.set(.double(originalValue))
     }
     
     // MARK: - 持久化测试

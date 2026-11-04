@@ -512,6 +512,9 @@ final class NotchService: ObservableObject {
         activeCard = card
         // 置顶状态全局统一：不按卡片重置，从共享偏好解析
         refreshPinned()
+        // 先记日志再形变：首帧布局可能耗时数百毫秒到数秒，日志放在 animateTo
+        // 之后会让「卡片已弹出」的记录晚于真实时刻，干扰问题定位。
+        Log.info("showCard: \(card) 主动弹出, pinned=\(pinned)", topic: "card")
         FeedbackService.onArrive()
 
         // 新请求到达即清掉上一次手动收起的让位期，避免悬停状态机把它压住。
@@ -524,7 +527,6 @@ final class NotchService: ObservableObject {
             isClosing = false
         }
         animateTo(size: targetSizeForCurrentCard())
-        Log.info("showCard: \(card) 主动弹出, pinned=\(pinned)", topic: "card")
         syncKeyFocus()
         updatePendingTotal()
     }
