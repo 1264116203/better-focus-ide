@@ -202,17 +202,40 @@ enum PluginTemplate {
             });
 
             // Turn finished: pop the notice when a session goes idle.
-            if (ctx.event && ctx.event.on) {
-              await ctx.event.on('session.idle', async ({ event }) => {
-                if (!alertsEnabled('turn')) return;
-                const sessionID = (event && event.sessionID) || (event && event.session_id) || 'unknown';
-                await sendToIsland({
-                  provider: 'opencode', event: 'turn_finished',
-                  session_id: sessionID, timestamp: new Date().toISOString(),
-                  payload: {}
-                });
-              });
-            }
+            //
+            // ctx.event is an async-iterable stream, NOT an EventEmitter:
+            // ctx.event.on does not exist (silently undefined), so the old
+            // code registered nothing and no notice ever fired — with the
+            // plugin still "loading" cleanly. Subscribe and iterate instead.
+            // 2.x reports turn state as session.status with
+            // data = {sessionID, status: {type}} where only 'idle' means the
+            // agent stopped (busy/retry are mid-turn); older builds emit
+            // session.idle with data = {sessionID} directly. Sub-sessions
+            // idle too, so debounce per session to keep one turn = one card.
+            const TURN_DEBOUNCE_MS = 2000;
+            const lastTurnAt = new Map();
+            const eventController = new AbortController();
+            void (async () => {
+              try {
+                for await (const event of ctx.event.subscribe({ signal: eventController.signal })) {
+                  if (event.type !== 'session.idle' && event.type !== 'session.status') continue;
+                  const d = event.data || {};
+                  if (event.type === 'session.status' && (!d.status || d.status.type !== 'idle')) continue;
+                  if (!alertsEnabled('turn')) continue;
+                  const sessionID = d.sessionID || d.session_id
+                    || (d.info && (d.info.id || d.info.sessionID)) || 'unknown';
+                  const now = Date.now();
+                  if (now - (lastTurnAt.get(sessionID) || 0) < TURN_DEBOUNCE_MS) continue;
+                  lastTurnAt.set(sessionID, now);
+                  if (lastTurnAt.size > 64) lastTurnAt.clear();
+                  await sendToIsland({
+                    provider: 'opencode', event: 'turn_finished',
+                    session_id: sessionID, timestamp: new Date().toISOString(),
+                    payload: {}
+                  });
+                }
+              } catch { /* stream closed with the plugin */ }
+            })();
           }
         });
         """

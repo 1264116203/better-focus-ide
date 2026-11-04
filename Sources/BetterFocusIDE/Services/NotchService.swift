@@ -35,6 +35,10 @@ final class NotchService: ObservableObject {
     @Published var bellSwingStart: Date?
     /// 呼吸灯覆盖层的主题色（nil 时不显示，非 nil 时按提供方主题色呼吸）。
     @Published private(set) var breathingTint: Color?
+    /// 是否有未处理的通知卡片（自动收起后为 true，用于驱动呼吸灯提醒）。
+    @Published private(set) var hasUnprocessedNotice: Bool = false
+    /// 未处理通知的提供方主题色（用于呼吸灯颜色）。
+    @Published private(set) var unprocessedNoticeTint: Color?
     /// 正在撤下的卡片（收起动画期间可见，随后清空）。
     @Published private(set) var closingCard: ActiveCard?
 
@@ -404,6 +408,10 @@ final class NotchService: ObservableObject {
     func showHistory() {
         // 不抢占交互式卡片
         if activeCard == .question || activeCard == .permission { return }
+        // 用户点击气泡查看历史，清除未处理通知标记（呼吸灯随之关闭）
+        hasUnprocessedNotice = false
+        unprocessedNoticeTint = nil
+        updateBreathingTint()
         let cardChanged = activeCard != .history
         activeCard = .history
         // 使用记住的置顶偏好（用户手动切换后再次打开时保留状态）
@@ -676,29 +684,14 @@ final class NotchService: ObservableObject {
     
     /// 更新呼吸灯覆盖层的主题色。
     ///
-    /// 按当前活动卡片类型取对应提供方的主题色；无卡片时置 nil 关闭呼吸灯。
+    /// 只有当通知卡片未操作自动收起后（hasUnprocessedNotice = true），
+    /// 才显示呼吸灯提醒，颜色取该通知的提供方主题色。
     private func updateBreathingTint() {
-        switch activeCard {
-        case .question:
-            if let prompt = questionController.prompt {
-                breathingTint = prompt.provider.tint
-            } else {
-                breathingTint = nil
-            }
-        case .permission:
-            if let request = permissionController.request {
-                breathingTint = request.provider.tint
-            } else {
-                breathingTint = nil
-            }
-        case .notice:
-            if let notice = noticeController.notice {
-                breathingTint = AgentProvider(rawValue: notice.provider)?.tint
-            } else {
-                breathingTint = nil
-            }
-        case .history, .none:
-            // 历史面板和空闲状态不触发呼吸灯
+        if hasUnprocessedNotice {
+            // 有未处理通知：显示呼吸灯
+            breathingTint = unprocessedNoticeTint
+        } else {
+            // 无未处理通知：关闭呼吸灯
             breathingTint = nil
         }
     }
@@ -796,6 +789,11 @@ final class NotchService: ObservableObject {
         if let deadline = autoCollapseAt, now >= deadline {
             autoCollapseAt = nil
             if activeCard == .notice || activeCard == .history {
+                // 通知卡片未操作自动收起时，标记为未处理，驱动气泡呼吸灯提醒
+                if activeCard == .notice, let notice = noticeController.notice {
+                    hasUnprocessedNotice = true
+                    unprocessedNoticeTint = AgentProvider(rawValue: notice.provider)?.tint
+                }
                 collapse()
             }
         }
