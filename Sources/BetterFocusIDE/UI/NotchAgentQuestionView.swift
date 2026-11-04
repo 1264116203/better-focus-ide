@@ -22,11 +22,13 @@ struct NotchAgentQuestionView: View {
     /// 卡片内边距（实时取自 Settings，改动即时生效）
     private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
-    /// 来源展示名：使用 AgentProvider 的统一辅助方法，优先 host.name（具体 IDE 名称），
-    /// 回退到 displayName，JetBrains 插件模式下兜底为 "JetBrains"。
+    /// 来源展示名：走 AgentProvider.label——GUI 宿主用 host.name（具体 IDE 名称），
+    /// CLI 宿主标成「产品（终端）」如 "Qoder CLI（Warp）"，JetBrains 兜底 "JetBrains"。
     private var sourceName: String {
         guard let prompt = prompt else { return "" }
-        return AgentProvider.effectiveName(provider: prompt.provider, hostName: prompt.host?.name)
+        return AgentProvider.label(provider: prompt.provider,
+                                   hostName: prompt.host?.name,
+                                   bundleID: prompt.host?.bundle)
     }
 
     /// 项目名：从 host.cwd 提取末级目录名，用于卡片头部展示。
@@ -93,10 +95,15 @@ struct NotchAgentQuestionView: View {
     private func header(prompt: AgentQuestionPrompt, question: AgentQuestion) -> some View {
         HStack(spacing: 8) {
             // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章；
-            // host 缺失时用 sourceName（统一兜底名）匹配图标
-            IDEIconProvider.badgeView(
+            // host 缺失时用 sourceName（统一兜底名）匹配图标。
+            // 图标身份与来源文字同源（CLI → 终端图标，GUI → 产品图标）。
+            let iconID = AgentProvider.iconIdentity(
+                provider: prompt.provider,
                 hostName: prompt.host?.name ?? sourceName,
-                bundleID: prompt.host?.bundle,
+                bundleID: prompt.host?.bundle)
+            IDEIconProvider.badgeView(
+                hostName: iconID.name,
+                bundleID: iconID.bundle,
                 fallbackText: badgeText,
                 tint: prompt.provider.tint,
                 size: IDEIconProvider.badgeSize

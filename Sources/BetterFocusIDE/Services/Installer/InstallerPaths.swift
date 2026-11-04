@@ -14,6 +14,11 @@ import Foundation
 ///   - Plugin : ~/.config/opencode/plugins/betterfocus-notify.js
 ///   - Cursor : ~/.cursor/hooks.json + ~/.cursor/hooks/betterfocus-notify.sh (+ .py)
 ///   - WorkBuddy: ~/.workbuddy/settings.json + ~/.workbuddy/hooks/betterfocus-notify.sh (+ .py)
+///   - Claude Code: ~/.claude/settings.json + ~/.claude/hooks/betterfocus-notify.sh (+ .py)
+///   - Trae / Trae CN: ~/.trae{,-cn}/hooks.json + ~/.trae{,-cn}/hooks/betterfocus-notify.sh
+///   - Kimi Code CLI: ~/.kimi-code/config.toml（`[[hooks]]` 数组）+ hooks/
+///   - Codex CLI: ~/.codex/config.toml（`notify` 数组）+ hooks/
+///   - Qoder CN: ~/.qoder-cn/settings.json + ~/.qoder-cn/hooks/（与 Qoder 同构）
 enum InstallerPaths {
     /// 数据目录命名空间（决定 Application Support 下的子目录名）。
     static let namespace = "BetterFocusIDE"
@@ -84,6 +89,90 @@ enum InstallerPaths {
     }
     static var workbuddyHelperPath: String {
         (workbuddyHooksDir as NSString).appendingPathComponent("betterfocus-hook.py")
+    }
+
+    // MARK: Claude Code（用户级 settings.json，Claude Code 事件方言）
+
+    static var claudeDir: String { (home as NSString).appendingPathComponent(".claude") }
+    static var claudeSettingsPath: String {
+        (claudeDir as NSString).appendingPathComponent("settings.json")
+    }
+    static var claudeHooksDir: String { (claudeDir as NSString).appendingPathComponent("hooks") }
+    static var claudeScriptPath: String {
+        (claudeHooksDir as NSString).appendingPathComponent("betterfocus-notify.sh")
+    }
+    static var claudeHelperPath: String {
+        (claudeHooksDir as NSString).appendingPathComponent("betterfocus-hook.py")
+    }
+
+    // MARK: Trae / Trae CN（用户级 hooks.json，Claude Code 同构）
+
+    /// Trae（国际版）：`~/.trae/hooks.json`。
+    static var traeDir: String { (home as NSString).appendingPathComponent(".trae") }
+    /// Trae CN（国内版）：`~/.trae-cn/hooks.json`。
+    static var traeCnDir: String { (home as NSString).appendingPathComponent(".trae-cn") }
+
+    static func traeHooksConfigPath(_ dir: String) -> String {
+        (dir as NSString).appendingPathComponent("hooks.json")
+    }
+    static func traeHooksDir(_ dir: String) -> String {
+        (dir as NSString).appendingPathComponent("hooks")
+    }
+    static func traeScriptPath(_ dir: String) -> String {
+        (traeHooksDir(dir) as NSString).appendingPathComponent("betterfocus-notify.sh")
+    }
+    static func traeHelperPath(_ dir: String) -> String {
+        (traeHooksDir(dir) as NSString).appendingPathComponent("betterfocus-hook.py")
+    }
+
+    // MARK: Kimi Code CLI（config.toml 的 `[[hooks]]` 数组）
+
+    /// 新旧两个产品目录：Kimi Code CLI 用 `~/.kimi-code`，早期 kimi-cli 用 `~/.kimi`。
+    /// 安装时优先写已存在的那个；都不存在才新建 `~/.kimi-code`。
+    static var kimiCodeDir: String { (home as NSString).appendingPathComponent(".kimi-code") }
+    static var kimiLegacyDir: String { (home as NSString).appendingPathComponent(".kimi") }
+
+    static func kimiConfigPath(_ dir: String) -> String {
+        (dir as NSString).appendingPathComponent("config.toml")
+    }
+    static func kimiHooksDir(_ dir: String) -> String {
+        (dir as NSString).appendingPathComponent("hooks")
+    }
+    static func kimiScriptPath(_ dir: String) -> String {
+        (kimiHooksDir(dir) as NSString).appendingPathComponent("betterfocus-notify.sh")
+    }
+    static func kimiHelperPath(_ dir: String) -> String {
+        (kimiHooksDir(dir) as NSString).appendingPathComponent("betterfocus-hook.py")
+    }
+
+    // MARK: Codex CLI（config.toml 的 notify 数组）
+
+    static var codexDir: String { (home as NSString).appendingPathComponent(".codex") }
+    static var codexConfigPath: String {
+        (codexDir as NSString).appendingPathComponent("config.toml")
+    }
+    static var codexHooksDir: String { (codexDir as NSString).appendingPathComponent("hooks") }
+    static var codexScriptPath: String {
+        (codexHooksDir as NSString).appendingPathComponent("betterfocus-notify.sh")
+    }
+    static var codexHelperPath: String {
+        (codexHooksDir as NSString).appendingPathComponent("betterfocus-hook.py")
+    }
+
+    // MARK: Qoder CN（与 Qoder 完全同构，只是根目录不同）
+
+    static var qoderCnDir: String { (home as NSString).appendingPathComponent(".qoder-cn") }
+    static var qoderCnSettingsPath: String {
+        (qoderCnDir as NSString).appendingPathComponent("settings.json")
+    }
+    static var qoderCnHooksDir: String {
+        (qoderCnDir as NSString).appendingPathComponent("hooks")
+    }
+    static var qoderCnScriptPath: String {
+        (qoderCnHooksDir as NSString).appendingPathComponent("betterfocus-notify.sh")
+    }
+    static var qoderCnHelperPath: String {
+        (qoderCnHooksDir as NSString).appendingPathComponent("betterfocus-hook.py")
     }
 
     /// 宿主是否已在本机留下配置目录（自检时用于区分「未装宿主」与「未装集成」）。

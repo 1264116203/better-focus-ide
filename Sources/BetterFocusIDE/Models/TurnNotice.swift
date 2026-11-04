@@ -41,9 +41,12 @@ struct TurnNotice: Equatable, Identifiable {
         let host = HostInfo(from: message.host,
                             cwd: message.cwd)
         let project = projectLeaf(from: host)
-        // 来源展示名：统一走 effectiveName——优先 hook 上报的真实 IDE 名称
-        // （如 "IntelliJ IDEA"），回退到产品名，JetBrains 插件模式兜底 "JetBrains"。
-        let name = AgentProvider.effectiveName(provider: providerEnum, hostName: host.name)
+        // 来源展示名：统一走 label——GUI 宿主用 hook 上报的真实应用名
+        // （如 "IntelliJ IDEA"），CLI 宿主标成「产品（终端）」如
+        // "Qoder CLI（Warp）"，JetBrains 插件模式兜底 "JetBrains"。
+        let name = AgentProvider.label(provider: providerEnum,
+                                       hostName: host.name,
+                                       bundleID: host.bundle)
         // 从 hook 上报的 transcript jsonl 读取真实会话标题。
         let transcriptPath = message.payload?["transcript_path"]?.stringValue
         let summary = Transcript.sessionSummary(path: transcriptPath, provider: providerEnum.providerGroup)

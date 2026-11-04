@@ -39,6 +39,32 @@ enum Doctor {
             label: "WorkBuddy", hostDir: InstallerPaths.workbuddyDir,
             script: InstallerPaths.workbuddyScriptPath, helper: InstallerPaths.workbuddyHelperPath,
             registered: { WorkBuddyHookInstaller.isRegistered }))
+        checks.append(contentsOf: hostIntegration(
+            label: "Claude Code", hostDir: InstallerPaths.claudeDir,
+            script: InstallerPaths.claudeScriptPath, helper: InstallerPaths.claudeHelperPath,
+            registered: { ClaudeCodeHookInstaller.isRegistered }))
+        checks.append(contentsOf: hostIntegration(
+            label: "Codex", hostDir: InstallerPaths.codexDir,
+            script: InstallerPaths.codexScriptPath, helper: InstallerPaths.codexHelperPath,
+            registered: { CodexHookInstaller.isRegistered }))
+        checks.append(contentsOf: hostIntegration(
+            label: "Trae CN", hostDir: InstallerPaths.traeCnDir,
+            script: InstallerPaths.traeScriptPath(InstallerPaths.traeCnDir),
+            helper: InstallerPaths.traeHelperPath(InstallerPaths.traeCnDir),
+            registered: { TraeHookInstaller.isRegistered(.cn) }))
+        checks.append(contentsOf: hostIntegration(
+            label: "Trae", hostDir: InstallerPaths.traeDir,
+            script: InstallerPaths.traeScriptPath(InstallerPaths.traeDir),
+            helper: InstallerPaths.traeHelperPath(InstallerPaths.traeDir),
+            registered: { TraeHookInstaller.isRegistered(.international) }))
+        checks.append(contentsOf: hostIntegration(
+            label: "Kimi", hostDir: KimiHookInstaller.targetDir,
+            script: KimiHookInstaller.scriptPath, helper: KimiHookInstaller.helperPath,
+            registered: { KimiHookInstaller.isRegistered }))
+        checks.append(contentsOf: hostIntegration(
+            label: "Qoder CN", hostDir: InstallerPaths.qoderCnDir,
+            script: InstallerPaths.qoderCnScriptPath, helper: InstallerPaths.qoderCnHelperPath,
+            registered: { QoderCnHookInstaller.isRegistered }))
         checks.append(answerDirWritable())
         checks.append(settingsReadable())
         return checks

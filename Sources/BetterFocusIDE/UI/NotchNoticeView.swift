@@ -53,9 +53,15 @@ struct NotchNoticeView: View {
                         // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章。
                         // host 缺失时（如 CLI 直发的测试消息）用 providerName 兜底，
                         // 使 opencode / qoder 等提供方仍能匹配到真实图标。
-                        IDEIconProvider.badgeView(
+                        // 图标身份与标题同源（见 `AgentProvider.iconIdentity`）：
+                        // CLI 用终端图标，GUI 用产品图标，不跟着被污染的 host 走。
+                        let iconID = AgentProvider.iconIdentity(
+                            provider: notice.provider,
                             hostName: notice.host?.name ?? notice.providerName,
-                            bundleID: notice.host?.bundle,
+                            bundleID: notice.host?.bundle)
+                        IDEIconProvider.badgeView(
+                            hostName: iconID.name,
+                            bundleID: iconID.bundle,
                             fallbackText: badgeText,
                             tint: tint,
                             size: IDEIconProvider.badgeSize

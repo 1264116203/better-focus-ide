@@ -159,9 +159,14 @@ struct NotchHistoryView: View {
                     // 提供者徽章：优先使用真实 IDE 图标，回退到文字徽章。
                     // 传入 bundle ID 用于消歧（如 Qoder IDE 的 CFBundleName 也是 "Qoder"）；
                     // host 缺失时用 source（宿主名或提供方名）兜底匹配图标。
-                    IDEIconProvider.badgeView(
+                    // 图标身份与来源文字同源，避免「写着 Trae CN、画着 WorkBuddy」。
+                    let iconID = AgentProvider.iconIdentity(
+                        provider: entry.provider ?? "",
                         hostName: entry.host?.name ?? entry.source,
-                        bundleID: entry.host?.bundle,
+                        bundleID: entry.host?.bundle)
+                    IDEIconProvider.badgeView(
+                        hostName: iconID.name,
+                        bundleID: iconID.bundle,
                         fallbackText: entry.badgeText,
                         tint: Color(red: entry.tintRGB.red,
                                     green: entry.tintRGB.green,

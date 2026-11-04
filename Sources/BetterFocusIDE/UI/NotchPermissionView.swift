@@ -16,11 +16,13 @@ struct NotchPermissionView: View {
     /// 卡片内边距（实时取自 Settings）。
     private var inset: CGFloat { CGFloat(Settings.shared.cardInset) }
 
-    /// 来源展示名：使用 AgentProvider 的统一辅助方法，优先 host.name（具体 IDE 名称），
-    /// 回退到 displayName，JetBrains 插件模式下兜底为 "JetBrains"。
+    /// 来源展示名：走 AgentProvider.label——GUI 宿主用 host.name（具体 IDE 名称），
+    /// CLI 宿主标成「产品（终端）」如 "Qoder CLI（Warp）"，JetBrains 兜底 "JetBrains"。
     private var sourceName: String {
         guard let req = request else { return "" }
-        return AgentProvider.effectiveName(provider: req.provider, hostName: req.host?.name)
+        return AgentProvider.label(provider: req.provider,
+                                   hostName: req.host?.name,
+                                   bundleID: req.host?.bundle)
     }
 
     /// 徽章文本：取来源展示名的首字母大写。
@@ -67,10 +69,15 @@ struct NotchPermissionView: View {
     private func header(_ req: PermissionRequest) -> some View {
         HStack(spacing: 8) {
             // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章；
-            // host 缺失时用 sourceName（统一兜底名）匹配图标
-            IDEIconProvider.badgeView(
+            // host 缺失时用 sourceName（统一兜底名）匹配图标。
+            // 图标身份与来源文字同源（CLI → 终端图标，GUI → 产品图标）。
+            let iconID = AgentProvider.iconIdentity(
+                provider: req.provider,
                 hostName: req.host?.name ?? sourceName,
-                bundleID: req.host?.bundle,
+                bundleID: req.host?.bundle)
+            IDEIconProvider.badgeView(
+                hostName: iconID.name,
+                bundleID: iconID.bundle,
                 fallbackText: badgeText,
                 tint: req.provider.tint,
                 size: IDEIconProvider.badgeSize

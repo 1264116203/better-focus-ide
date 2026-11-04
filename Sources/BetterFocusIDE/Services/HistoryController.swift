@@ -107,9 +107,17 @@ final class HistoryController: ObservableObject {
 
     /// 由一次轮次完成通知构造历史条目；无对应提供方时回退到默认蓝色调。
     static func turn(notice: TurnNotice, state: String) -> HistoryEntry {
-        let tint = AgentProvider(rawValue: notice.provider)?.tintRGB
+        let providerEnum = AgentProvider(rawValue: notice.provider)
+        let tint = providerEnum?.tintRGB
             ?? (red: 0.29, green: 0.62, blue: 1.0)
-        let source = notice.host?.name.isEmpty == false ? notice.host!.name : notice.providerName
+        // 来源名与卡片保持同一套规则：CLI 宿主标成「产品（终端）」，
+        // 直接取 host.name 会把 "Qoder CLI（Warp）" 压成 "Warp"，历史里就看不出
+        // 是哪个 CLI 了。
+        let source = providerEnum.map {
+            AgentProvider.label(provider: $0,
+                                hostName: notice.host?.name,
+                                bundleID: notice.host?.bundle)
+        } ?? notice.providerName
         return HistoryEntry(
             title: notice.title,
             body: notice.body,

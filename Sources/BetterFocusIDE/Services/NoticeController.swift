@@ -109,7 +109,9 @@ final class NoticeController: ObservableObject {
         let resolvedToolName = toolName.isEmpty ? PermissionRequest.toolNameHint(from: detail) : toolName
         let action = PermissionRequest.actionFromToolName(resolvedToolName)
         let title = "Agent 请求执行「\(PermissionRequest.actionLabel(action))」"
-        let hostLabel = AgentProvider.effectiveName(provider: providerEnum, hostName: host.name)
+        let hostLabel = AgentProvider.label(provider: providerEnum,
+                                            hostName: host.name,
+                                            bundleID: host.bundle)
         let body = detail.isEmpty ? "请在 \(hostLabel) 对话框中做出决策" : detail
         let project = host.cwd.isEmpty ? "" : (host.cwd as NSString).lastPathComponent
 
