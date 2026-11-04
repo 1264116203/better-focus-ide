@@ -16,13 +16,13 @@ struct HistoryEntry: Identifiable, Equatable, Codable {
     /// 结果行，如 "已回答" / "已拒绝" / "回复完成"。
     let state: String
     /// 来源展示名（宿主应用名或提供方名）。
-    let source: String
+    var source: String
     /// 作为淡色元数据显示的项目叶子名（路径末级目录）。
     let project: String
     /// 提供方可用于跳回 IDE 的标识。
     let provider: String?
     /// 宿主应用信息（bundle/name/path），用于精确跳转。
-    let host: HostInfo?
+    var host: HostInfo?
     /// 徽章主题色 RGB 分量（存储为 "r,g,b" 字符串）。
     let tintRGB: (red: Double, green: Double, blue: Double)
     let timestamp: Date
@@ -49,6 +49,15 @@ struct HistoryEntry: Identifiable, Equatable, Codable {
         let g = try container.decode(Double.self, forKey: .tintGreen)
         let b = try container.decode(Double.self, forKey: .tintBlue)
         tintRGB = (red: r, green: g, blue: b)
+        // 旧数据 host.name 可能为空（hook 的 CFBundleName 缺失），用 bundle ID 回退填充
+        if var h = host, h.name.isEmpty && !h.bundle.isEmpty {
+            h.name = HostInfo.bundleIdDisplayName[h.bundle] ?? ""
+            host = h
+        }
+        // 旧数据 source 也可能为空，用修复后的 host.name 回填
+        if source.isEmpty, let hostName = host?.name, !hostName.isEmpty {
+            source = hostName
+        }
     }
 
     func encode(to encoder: Encoder) throws {
