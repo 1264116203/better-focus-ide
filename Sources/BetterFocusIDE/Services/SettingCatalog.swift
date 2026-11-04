@@ -155,9 +155,14 @@ enum SettingCatalog {
             defaultValue: .bool(true), get: getB(\.permissionNoticeJump), set: setB(\.permissionNoticeJump)),
 
         // ---------------- 尺寸 ----------------
+        SettingDefinition(key: "cardFollowsNotch", label: "卡片宽度跟随刘海", kind: .toggle, group: "尺寸",
+            note: "开启时卡片宽按黄金分割自适应：刘海宽 × 1.5 ÷ 0.618（卡片:刘海 = 1.5:0.618），换机型自动跟随；关闭后用下方手动宽度。无刘海屏恒用手动值",
+            keywords: ["卡片", "刘海", "跟随", "黄金分割", "自适应", "notch", "card", "宽度"],
+            defaultValue: .bool(true), get: getB(\.cardFollowsNotch), set: setB(\.cardFollowsNotch)),
         SettingDefinition(key: "notifyWidth", label: "卡片宽度", kind: .slider, group: "尺寸",
             min: 260, max: 520, step: 10, unit: "pt", digits: 0,
             note: "所有卡片（提问、权限、通知、历史）的统一宽度",
+            enabledBy: ["cardFollowsNotch"], enabledWhen: { !Settings.shared.cardFollowsNotch },
             defaultValue: .double(380), get: getD(\.notifyWidth), set: setD(\.notifyWidth)),
         SettingDefinition(key: "notifyHeight", label: "卡片高度", kind: .slider, group: "尺寸",
             min: 56, max: 180, step: 2, unit: "pt", digits: 0,
@@ -181,14 +186,20 @@ enum SettingCatalog {
             note: "展开态卡片的水平位置，正值向右移动，负值向左移动，0 = 居中。通常保持 0 使卡片居中",
             keywords: ["卡片", "card", "水平", "偏移", "位置", "offset", "horizontal"],
             defaultValue: .double(0), get: getD(\.cardHorizontalOffset), set: setD(\.cardHorizontalOffset)),
+        SettingDefinition(key: "bubbleFollowsNotch", label: "气泡跟随刘海尺寸", kind: .toggle, group: "尺寸",
+            note: "开启时收起态气泡自动贴合本机物理刘海（宽×高），换机型自适应；关闭后用下方手动宽高。无刘海屏恒用手动值",
+            keywords: ["气泡", "刘海", "跟随", "自适应", "notch", "bubble", "尺寸"],
+            defaultValue: .bool(true), get: getB(\.bubbleFollowsNotch), set: setB(\.bubbleFollowsNotch)),
         SettingDefinition(key: "bubbleWidth", label: "气泡宽度", kind: .slider, group: "尺寸",
             min: 30, max: 240, step: 2, unit: "pt", digits: 0,
             note: "收起态气泡的宽度，影响呼吸灯辉光显示范围",
+            enabledBy: ["bubbleFollowsNotch"], enabledWhen: { !Settings.shared.bubbleFollowsNotch },
             keywords: ["气泡", "bubble", "宽度", "width", "辉光"],
             defaultValue: .double(44), get: getD(\.bubbleWidth), set: setD(\.bubbleWidth)),
         SettingDefinition(key: "bubbleHeight", label: "气泡高度", kind: .slider, group: "尺寸",
             min: 20, max: 80, step: 2, unit: "pt", digits: 0,
             note: "收起态气泡的高度，影响呼吸灯辉光显示范围",
+            enabledBy: ["bubbleFollowsNotch"], enabledWhen: { !Settings.shared.bubbleFollowsNotch },
             keywords: ["气泡", "bubble", "高度", "height", "辉光"],
             defaultValue: .double(26), get: getD(\.bubbleHeight), set: setD(\.bubbleHeight)),
 
@@ -216,7 +227,16 @@ enum SettingCatalog {
             min: 3, max: 40, step: 1, unit: "pt", digits: 0,
             note: "气泡外缘辉光的扩散范围，值越大光晕越宽越淡",
             keywords: ["呼吸灯", "辉光", "范围", "glow", "radius", "光晕"],
-            defaultValue: .double(12), get: getD(\.glowRadius), set: setD(\.glowRadius)),
+            defaultValue: .double(6), get: getD(\.glowRadius), set: setD(\.glowRadius)),
+        SettingDefinition(key: "glowBreathAmplitude", label: "呼吸灯幅度", kind: .slider, group: "外观",
+            min: 0, max: 100, step: 5, unit: "%", digits: 0,
+            note: "呼吸时辉光最暗降到多暗：0% = 恒亮不呼吸，越大明暗差越明显",
+            keywords: ["呼吸灯", "呼吸", "幅度", "强度", "glow", "amplitude", "脉动"],
+            defaultValue: .double(65),
+            get: { .double(Settings.shared.glowBreathAmplitude * 100) },
+            set: { if case .double(let v) = $0 {
+                Settings.shared.glowBreathAmplitude = min(1, max(0, v / 100)); Settings.shared.markChanged()
+            } }),
 
         // ---------------- 动画 ----------------
         SettingDefinition(key: "motionGrowBounce", label: "弹簧回弹（展开）", kind: .slider, group: "动画",
@@ -256,6 +276,11 @@ enum SettingCatalog {
             min: 0.6, max: 6.0, step: 0.2, unit: "秒", digits: 1,
             note: "收起态圆点呼吸一次的时长",
             defaultValue: .double(2.4), get: getD(\.idlePulsePeriod), set: setD(\.idlePulsePeriod)),
+        SettingDefinition(key: "glowBreathPeriod", label: "呼吸灯频率", kind: .slider, group: "动画",
+            min: 0.6, max: 8.0, step: 0.2, unit: "秒", digits: 1,
+            note: "呼吸灯亮一次暗一次的完整周期，越小呼吸越快",
+            keywords: ["呼吸灯", "呼吸", "频率", "周期", "速度", "glow", "period"],
+            defaultValue: .double(2.4), get: getD(\.glowBreathPeriod), set: setD(\.glowBreathPeriod)),
 
         // ---------------- 声音与触感 ----------------
         SettingDefinition(key: "notifySound", label: "提示音", kind: .choice, group: "声音与触感", section: "提示音",

@@ -66,7 +66,7 @@ struct NotchView: View {
         }
     }
     
-    /// 气泡内容。外缘呼吸辉光由 AppKit 画布层绘制（NotchCanvas.glowShape），
+    /// 气泡内容。外缘呼吸辉光由 AppKit 画布层绘制（NotchCanvas.glowLayer），
     /// 不再在 SwiftUI 层渲染——因为黑色岛面轮廓由 AppKit 遮罩裁剪，SwiftUI 内容
     /// 无法越出气泡外缘。
     private var bubbleWithGlow: some View {
