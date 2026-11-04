@@ -367,26 +367,34 @@ enum IDELauncher {
     /// 否则 CLI 无法找到运行中的实例而会打开新窗口。
     ///
     /// 注意：应用名与数据目录名不一定相同（如 "Qoder IDE.app" → "Qoder"，
-    /// "Qoder CN IDE.app" → "QoderCN"），因此通过 bundle ID 映射到已知的数据目录名。
-    private static func findCodeIPCSocket(hostBundle: String) -> String? {
+    /// "Qoder CN IDE.app" → "QoderCN"），因此通过 bundle ID 映射到已知的数据目录名，
+    /// 同时兜底扫描所有可能的目录名。
+    private static func findCodeIPCSocket(hostBundle: String, hostPath: String = "") -> String? {
         // bundle ID → 数据目录名（VS Code 系应用的用户数据目录不一定与应用名相同）
-        let bundleToDataDir: [String: String] = [
-            "com.qoder.ide": "Qoder",
-            "com.aliyun.lingma.ide": "QoderCN",
-            "com.microsoft.VSCode": "Code",
-            "com.visualstudio.code.oss": "Code - OSS",
+        let bundleToDataDir: [String: [String]] = [
+            "com.qoder.ide": ["Qoder", "Qoder IDE"],
+            "com.aliyun.lingma.ide": ["QoderCN", "Qoder CN"],
+            "com.microsoft.VSCode": ["Code"],
+            "com.visualstudio.code.oss": ["Code - OSS"],
         ]
 
         let appSupport = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support")
 
-        // 优先用 bundle ID 映射的数据目录名
+        // 收集候选目录名：bundle ID 映射优先，再从应用路径推导兜底
         var candidateDirs: [String] = []
-        if let dirName = bundleToDataDir[hostBundle] {
-            candidateDirs.append(dirName)
+        if let dirNames = bundleToDataDir[hostBundle] {
+            candidateDirs.append(contentsOf: dirNames)
         }
-        // 兜底：尝试从 host.path 推导应用名作为目录名
-        // （某些 VS Code fork 可能用应用名作为数据目录）
+        // 兜底：从 .app 路径推导可能的数据目录名
+        // （某些 VS Code fork 的数据目录名与应用名一致）
+        if !hostPath.isEmpty {
+            let appName = (hostPath as NSString).lastPathComponent
+                .replacingOccurrences(of: ".app", with: "")
+            if !appName.isEmpty && !candidateDirs.contains(appName) {
+                candidateDirs.append(appName)
+            }
+        }
 
         for dirName in candidateDirs {
             let dataDir = appSupport.appendingPathComponent(dirName)
@@ -412,6 +420,7 @@ enum IDELauncher {
     ///
     /// **关键**：必须设置 `VSCODE_IPC_HOOK_CLI` 环境变量指向运行中实例的 IPC socket，
     /// 否则 CLI 进程无法通过 socket 连接到已有实例，会退化为打开新窗口。
+    /// 找不到 socket 时返回 false，由调用者回退到 AppleScript 激活（不会产生新实例闪烁）。
     /// socket 路径从 `hostPath` 推导出的应用数据目录中查找（`*-main.sock`）。
     private static func focusCodeWindow(hostPath: String, hostBundle: String, cwd: String) -> Bool {
         guard !hostPath.isEmpty else { return false }
@@ -421,17 +430,19 @@ enum IDELauncher {
             return false
         }
 
+        // 必须找到 IPC socket 才能安全复用窗口；否则 code -r 会打开新实例导致闪烁
+        guard let sockPath = findCodeIPCSocket(hostBundle: hostBundle, hostPath: hostPath) else {
+            Log.debug("未找到 \(hostBundle) 的 IPC socket，跳过 code -r 回退 AppleScript", topic: "launcher")
+            return false
+        }
+
         let task = Process()
         task.executableURL = URL(fileURLWithPath: codeBin)
         task.arguments = ["-r", cwd]
 
         // 设置 IPC socket 环境变量，让 CLI 能连接到运行中的实例而非开新窗口
         var env = ProcessInfo.processInfo.environment
-        if let sockPath = findCodeIPCSocket(hostBundle: hostBundle) {
-            env["VSCODE_IPC_HOOK_CLI"] = sockPath
-        } else {
-            Log.debug("未找到 \(hostBundle) 的 IPC socket，尝试无环境变量调用", topic: "launcher")
-        }
+        env["VSCODE_IPC_HOOK_CLI"] = sockPath
         task.environment = env
 
         do {

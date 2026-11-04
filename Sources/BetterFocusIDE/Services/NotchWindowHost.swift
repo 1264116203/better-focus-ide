@@ -386,8 +386,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     }
 
     /// 容纳顶部居中岛的带留白窗口 frame：四周各留 `shadowPad`，底部额外留 `shadowPad`
-    /// 供投影消散。`showsContent` 为 false 时 frame 落在刘海底沿，使收起胶囊悬挂于
-    /// 摄像头下方。
+    /// 供投影消散。Frame 顶边始终对齐屏幕顶边，使气泡隐藏在刘海中。
     private func panelFrame(for islandSize: CGSize, showsContent: Bool = true) -> CGRect {
         let base = currentGeometry.frame(for: islandSize, showsContent: showsContent)
         return CGRect(x: base.minX - shadowPad,

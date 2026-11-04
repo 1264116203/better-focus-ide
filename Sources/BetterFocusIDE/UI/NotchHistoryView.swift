@@ -158,8 +158,10 @@ struct NotchHistoryView: View {
 
                 HStack(spacing: gap) {
                     // 提供者徽章：优先使用真实 IDE 图标，回退到文字徽章
+                    // 传入 bundle ID 用于消歧（如 Qoder IDE 的 CFBundleName 也是 "Qoder"）
                     IDEIconProvider.badgeView(
                         hostName: entry.host?.name,
+                        bundleID: entry.host?.bundle,
                         fallbackText: entry.badgeText,
                         tint: Color(red: entry.tintRGB.red,
                                     green: entry.tintRGB.green,
