@@ -87,19 +87,21 @@ struct NotchView: View {
     /// 有未处理通知时 breathingTint 非 nil，气泡周围会出现呼吸辉光；否则无辉光。
     private var bubbleWithGlow: some View {
         ZStack {
-            // 呼吸灯辉光（在气泡下层，使用 NotchShape 匹配气泡轮廓）
-            BreathingGlowOverlay(
-                tint: service.breathingTint,
-                shape: NotchShape.island(
-                    height: service.geometry.collapsed.height,
-                    geometry: service.geometry
-                )
-            )
-            .allowsHitTesting(false)
-            
-            // 气泡Content
+            // 气泡内容
             bubbleContent
         }
+    }
+    
+    /// 呼吸灯辉光覆盖层（独立于气泡，渲染在更大区域内）
+    private var breathingGlowLayer: some View {
+        BreathingGlowOverlay(
+            tint: service.breathingTint,
+            shape: NotchShape.island(
+                height: service.geometry.collapsed.height,
+                geometry: service.geometry
+            )
+        )
+        .allowsHitTesting(false)
     }
     
     private var collapsedContent: some View {
@@ -123,7 +125,8 @@ struct NotchView: View {
                                     onTogglePin: { service.togglePin() })
             case .notice:
                 if let notice = service.noticeController.notice {
-                    NotchNoticeView(notice: notice,
+                    NotchNoticeView(controller: service.noticeController,
+                                    notice: notice,
                                     pinned: service.pinned,
                                     onTogglePin: { service.togglePin() },
                                     onTap: { service.noticeController.tapped() },
