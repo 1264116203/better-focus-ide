@@ -15,6 +15,14 @@ struct NotchView: View {
         // 黑色岛面及其形变轮廓由 AppKit 画布（一层遮罩层）绘制；SwiftUI 层只承载
         // 内容，保持透明，绝不与形状形变争抢。
         ZStack(alignment: .top) {
+            // 呼吸灯辉光层（在最底层，超出气泡范围）
+            // 使用固定蓝色测试渲染
+            Rectangle()
+                .fill(Color.blue)
+                .frame(width: 200, height: 100)
+                .blur(radius: 30)
+                .opacity(0.8)
+            
             if service.expanded || service.closingCard != nil {
                 expandedContent
                 
@@ -33,12 +41,6 @@ struct NotchView: View {
         }
         .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
         .clipped()  // 防止 SwiftUI 内容在 AppKit 壳布局完成前溢出
-        // 呼吸灯辉光层：在 clipped 外部渲染，确保辉光效果能完整显示
-        .overlay(
-            breathingGlowLayer
-                .frame(width: service.surfaceSize.width + 80,
-                       height: service.surfaceSize.height + 80)
-        )
         .foregroundStyle(.white)
         // 表面点击：仅收起态或无卡片时处理；展开的交互式卡片由自身处理交互，
         // 背景点击不应触发收起（否则点选项间隙会误关卡片）。

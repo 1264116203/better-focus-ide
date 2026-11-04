@@ -466,6 +466,9 @@ final class NotchService: ObservableObject {
     private func showNoticeBanner() {
         let cardChanged = activeCard != .notice
         activeCard = .notice
+        // 新通知上屏：清除旧的未处理标记（呼吸灯随之关闭）
+        hasUnprocessedNotice = false
+        unprocessedNoticeTint = nil
         // 置顶偏好：用户手动切换过的以用户为准，否则实时跟随设置（改动即刻生效）
         if cardChanged {
             pinned = lastNoticePinned ?? Settings.shared.pinByDefault
@@ -724,6 +727,9 @@ final class NotchService: ObservableObject {
     /// 只有当通知卡片未操作自动收起后（hasUnprocessedNotice = true），
     /// 才显示呼吸灯提醒，颜色取该通知的提供方主题色。
     private func updateBreathingTint() {
+        // DEBUG: 强制显示蓝色辉光以测试渲染
+        breathingTint = Color.blue
+        /*
         if hasUnprocessedNotice {
             // 有未处理通知：显示呼吸灯
             breathingTint = unprocessedNoticeTint
@@ -731,6 +737,7 @@ final class NotchService: ObservableObject {
             // 无未处理通知：关闭呼吸灯
             breathingTint = nil
         }
+        */
     }
     
     // MARK: - 悬停状态机
