@@ -14,6 +14,12 @@ import SwiftUI
 /// - `qoder_cli`：终端 CLI 模式（无头脚本）
 /// - `cursor`：Cursor 用户级 hooks（`~/.cursor/hooks.json`）
 /// - `workbuddy`：WorkBuddy 用户级 hooks（`~/.workbuddy/settings.json`）
+/// - `claude_code`：Claude Code 用户级 hooks（`~/.claude/settings.json`）
+/// - `trae` / `trae_cn`：Trae / Trae CN 用户级 hooks（`~/.trae{,-cn}/hooks.json`）
+/// - `kimi`：Kimi Code CLI（`~/.kimi-code/config.toml` 的 `[[hooks]]`）
+/// - `codex`：Codex CLI（`~/.codex/config.toml` 的 `notify`）
+/// - `qoder_cn*`：Qoder CN（通义灵码）同名产品，识别结果由启动器里的
+///   `BETTERFOCUS_VARIANT=cn` 决定（见 `HelperTemplate`）
 /// - `unknown`：无法识别
 enum AgentProvider: String, CaseIterable, Codable {
     case qoder
@@ -23,6 +29,14 @@ enum AgentProvider: String, CaseIterable, Codable {
     case qoder_cli
     case cursor
     case workbuddy
+    case claude_code
+    case codex
+    case trae
+    case trae_cn
+    case kimi
+    case qoder_cn
+    case qoder_cn_ide
+    case qoder_cn_cli
     case unknown
 
     /// 界面展示名称（用于徽章首字母、来源文案等）。
@@ -38,7 +52,29 @@ enum AgentProvider: String, CaseIterable, Codable {
         case .qoder_cli: return "Qoder CLI"
         case .cursor: return "Cursor"
         case .workbuddy: return "WorkBuddy"
+        case .claude_code: return "Claude Code"
+        case .codex: return "Codex"
+        case .trae: return "Trae"
+        case .trae_cn: return "Trae CN"
+        case .kimi: return "Kimi"
+        case .qoder_cn: return "Qoder CN"
+        case .qoder_cn_ide: return "Qoder CN IDE"
+        case .qoder_cn_cli: return "Qoder CN CLI"
         case .unknown: return "Unknown"
+        }
+    }
+
+    /// 是否为「跑在终端里的 CLI 产品」。
+    ///
+    /// 这类产品没有自己的窗口，卡片上要标成「产品（终端）」并借用终端图标，
+    /// 点击时也要把终端窗口激活到前台。IDE / 桌面应用返回 false。
+    var isCLI: Bool {
+        switch self {
+        case .claude_code, .codex, .kimi, .qoder_cli, .qoder_cn_cli:
+            return true
+        case .qoder, .opencode, .jetbrains_plugin, .qoder_ide, .cursor,
+             .workbuddy, .trae, .trae_cn, .qoder_cn, .qoder_cn_ide, .unknown:
+            return false
         }
     }
 
@@ -55,7 +91,10 @@ enum AgentProvider: String, CaseIterable, Codable {
     /// opencode_tint 的修改可实时生效。
     var tintRGB: (red: Double, green: Double, blue: Double) {
         switch self {
-        case .qoder, .jetbrains_plugin, .qoder_ide, .qoder_cli:
+        case .qoder, .jetbrains_plugin, .qoder_ide, .qoder_cli,
+             .qoder_cn, .qoder_cn_ide, .qoder_cn_cli:
+            // Qoder 系（含 CN 发行版）共用一个可配置主题色：同一个产品的
+            // 两种发行版，没有理由让用户在设置里分别调两次。
             let c = Settings.shared.qoderTintRGB
             return (c.r, c.g, c.b)
         case .opencode:
@@ -67,6 +106,11 @@ enum AgentProvider: String, CaseIterable, Codable {
         case .workbuddy:
             let c = Settings.shared.workbuddyTintRGB
             return (c.r, c.g, c.b)
+        // 以下宿主用固定品牌色：它们各自只有一个身份，不需要用户配置。
+        case .claude_code: return (0.85, 0.55, 0.25)   // Anthropic 橙
+        case .codex: return (0.15, 0.65, 0.45)         // OpenAI 绿
+        case .trae, .trae_cn: return (0.25, 0.48, 0.95) // 字节蓝
+        case .kimi: return (0.35, 0.30, 0.75)          // 月之暗面紫蓝
         case .unknown:
             return (red: 0.5, green: 0.5, blue: 0.5)
         }
@@ -81,7 +125,12 @@ enum AgentProvider: String, CaseIterable, Codable {
         case .opencode: return "opencode"
         case .cursor: return "cursor"
         case .workbuddy: return "workbuddy"
-        case .qoder, .jetbrains_plugin, .qoder_ide, .qoder_cli, .unknown:
+        case .trae, .trae_cn: return "trae"
+        case .kimi: return "kimi"
+        case .claude_code: return "claude_code"
+        case .codex: return "codex"
+        case .qoder, .jetbrains_plugin, .qoder_ide, .qoder_cli,
+             .qoder_cn, .qoder_cn_ide, .qoder_cn_cli, .unknown:
             return "qoder"
         }
     }
@@ -108,9 +157,81 @@ enum AgentProvider: String, CaseIterable, Codable {
         return "Unknown"
     }
 
+    /// 卡片 / 历史 / 横幅上展示的完整来源名。
+    ///
+    /// CLI 类产品（Claude Code / Codex / Kimi / Qoder CLI / Qoder CN CLI）本身
+    /// 没有窗口，跑在某个终端里。此时只写产品名分不清是哪个终端里的会话，
+    /// 只写终端名又丢了产品——所以标成 `产品（终端）`，例如：
+    ///
+    /// - `Qoder CLI（Warp）`
+    /// - `Qoder CN CLI（iTerm）`
+    /// - `Claude Code（Ghostty）`
+    ///
+    /// 终端识别优先用 bundle ID（可靠），名称是兜底（hook 在某些容器里拿不到 bundle）。
+    /// 认不出终端时退回 `effectiveName`，也就是产品名本身。
+    static func label(provider: AgentProvider,
+                      hostName: String?,
+                      bundleID: String? = nil) -> String {
+        if provider.isCLI {
+            // 认得出终端才加括号标注；认不出就只写产品名。
+            // 不能退回 host.name——CLI 的祖先进程往往是「启动它的那个宿主」
+            // （IDE、甚至另一个 agent），把 "WorkBuddy" 当成来源会掩盖真正的产品。
+            if let terminal = TerminalHost.displayName(bundle: bundleID, name: hostName) {
+                return "\(provider.displayName)（\(terminal)）"
+            }
+            return provider.displayName
+        }
+        // GUI 宿主：默认信 host.name，它能区分同一个产品下的具体 IDE
+        //（JetBrains 插件必须靠它显示 "IntelliJ IDEA" 而不是 "Qoder"）。
+        // 但祖先链可能根本没走到产品自身——脚本被别的应用拉起、或在别人的
+        // 终端里手动跑——那时 host 报的是那个「别人」。实测在 WorkBuddy 的
+        // shell 里触发 Trae CN 的 hook，卡片会写成 "WorkBuddy 回复完成"。
+        // 所以先校验 bundle 归属：明确属于另一个应用家族时，只写产品名。
+        if let bundle = bundleID, !bundle.isEmpty,
+           let family = IDELauncher.group(for: bundle),
+           family != provider.providerGroup,
+           provider != .jetbrains_plugin,
+           !provider.displayName.isEmpty {
+            return provider.displayName
+        }
+        return effectiveName(provider: provider, hostName: hostName)
+    }
+
     /// 获取徽章文本：取有效展示名称的首字母大写。
-    static func badgeText(provider: AgentProvider, hostName: String?) -> String {
-        let name = effectiveName(provider: provider, hostName: hostName)
+    static func badgeText(provider: AgentProvider,
+                          hostName: String?,
+                          bundleID: String? = nil) -> String {
+        let name = label(provider: provider, hostName: hostName, bundleID: bundleID)
         return String(name.prefix(1)).uppercased()
+    }
+
+    /// 徽章图标该按哪个身份去找图标与品牌色。
+    ///
+    /// - CLI 宿主：用**终端**身份（`Claude Code` 的图标就是它跑在的那个终端）。
+    /// - GUI 宿主：用**产品自己**的身份。正常情况下 host 就是产品，原样返回；
+    ///   但 host 的 bundle 明确属于另一个应用家族时（祖先链没走到产品），
+    ///   若继续用 host 就会「文字写 Trae CN、图标画 WorkBuddy」——两者必须同源。
+    static func iconIdentity(provider: AgentProvider,
+                             hostName: String?,
+                             bundleID: String?) -> (name: String?, bundle: String?) {
+        guard !provider.isCLI else { return (hostName, bundleID) }
+        guard let bundle = bundleID, !bundle.isEmpty,
+              let family = IDELauncher.group(for: bundle),
+              family != provider.providerGroup,
+              provider != .jetbrains_plugin,
+              !provider.displayName.isEmpty else {
+            return (hostName, bundleID)
+        }
+        return (provider.displayName, IDELauncher.ideBundles[provider.providerGroup]?.first)
+    }
+
+    /// 同上，接受原始字符串标识（历史条目里存的是 rawValue）。
+    static func iconIdentity(provider: String,
+                             hostName: String?,
+                             bundleID: String?) -> (name: String?, bundle: String?) {
+        guard let provider = AgentProvider(rawValue: provider) else {
+            return (hostName, bundleID)
+        }
+        return iconIdentity(provider: provider, hostName: hostName, bundleID: bundleID)
     }
 }

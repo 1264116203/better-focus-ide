@@ -38,6 +38,8 @@ struct HostInfo: Codable, Equatable {
         "ai.opencode.desktop": "OpenCode",
         "com.byte-dance.trae": "Trae",
         "com.bytedance.trae": "Trae",
+        "cn.trae.app": "Trae CN",
+        "com.trae.app": "Trae",
         // 终端
         "com.apple.Terminal": "Terminal",
         "com.googlecode.iterm2": "iTerm",
@@ -50,6 +52,7 @@ struct HostInfo: Codable, Equatable {
         "com.tencent.workbuddy.mac": "WorkBuddy",
         "ai.workbuddy": "WorkBuddy",
         "ai.moonshot.kimi": "Kimi",
+        "com.moonshot.kimichat": "Kimi",
     ]
 
     init() {}
@@ -89,12 +92,24 @@ enum IDELauncher {
         "cursor": ["com.todesktop.230313mzl4w4u92", "com.cursor"],
         // WorkBuddy：桌面应用（Electron），无 VS Code 系 CLI
         "workbuddy": ["com.tencent.workbuddy.mac", "ai.workbuddy"],
+        // Trae：国内版 cn.trae.app 在前，国际版与旧 id 兜底
+        "trae": ["cn.trae.app", "com.trae.app", "com.byte-dance.trae", "com.bytedance.trae"],
+        // Kimi 桌面应用（Kimi CLI 跑在终端里，不会用到这一项）
+        "kimi": ["com.moonshot.kimichat", "ai.moonshot.kimi"],
+        // Claude Code / Codex 只有 CLI，没有可跳回的应用窗口——空列表意味着
+        // 交给下面的「终端宿主」分支去激活终端。
+        "claude_code": [],
+        "codex": [],
     ]
     static let ideNames: [String: [String]] = [
         "qoder": ["Qoder"],
         "opencode": ["OpenCode"],
         "cursor": ["Cursor"],
         "workbuddy": ["WorkBuddy"],
+        "trae": ["Trae CN", "Trae"],
+        "kimi": ["Kimi"],
+        "claude_code": [],
+        "codex": [],
     ]
     static let jetbrainsPrefix = "com.jetbrains."
     /// VS Code 系变体：支持 `code -r <cwd>` 精确复用项目窗口。
@@ -102,12 +117,9 @@ enum IDELauncher {
         "com.qoder.ide", "com.aliyun.lingma.ide",
         "com.todesktop.230313mzl4w4u92", "com.cursor",
     ]
-    /// 表示"跑在终端里、没有可跳回的 GUI 窗口"的 bundle 集合。
-    static let terminalBundles: Set<String> = [
-        "com.apple.Terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty",
-        "dev.warp.Warp-Stable", "net.kovidgoyal.kitty", "org.alacritty",
-        "com.github.wez.wezterm", "com.microsoft.VSCode",
-    ]
+    /// 终端宿主的判定统一收在 `TerminalHost`：跳转、命名、图标三处必须用同一份
+    /// 名单，否则会出现「卡片写着 Qoder CLI（Warp）但点不开」这类不一致。
+    /// 需要终端名单时请用 `TerminalHost.bundles`。
 
     /// 决定该为这条通知唤起哪个应用；返回 nil 表示没有可跳转的目标。
     static func target(for provider: String, host: HostInfo?) -> (bundles: [String], names: [String])? {
@@ -131,8 +143,13 @@ enum IDELauncher {
             return ([bundle], name.isEmpty ? [] : [name])
         }
         if bundles.contains(bundle) { return (bundles, names) }
-        // Qoder 跑在终端里：无窗口可跳，返回 nil。
-        if terminalBundles.contains(bundle) && key == "qoder" { return nil }
+        // 终端宿主（Warp / iTerm / Terminal / Ghostty / VS Code 内置终端…）：
+        // 产品自己没有窗口，但用户是在这个终端里等结果的——点通知就把终端
+        // 激活到前台，而不是什么都不做。
+        if TerminalHost.isTerminal(bundle: bundle, name: host?.name) {
+            let terminalName = TerminalHost.displayName(bundle: bundle, name: host?.name) ?? ""
+            return ([bundle], terminalName.isEmpty ? [] : [terminalName])
+        }
         return (bundles, names)
     }
 

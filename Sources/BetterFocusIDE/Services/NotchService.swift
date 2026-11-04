@@ -417,6 +417,27 @@ final class NotchService: ObservableObject {
         install("OpenCode Plugin") { try OpenCodePluginInstaller.install() }
         install("Cursor Hook") { try CursorHookInstaller.install() }
         install("WorkBuddy Hook") { try WorkBuddyHookInstaller.install() }
+        // 其余宿主一律「装在本机才写配置」：给没装的宿主建目录，只会在人家
+        // 那边留一堆没人读的脚本，卸载时还得靠用户自己清理。
+        if InstallerPaths.hostDirectoryExists(InstallerPaths.claudeDir)
+            || FileManager.default.fileExists(atPath: "/Applications/Claude.app") {
+            install("Claude Code Hook") { try ClaudeCodeHookInstaller.install() }
+        }
+        if CodexHookInstaller.isPresent {
+            install("Codex Notify") { try CodexHookInstaller.install() }
+        }
+        if TraeHookInstaller.Flavor.cn.isPresent {
+            install("Trae CN Hook") { try TraeHookInstaller.install(.cn) }
+        }
+        if TraeHookInstaller.Flavor.international.isPresent {
+            install("Trae Hook") { try TraeHookInstaller.install(.international) }
+        }
+        if KimiHookInstaller.isPresent {
+            install("Kimi Hook") { try KimiHookInstaller.install() }
+        }
+        if QoderCnHookInstaller.isPresent {
+            install("Qoder CN Hook") { try QoderCnHookInstaller.install() }
+        }
         Log.info("installAll: " + lines.joined(separator: " | "), topic: "install")
         return lines.joined(separator: "\n")
     }
@@ -426,6 +447,12 @@ final class NotchService: ObservableObject {
         OpenCodePluginInstaller.uninstall()
         CursorHookInstaller.uninstall()
         WorkBuddyHookInstaller.uninstall()
+        ClaudeCodeHookInstaller.uninstall()
+        CodexHookInstaller.uninstall()
+        TraeHookInstaller.uninstall(.cn)
+        TraeHookInstaller.uninstall(.international)
+        KimiHookInstaller.uninstall()
+        QoderCnHookInstaller.uninstall()
     }
 
     /// 显示最近通知历史面板（从空闲状态的灵动岛触发）

@@ -233,7 +233,19 @@ enum HelperTemplate {
                                   "BetterFocusIDE", "sessions")
 
 
-        def _identify_product():
+        # CN 发行版（Qoder CN / 通义灵码）与英文版是同一套代码，只有产品名不同。
+        # 安装器在启动器里 export BETTERFOCUS_VARIANT=cn，识别结果整体换到 _cn
+        # 命名空间；这样 IDE 内置、CLI、插件三种形态依然各自可辨，不会因为
+        # 「一律改成 qoder_cn」而丢掉 IDE 与 CLI 的区别。
+        _VARIANT = os.environ.get("BETTERFOCUS_VARIANT") or ""
+        _CN_PRODUCT_MAP = {
+            "qoder": "qoder_cn",
+            "qoder_ide": "qoder_cn_ide",
+            "qoder_cli": "qoder_cn_cli",
+        }
+
+
+        def _identify_product_base():
             \"\"\"通过环境变量决策树推导 product（与事件 JSON 无关）。
 
             优先级：
@@ -273,6 +285,14 @@ enum HelperTemplate {
 
             # 优先级 3：兜底
             return "unknown"
+
+
+        def _identify_product():
+            \"\"\"产品识别的最终结果：基线结果 + 发行版变体映射。\"\"\"
+            product = _identify_product_base()
+            if _VARIANT == "cn":
+                return _CN_PRODUCT_MAP.get(product, product)
+            return product
 
 
         def _state_path(session_id):

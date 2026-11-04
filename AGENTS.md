@@ -559,6 +559,31 @@ echo '{"provider":"qoder","product":"qoder_ide","event":"turn_finished","session
 **否决方案**：凭 SwiftUI 自适应直觉自拟数值（`maxWidth: .infinity` + `fixedSize` + `layoutPriority` 组合调参），对 greedy/fixed 混合行的压缩顺序不确定，肉眼难判定且反复返工。
 **适用边界**：只要目标是与 Python 原版逐像素对齐的迁移即成立。若未来脱离原设计做全新 UI 风格，需重新评估。
 
+## 宿主适配矩阵（多宿主接入）
+
+**结论**：每个宿主一个安装器，一套 Python 正文覆盖四种方言（`cursor` / `claude` / `codex`，Qoder 另有一份 `HelperTemplate`）。
+
+| 宿主 | 配置 | 协议 | 能接管 |
+|---|---|---|---|
+| Qoder / Qoder CN | `~/.qoder{,-cn}/settings.json` | matcher 分组 | 提问、权限、回合、会话结束 |
+| OpenCode | `~/.config/opencode/plugins/*.js` | 插件 | 提问、回合 |
+| Cursor | `~/.cursor/hooks.json` | camelCase，权限类必须回决策 | 回合、会话结束（观测型） |
+| WorkBuddy | `~/.workbuddy/settings.json` | PascalCase | 全部 |
+| Claude Code | `~/.claude/settings.json` | PascalCase | 全部 |
+| Trae / Trae CN | `~/.trae{,-cn}/hooks.json` | 同 Claude + `version:1` | 提问、权限提醒、回合（**无 SessionEnd**） |
+| Kimi Code CLI | `~/.kimi-code/config.toml` | TOML `[[hooks]]`（只认 4 字段） | 全部 |
+| Codex CLI | `~/.codex/config.toml` 的 `notify` | 外部程序，payload 走 argv | 仅回合完成 |
+
+**CLI 宿主的双身份**：产品身份来自 hook（编译期写入的 `PROVIDER`），终端身份来自父进程走查到的
+最外层 `.app`。卡片标成 `Qoder CLI（Warp）`、图标用终端图标、点击激活终端窗口，
+三者共用 `Models/TerminalHost.swift` 一份名单。认不出终端时**只写产品名**，不要退回 `host.name`
+（那会把「Qoder CN CLI」显示成「WorkBuddy」）。
+
+**三条踩过的坑**（详见 `knowledge/technologies/active/sprint2611/cli-host-adaptation/01-适配经验.md`）：
+1. Codex 的 payload 在 **argv**：启动器必须 `exec python hook.py "$@"`，且 codex 方言绝不能读 stdin（会卡死终端）。
+2. TOML 没有「只加一条」的入口：用注释界标维护受管区块，界标外一字节不碰；外来 `notify` 冲突时**放弃安装并报错**。
+3. Trae 的 `Notification` matcher 匹配 `notification_type`（不是工具名），应为 `permission_prompt`。
+
 ## Qoder 记忆同步约定
 
 本文件与 Qoder 记忆系统保持同步。以下规则 govern 同步行为：
