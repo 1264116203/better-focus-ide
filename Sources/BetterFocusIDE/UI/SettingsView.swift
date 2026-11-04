@@ -471,26 +471,42 @@ struct SettingsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + Metric.writebackDelay, execute: work)
     }
 
-    /// 实际执行写回：先落盘，再依次重装 Qoder Hook 与 OpenCode Plugin，
-    /// 任一步失败即在状态行提示并记日志，中断后续步骤。
+    /// 实际执行写回：先落盘，再刷新**已经安装过**的集成，让新的超时值进入
+    /// hook / 插件生成物。未安装的宿主不会被顺手写入配置（WorkBuddy 的
+    /// settings.json 还存着账号与插件配置，不能无故改动）。
     private func writeBack() {
         writebackWork = nil
         settings.flushSave()
-        do {
-            try QoderHookInstaller.install()
-        } catch {
-            status = "Qoder Hook 写入失败：\(error.localizedDescription)"
-            Log.error("writeBack: Qoder Hook failed (\(error))", topic: "settings")
-            return
+
+        var refreshed: [String] = []
+        func refresh(_ label: String, installed: Bool, _ work: () throws -> Void) -> Bool {
+            guard installed else { return true }
+            do {
+                try work()
+                refreshed.append(label)
+                return true
+            } catch {
+                status = "\(label) 写入失败：\(error.localizedDescription)"
+                Log.error("writeBack: \(label) failed (\(error))", topic: "settings")
+                return false
+            }
         }
-        do {
-            try OpenCodePluginInstaller.install()
-        } catch {
-            status = "OpenCode Plugin 写入失败：\(error.localizedDescription)"
-            Log.error("writeBack: OpenCode Plugin failed (\(error))", topic: "settings")
-            return
+
+        guard refresh("Qoder Hook", installed: QoderHookInstaller.isInstalled,
+                      { try QoderHookInstaller.install() }) else { return }
+        guard refresh("OpenCode Plugin", installed: OpenCodePluginInstaller.isInstalled,
+                      { try OpenCodePluginInstaller.install() }) else { return }
+        guard refresh("Cursor Hook", installed: CursorHookInstaller.isInstalled,
+                      { try CursorHookInstaller.install() }) else { return }
+        guard refresh("WorkBuddy Hook", installed: WorkBuddyHookInstaller.isInstalled,
+                      { try WorkBuddyHookInstaller.install() }) else { return }
+
+        if refreshed.isEmpty {
+            status = "已生效（尚未安装 Hook / Plugin）"
+        } else {
+            status = "已写回 \(refreshed.joined(separator: " / ")) · "
+                + Self.clock.string(from: Date())
         }
-        status = "已自动写回 Hook / Plugin · " + Self.clock.string(from: Date())
     }
 
     /// 恢复所有默认为出厂值，并触发一次写回。

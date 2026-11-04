@@ -1,6 +1,6 @@
 # BetterFocusIDE
 
-macOS 刘海「灵动岛」通知助手。把 Qoder / OpenCode 的**提问、权限申请、回复完成**三件事，收进屏幕顶部的刘海里：卡片直接弹出、一键跳回 IDE、还能用键盘秒答。
+macOS 刘海「灵动岛」通知助手。把 Qoder / OpenCode / Cursor / WorkBuddy 的**提问、权限申请、回复完成**三件事，收进屏幕顶部的刘海里：卡片直接弹出、一键跳回 IDE、还能用键盘秒答。
 
 由 Python 版 `dynamic-Island-python-validate` 迁移而来的 Swift 原生实现，参考 [Vorssaint](https://github.com/) 的灵动岛动画与 UI。
 
@@ -16,7 +16,7 @@ macOS 刘海「灵动岛」通知助手。把 Qoder / OpenCode 的**提问、权
 - [功能总览](#功能总览)
 - [安装与启动](#安装与启动)
 - [绕过 Gatekeeper（未签名应用）](#绕过-gatekeeper未签名应用)
-- [同事一键接入 Qoder / OpenCode](#同事一键接入-qoder--opencode)
+- [同事一键接入 Qoder / OpenCode / Cursor / WorkBuddy](#同事一键接入-qoder--opencode--cursor--workbuddy)
 - [键盘答卡快捷键](#键盘答卡快捷键)
 - [图钉固定模式](#图钉固定模式)
 - [刘海屏行为](#刘海屏行为)
@@ -40,7 +40,7 @@ macOS 刘海「灵动岛」通知助手。把 Qoder / OpenCode 的**提问、权
 | **通知历史** | 点空闲的岛回顾最近 5 条通知，点某条跳回来源 |
 | **设置面板** | 通知开关、声音/震动、卡片行为、默认固定偏好 |
 | **声音与触感** | 系统提示音 + 触控板震动 |
-| **Hook / Plugin 安装器** | 一键接入 Qoder Hook 与 OpenCode Plugin，幂等、只动自己的条目 |
+| **Hook / Plugin 安装器** | 一键接入 Qoder / OpenCode / Cursor / WorkBuddy 四处集成，幂等、只动自己的条目 |
 | **单实例互斥** | `flock` 启动锁，防止重复启动多个灵动岛 |
 | **刘海屏优先** | 固定钉在内置刘海屏，不随焦点在两屏间跳 |
 | **落盘日志** | `logs/betterfocus.log`，5MB×3 轮转，跨进程消息脱敏 |
@@ -92,9 +92,9 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app
 
 ---
 
-## 同事一键接入 Qoder / OpenCode
+## 同事一键接入 Qoder / OpenCode / Cursor / WorkBuddy
 
-装好应用后，点状态栏图标 → **一键安装 Hook / Plugin**。它会自动写入两处集成，**幂等、且只增删自己的条目**（用 `betterfocus` 标记隔离，绝不碰你已有的其它 hook）：
+装好应用后，点状态栏图标 → **一键安装 Hook / Plugin**。它会自动写入四组集成，**幂等、且只增删自己的条目**（Qoder 用 `_betterfocus_marker` 标记，其余宿主靠 `command` 指向 `betterfocus-notify.sh` 识别，绝不碰你已有的其它 hook）：
 
 **Qoder**（写入 `~/.qoder/`）
 - `hooks/betterfocus-notify.sh` —— 启动器
@@ -104,9 +104,21 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app
 **OpenCode**（写入 `~/.config/opencode/plugins/betterfocus-notify.js`）
 - 接管 `question` 工具 + 监听 `session.idle` 发回复完成事件
 
+**Cursor**（写入 `~/.cursor/`）
+- `hooks/betterfocus-notify.sh` / `hooks/betterfocus-hook.py`
+- `hooks.json` —— 只注册观测型事件 `stop` / `sessionEnd`，恒回 `{}`
+
+**WorkBuddy**（写入 `~/.workbuddy/`）
+- `hooks/betterfocus-notify.sh` / `hooks/betterfocus-hook.py`
+- `settings.json` 的 `hooks` —— 注册 `PreToolUse`（提问）、`Notification` + `PermissionRequest`（权限提醒）、`Stop`、`SessionEnd`；账号/插件等其余设置原样保留
+
+> **两家宿主的差异**
+> - **Cursor 只做"完成/结束"通知**：它的权限类 hook 必须在 stdout 返回 `allow`/`deny`，那等于替你拍板或拦工具，输出不合法还会直接阻塞调用。所以审批仍留在 Cursor 自己的界面。
+> - **WorkBuddy 的 hook 改动不热加载**：装完需要新开一个会话（或在 `/hooks` 面板确认注册）才生效。权限提醒只弹横幅，审批仍在 WorkBuddy 原生对话框里完成。
+
 安装摘要（成功/失败逐条）会弹窗提示。要移除：状态栏图标 → **卸载 Hook / Plugin**。
 
-**接入后验证**：在 Qoder / OpenCode 里让 Agent 提一个选择题，刘海应弹出提问卡片。没反应就用下面的 [Doctor 自检](#自检doctor)。
+**接入后验证**：在对应宿主里让 Agent 提一个选择题，刘海应弹出提问卡片；让它跑完一轮，应弹完成横幅（Cursor / WorkBuddy 都会有）。没反应就用下面的 [Doctor 自检](#自检doctor)。
 
 > 安装器只做语法校验级别的自检，**不会**替你改正在使用的 IDE 配置以外的东西；它只写上述带 `betterfocus` 标记的文件。
 
@@ -199,6 +211,14 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app
 ~/.qoder/hooks/betterfocus-hook.py        # Qoder Hook 体
 ~/.qoder/settings.json                    # Qoder Hook 注册（带 betterfocus 标记）
 ~/.config/opencode/plugins/betterfocus-notify.js   # OpenCode Plugin
+
+~/.cursor/hooks/betterfocus-notify.sh     # Cursor Hook 启动器
+~/.cursor/hooks/betterfocus-hook.py       # Cursor Hook 体（仅 stop / sessionEnd）
+~/.cursor/hooks.json                      # Cursor Hook 注册（version + hooks）
+
+~/.workbuddy/hooks/betterfocus-notify.sh  # WorkBuddy Hook 启动器
+~/.workbuddy/hooks/betterfocus-hook.py    # WorkBuddy Hook 体
+~/.workbuddy/settings.json                # WorkBuddy Hook 注册（只动 hooks 字段）
 ```
 
 **日志环境变量**（排障用）：
@@ -215,12 +235,12 @@ BETTERFOCUS_LOG_LEVEL=info # 调整级别（debug/info/warning/error）
 状态栏 → **自检（Doctor）…**，逐项检查并给修复建议：
 
 - **Socket 是否存活**（探活连接）
-- **Hook / Plugin 文件是否就位**
-- **Qoder `settings.json` 是否注册了带 `betterfocus` 标记的 PermissionRequest 组**
+- **各宿主的 Hook / Plugin 文件是否就位**（Qoder / OpenCode / Cursor / WorkBuddy 分别检查；本机没装的宿主自动跳过）
+- **宿主配置里是否登记了我们的条目**（Qoder 的 `_betterfocus_marker`、WorkBuddy / Cursor 的 `command` 路径）
 - **答案目录是否可写**
 - **设置文件是否可读**
 
-点"重新自检"可再次扫描。装了但卡片不弹，八成是 Qoder 端 hook 没注册成功或 socket 没起来，先跑这个。
+点"重新自检"可再次扫描。装了但卡片不弹，八成是宿主端 hook 没注册成功或 socket 没起来，先跑这个。
 
 ---
 
