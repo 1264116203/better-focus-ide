@@ -152,7 +152,7 @@ final class NotchCanvas: NSView {
         glowShape.zPosition = 3
         glowShape.opacity = 0
         glowShape.shadowOffset = .zero
-        glowShape.shadowRadius = 9
+        glowShape.shadowRadius = CGFloat(Settings.shared.glowRadius)
         glowShape.shadowOpacity = 0
         layer?.addSublayer(glowShape)
 
@@ -274,6 +274,7 @@ final class NotchCanvas: NSView {
         CATransaction.setDisableActions(true)
         glowShape.strokeColor = color.cgColor
         glowShape.shadowColor = color.cgColor
+        glowShape.shadowRadius = CGFloat(Settings.shared.glowRadius)
         CATransaction.commit()
 
         if glowBreathing {
