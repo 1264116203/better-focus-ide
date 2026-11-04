@@ -514,6 +514,25 @@ final class NotchService: ObservableObject {
             animateTo(size: targetSizeForCurrentCard())
         } else if noticeController.hasActiveNotice {
             activeCard = .notice
+        } else if noticeController.count > 0 {
+            // 通知队列有待展示项（之前因交互卡片在屏而被排队）：弹出下一条。
+            noticeController.promoteNextFromQueue()
+            if noticeController.hasActiveNotice {
+                activeCard = .notice
+                showNoticeBanner()
+            } else {
+                // 队列实际已空（不应到达）：收起。
+                closingCard = activeCard
+                activeCard = .none
+                if expanded {
+                    expanded = false
+                    isClosing = true
+                    cancelAutoCollapse()
+                    collapseAt = nil
+                    let newSize = geometry.restingSize(showsContent: false)
+                    animateTo(size: newSize)
+                }
+            }
         } else {
             // No more content: play withdrawal animation then collapse.
             closingCard = activeCard
@@ -789,12 +808,22 @@ final class NotchService: ObservableObject {
         if let deadline = autoCollapseAt, now >= deadline {
             autoCollapseAt = nil
             if activeCard == .notice || activeCard == .history {
-                // 通知卡片未操作自动收起时，标记为未处理，驱动气泡呼吸灯提醒
-                if activeCard == .notice, let notice = noticeController.notice {
-                    hasUnprocessedNotice = true
-                    unprocessedNoticeTint = AgentProvider(rawValue: notice.provider)?.tint
+                if activeCard == .notice {
+                    // 通知自动到时：先尝试弹出队列中下一条，队列空才标记未处理+收起。
+                    let savedTint = noticeController.notice.flatMap {
+                        AgentProvider(rawValue: $0.provider)?.tint
+                    }
+                    noticeController.dismiss()        // 清当前 + onDismiss + promoteNext()
+                    if !noticeController.hasActiveNotice {
+                        // 队列已空：标记未处理以驱动呼吸灯，然后收起。
+                        hasUnprocessedNotice = true
+                        unprocessedNoticeTint = savedTint
+                        collapse()
+                    }
+                    // promoteNext 成功时 showNoticeBanner 已重设 autoCollapse，无需额外处理。
+                } else {
+                    collapse()
                 }
-                collapse()
             }
         }
         if autoCollapseAt != nil { needsTimer = true }

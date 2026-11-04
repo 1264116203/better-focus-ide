@@ -22,10 +22,14 @@ final class NoticeController: ObservableObject {
 
     /// 每个会话上次横幅的时间，用于去抖。
     private var lastNoticeAt: [String: Date] = [:]
+    /// 等待展示的通知队列；当前通知展示期间新到的通知排入此队列。
+    private var queue: [TurnNotice] = []
 
     var hasActiveNotice: Bool { notice != nil }
-    /// 总数——驱动收起态的待处理圆点。
-    var count: Int { notice != nil ? 1 : 0 }
+    /// 总数（当前 + 队列）——驱动收起态的待处理圆点。
+    var count: Int { (notice != nil ? 1 : 0) + queue.count }
+    /// 未读通知总数（含当前展示的），驱动卡片右上角的未读数字徽章。
+    var queueCount: Int { (notice != nil ? 1 : 0) + queue.count }
     /// 待处理圆点的提供方主题色。
     var pendingTint: (r: Double, g: Double, b: Double)? {
         guard let p = notice?.provider,
@@ -36,7 +40,7 @@ final class NoticeController: ObservableObject {
 
     // MARK: - 事件入口
 
-    /// 处理一条 `turn_finished` 消息：开关校验 → 去抖 → 让位卡片 → 解析 → 记历史 → 展示。
+    /// 处理一条 `turn_finished` 消息：开关校验 → 去抖 → 解析 → 记历史 → 入队或展示。
     func handleTurnFinished(message: AgentSocketMessage) {
         let settings = Settings.shared
         guard settings.turnNotifyEnabled else { return }
@@ -48,8 +52,6 @@ final class NoticeController: ObservableObject {
            now.timeIntervalSince(last) < settings.notifyBannerDuration * 0.4 {
             return
         }
-        // 不要盖住正在等用户的卡片。
-        if hasPendingCard() { return }
 
         guard let parsed = TurnNotice.parse(message: message) else { return }
         if lastNoticeAt.count > 32 { lastNoticeAt.removeAll() }
@@ -60,6 +62,11 @@ final class NoticeController: ObservableObject {
         onRemember?(parsed)
         if parsed.fromCLI { return }
 
+        // 已有通知在屏或有交互卡片等待用户时，入队而非替换。
+        if hasActiveNotice || hasPendingCard() {
+            queue.append(parsed)
+            return
+        }
         show(parsed)
     }
 
@@ -81,8 +88,7 @@ final class NoticeController: ObservableObject {
             return
         }
         if hasPendingCard() {
-            Log.debug("handlePermissionNotice: skipped, hasPendingCard=true", topic: "permission")
-            return
+            Log.debug("handlePermissionNotice: queuing (hasPendingCard=true)", topic: "permission")
         }
 
         // 从 permission_notice 构造一条通知
@@ -99,7 +105,7 @@ final class NoticeController: ObservableObject {
         let body = detail.isEmpty ? "请在 Qoder 对话框中做出决策" : detail
         let project = host.cwd.isEmpty ? "" : (host.cwd as NSString).lastPathComponent
 
-        Log.info("handlePermissionNotice: showing notice title='\(title)', host=\(host.name), tool=\(toolName)", topic: "permission")
+        Log.info("handlePermissionNotice: notice title='\(title)', host=\(host.name), tool=\(toolName)", topic: "permission")
 
         let notice = TurnNotice(
             provider: provider,
@@ -118,16 +124,40 @@ final class NoticeController: ObservableObject {
         lastNoticeAt[sessionID] = now
 
         onRemember?(notice)
+        // 已有通知在屏或有交互卡片时，入队而非替换。
+        if hasActiveNotice || hasPendingCard() {
+            queue.append(notice)
+            return
+        }
         show(notice)
     }
 
     // MARK: - 展示 / 消失
 
     private func show(_ newNotice: TurnNotice) {
+        // 已有通知在屏时，新通知入队等待。
+        if notice != nil {
+            queue.append(newNotice)
+            return
+        }
         notice = newNotice
         onPresent?()
         FeedbackService.onArrive()
         // 自动收起由 NotchService 的悬停计时器统一管理。
+    }
+
+    /// 当前通知被处理（点击/自动收起）后，从队列中弹出下一条。
+    private func promoteNext() {
+        guard !queue.isEmpty else { return }
+        let next = queue.removeFirst()
+        notice = next
+        onPresent?()
+        FeedbackService.onArrive()
+    }
+
+    /// 外部（NotchService）在交互卡片移除后调用：若队列有排队通知则弹出下一条。
+    func promoteNextFromQueue() {
+        promoteNext()
     }
 
     /// 钉住状态在横幅展示期间翻转时调用。
@@ -140,9 +170,10 @@ final class NoticeController: ObservableObject {
         guard notice != nil else { return }
         notice = nil
         onDismiss?()
+        promoteNext()
     }
 
-    /// 用户点击横幅：先按需跳回 IDE，再消失。
+    /// 用户点击横幅：先按需跳回 IDE，再消失（并弹出队列中下一条）。
     func tapped() {
         guard let notice = notice else { return }
         if notice.jumpEnabled {
