@@ -104,13 +104,16 @@ final class NoticeController: ObservableObject {
         let toolName = message.payload?["tool_name"]?.stringValue ?? ""
         let resources = message.payload?["resources"]?.arrayValue?.compactMap { $0.stringValue } ?? []
         let detail = resources.first ?? ""
-        let action = PermissionRequest.actionFromToolName(toolName)
+        // Notification 类权限提醒只带文案、没有 tool_name；从「permission to use Bash」
+        // 里抠出工具名，标题才不会一律退化成「操作」。
+        let resolvedToolName = toolName.isEmpty ? PermissionRequest.toolNameHint(from: detail) : toolName
+        let action = PermissionRequest.actionFromToolName(resolvedToolName)
         let title = "Agent 请求执行「\(PermissionRequest.actionLabel(action))」"
         let hostLabel = AgentProvider.effectiveName(provider: providerEnum, hostName: host.name)
         let body = detail.isEmpty ? "请在 \(hostLabel) 对话框中做出决策" : detail
         let project = host.cwd.isEmpty ? "" : (host.cwd as NSString).lastPathComponent
 
-        Log.info("handlePermissionNotice: notice title='\(title)', host=\(host.name), tool=\(toolName)", topic: "permission")
+        Log.info("handlePermissionNotice: notice title='\(title)', host=\(host.name), tool=\(resolvedToolName)", topic: "permission")
 
         let notice = TurnNotice(
             provider: provider,
