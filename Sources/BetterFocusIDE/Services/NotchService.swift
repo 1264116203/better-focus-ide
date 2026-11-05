@@ -1000,20 +1000,20 @@ final class NotchService: ObservableObject {
         switch event {
         case .questionRequested:
             // 门控：question_enabled 关 → 忽略，请求回落到 IDE。
-            guard Settings.shared.questionEnabled else { return }
+            guard Settings.shared.questionEnabled || debugBypassGates else { return }
             questionController.handleEvent(event, message: message)
         case .questionAnswered, .questionTimeout:
             questionController.handleEvent(event, message: message)
         case .permissionRequested:
             // 门控：permission_enabled 关 → 忽略，请求回落到 IDE。
-            guard Settings.shared.permissionEnabled else { return }
+            guard Settings.shared.permissionEnabled || debugBypassGates else { return }
             permissionController.handleEvent(event, message: message)
         case .permissionResolved, .permissionTimeout:
             permissionController.handleEvent(event, message: message)
         case .permissionNotice:
             // 权限通知（只提醒，不拦截）：以横幅形式展示，让 Qoder 原生窗做决策。
             Log.debug("routeSocketMessage: permission_notice received, permissionEnabled=\(Settings.shared.permissionEnabled)", topic: "permission")
-            guard Settings.shared.permissionEnabled else { return }
+            guard Settings.shared.permissionEnabled || debugBypassGates else { return }
             noticeController.handlePermissionNotice(message: message)
         case .sessionEnded:
             questionController.handleEvent(.sessionEnded, message: message)
@@ -1023,6 +1023,52 @@ final class NotchService: ObservableObject {
         case .activity:
             showHistory()  // 临时：供脚本触发打开历史，便于调试
         }
+    }
+
+    // MARK: - 调试注入
+
+    /// 调试注入时跳过「提醒 / 提问 / 权限」三个开关。
+    ///
+    /// 调试面板要能在用户把提醒全关掉的情况下预览卡片——否则一按没反应，
+    /// 分不清是「门控关了」还是「卡片坏了」。正常 socket 分发恒为 false。
+    private var debugBypassGates = false
+
+    /// 注入一条与 hook 完全同构的消息，走同一套分发（仅绕过功能开关）。
+    func injectDebugMessage(_ message: AgentSocketMessage) {
+        debugBypassGates = true
+        noticeController.bypassGates = true
+        defer {
+            debugBypassGates = false
+            noticeController.bypassGates = false
+        }
+        routeSocketMessage(message)
+    }
+
+    /// 清掉所有待处理的卡片与横幅：**不写应答文件、不触发跳转**。
+    ///
+    /// 用 `flushAll(notify: false)` 而不是正常收起：注入下一条场景时，应该直接
+    /// 换内容，而不是先播一遍收起动画再播展开动画。
+    func flushDebugChannels() {
+        questionController.flushAll(notify: false)
+        permissionController.flushAll(notify: false)
+        noticeController.flushAll()
+    }
+
+    /// 清空卡片并把灵动岛收回去（带正常收起动画）。
+    func clearDebugCards() {
+        flushDebugChannels()
+        handleCardDismissal()
+        Log.info("调试：已清空所有卡片", topic: "debug")
+    }
+
+    /// 清空历史记录与未处理标记。
+    func clearDebugHistory() {
+        historyController.clear()
+        hasUnprocessedNotice = false
+        unprocessedNoticeTint = nil
+        updateBreathingTint()
+        updatePendingTotal()
+        Log.info("调试：已清空历史记录", topic: "debug")
     }
 
     /// 释放：移除屏幕观察与键盘监听、停掉悬停与清扫计时器。
