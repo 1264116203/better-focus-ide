@@ -192,6 +192,8 @@ enum IDELauncher {
                 Log.info("已定位到浏览器里已打开的 \(raw)", topic: "launcher")
                 return true
             }
+            // 没找到就开在用户正在用的浏览器里，而不是系统默认那个。
+            if BrowserTabFocus.openInPreferredBrowser(url: raw) { return true }
             if NSWorkspace.shared.open(target) {
                 Log.info("已在浏览器打开 \(raw)", topic: "launcher")
                 return true

@@ -43,7 +43,8 @@ final class BrowserTabFocusTests: XCTestCase {
         XCTAssertTrue(script.contains("active tab index of window wi to ti"))
         XCTAssertTrue(script.contains(#"u contains "127.0.0.1:4096""#))
         XCTAssertTrue(script.contains(#"return "found""#))
-        XCTAssertTrue(script.contains(#"return "none""#), "没命中必须能区分出来")
+        XCTAssertTrue(script.contains(#"return "none " & wc & " " & tc & " " & lc"#),
+                      "没命中必须能区分出来，并带上扫描计数")
     }
 
     /// Safari 的属性名与 Chromium 系不同，写混了就静默失效。
@@ -58,29 +59,72 @@ final class BrowserTabFocusTests: XCTestCase {
     func testScriptJoinsNeedlesWithOr() throws {
         let target = try XCTUnwrap(BrowserTabFocus.Target(url: "http://127.0.0.1:4096/"))
         let script = BrowserTabFocus.script(for: BrowserTabFocus.safari, target: target)
-        let needles = target.needles.count
-        XCTAssertEqual(script.components(separatedBy: " or ").count, needles)
+        let condition = target.needles
+            .map { #"(u contains "\#($0)")"# }
+            .joined(separator: " or ")
+        XCTAssertTrue(script.contains("if \(condition) then"),
+                      "命中条件被拼坏了：\(condition)")
     }
 
     // MARK: - 候选顺序
 
-    func testDefaultBrowserGoesFirst() {
-        let chromeFirst = BrowserTabFocus.candidates(defaultBundle: "com.google.Chrome")
-        XCTAssertEqual(chromeFirst.first?.bundle, "com.google.Chrome")
-        XCTAssertEqual(chromeFirst.count, BrowserTabFocus.allBrowsers.count)
-
-        let safariFirst = BrowserTabFocus.candidates(defaultBundle: "com.apple.Safari")
-        XCTAssertEqual(safariFirst.first?.bundle, "com.apple.Safari")
+    /// 前台浏览器排第一：系统默认是 Safari、用户实际在 Chrome 里聊天时，
+    /// 只按默认排序会切到 Safari 里那个早已过期的旧标签页。
+    func testFrontmostBrowserGoesFirst() {
+        let ordered = BrowserTabFocus.orderedCandidates(
+            frontmost: "com.google.Chrome", defaultBundle: "com.apple.Safari")
+        XCTAssertEqual(ordered.first?.bundle, "com.google.Chrome")
+        XCTAssertEqual(ordered.count, BrowserTabFocus.allBrowsers.count)
+        XCTAssertEqual(ordered[1].bundle, "com.apple.Safari")
     }
 
-    /// 默认浏览器不在支持列表里（Firefox / Arc）时保持原顺序，一个都不丢。
-    func testUnknownDefaultKeepsOrder() {
-        let candidates = BrowserTabFocus.candidates(defaultBundle: "org.mozilla.firefox")
-        XCTAssertEqual(candidates, BrowserTabFocus.allBrowsers)
+    func testDefaultBrowserGoesFirstWithoutFrontmost() {
+        let safariFirst = BrowserTabFocus.orderedCandidates(
+            frontmost: nil, defaultBundle: "com.apple.Safari")
+        XCTAssertEqual(safariFirst.first?.bundle, "com.apple.Safari")
+        XCTAssertEqual(safariFirst.count, BrowserTabFocus.allBrowsers.count)
+    }
+
+    /// 前台就是默认浏览器时不能重复出现两份。
+    func testSameFrontmostAndDefaultNotDuplicated() {
+        let ordered = BrowserTabFocus.orderedCandidates(
+            frontmost: "com.google.Chrome", defaultBundle: "com.google.Chrome")
+        XCTAssertEqual(ordered.filter { $0.bundle == "com.google.Chrome" }.count, 1)
+        XCTAssertEqual(ordered.count, BrowserTabFocus.allBrowsers.count)
+    }
+
+    /// 前台应用不是浏览器（IDE / 终端）时返回 nil，不参与排序。
+    func testFrontmostNonBrowserIsIgnored() {
+        let ordered = BrowserTabFocus.orderedCandidates(
+            frontmost: "com.jetbrains.intellij", defaultBundle: "com.apple.Safari")
+        XCTAssertEqual(ordered.first?.bundle, "com.apple.Safari")
+        XCTAssertEqual(ordered.count, BrowserTabFocus.allBrowsers.count)
     }
 
     func testCandidatesHaveUniqueBundles() {
         let bundles = BrowserTabFocus.allBrowsers.map(\.bundle)
         XCTAssertEqual(Set(bundles).count, bundles.count)
+    }
+
+    // MARK: - 脚本结果解析
+
+    func testParseFound() {
+        XCTAssertEqual(BrowserTabFocus.parse("found"), .found)
+        XCTAssertEqual(BrowserTabFocus.parse("found\n"), .found)
+    }
+
+    /// 扫描计数要能读出来：0 窗口说明脚本压根没看到窗口（权限 / 窗口类型）。
+    func testParseNotFoundCarriesCounts() {
+        XCTAssertEqual(BrowserTabFocus.parse("none 3 47 2"),
+                       .notFound(windows: 3, tabs: 47, localPages: 2))
+        XCTAssertEqual(BrowserTabFocus.parse("none 0 0 0"),
+                       .notFound(windows: 0, tabs: 0, localPages: 0))
+    }
+
+    func testParseGarbageFallsBackToZeroCounts() {
+        XCTAssertEqual(BrowserTabFocus.parse(""),
+                       .notFound(windows: 0, tabs: 0, localPages: 0))
+        XCTAssertEqual(BrowserTabFocus.parse("something else"),
+                       .notFound(windows: 0, tabs: 0, localPages: 0))
     }
 }
