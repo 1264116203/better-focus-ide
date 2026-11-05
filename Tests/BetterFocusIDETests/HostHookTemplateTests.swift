@@ -39,6 +39,23 @@ final class HostHookTemplateTests: XCTestCase {
         XCTAssertFalse(workbuddy.contains("or \"cursor\""), "WorkBuddy 正文混入了 cursor 方言")
     }
 
+    // MARK: - 提醒开关键名
+
+    /// 提醒开关必须读设置里的驼峰键（`Settings` 的 @Published 名）。
+    ///
+    /// settings.json 的 `values` 里是 `turnNotifyEnabled`，旧模板只读
+    /// `turn_notify_enabled` → 键永远找不到 → 恒"默认开启"，关掉也不生效。
+    func testAlertToggleReadsCamelCaseKeys() {
+        for content in [CursorHookInstaller.helperContent,
+                        WorkBuddyHookInstaller.helperContent] {
+            XCTAssertTrue(content.contains("turnNotifyEnabled"))
+            XCTAssertTrue(content.contains("questionEnabled"))
+            XCTAssertTrue(content.contains("permissionEnabled"))
+            // 下划线键作为兼容回退保留
+            XCTAssertTrue(content.contains("turn_notify_enabled"))
+        }
+    }
+
     /// 正文必须能被 Python 解析（语法错误会让所有事件静默丢失）。
     func testHelperCompilesAsPython() throws {
         let dir = NSTemporaryDirectory() + "bf-hook-syntax-\(UUID().uuidString)"
