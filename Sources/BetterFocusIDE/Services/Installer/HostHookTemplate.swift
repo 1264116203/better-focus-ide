@@ -300,6 +300,11 @@ enum HostHookTemplate {
             # 只出卡、不作答：Notification 这条通道没有可回灌的决策，所以发完
             # 事件就退出。用户在岛上先答，等宿主真正执行工具（PreToolUse）时，
             # run_question 会发现答案已经在了，直接 deny 回灌，不会再问一遍。
+            # 占位互斥：与 run_question 用同一份 signature，谁先到谁开卡，
+            # 后到的（PreToolUse / PermissionRequest）静默退出，绝不弹第二遍。
+            signature = "q-" + "_".join(q["question"][:40] for q in questions)[:120]
+            if not claim(session_id, payload, "question", signature):
+                return
             request_id = safe_id(tool_use_id or ("q" + str(int(time.time()))))
             msg = base_event("question_requested", session_id, payload)
             msg["request_id"] = request_id
