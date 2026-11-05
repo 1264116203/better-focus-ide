@@ -1,249 +1,244 @@
-# BetterFocusIDE
+<div align="center">
 
-macOS 刘海「灵动岛」通知助手。把 Qoder / OpenCode / Cursor / WorkBuddy 的**提问、权限申请、回复完成**三件事，收进屏幕顶部的刘海里：卡片直接弹出、一键跳回 IDE、还能用键盘秒答。
+# 🏝️ BetterFocusIDE
 
-由 Python 版 `dynamic-Island-python-validate` 迁移而来的 Swift 原生实现，参考 [Vorssaint](https://github.com/) 的灵动岛动画与 UI。
+**把 MacBook 的刘海，变成面向 AI 编码智能体的「灵动岛」通知助手**
 
-- **要求**：macOS 14+，Apple Silicon（`arm64`）
-- **技术栈**：Swift 5.9 + SwiftPM executable，AppKit 窗口壳 + SwiftUI 内容
-- **许可**：GPL-3.0（`SPDX-License-Identifier: GPL-3.0-or-later`）
-- **形态**：`LSUIElement` 后台应用，无 Dock 图标，只在状态栏留一个胶囊图标
+Turn your MacBook notch into a Dynamic-Island-style assistant for AI coding agents.
 
----
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg)]()
+[![Arch](https://img.shields.io/badge/arch-arm64%20(Apple%20Silicon)-9cf.svg)]()
+[![Language](https://img.shields.io/badge/Swift-5.9-orange.svg)]()
+[![SPM](https://img.shields.io/badge/SwiftPM-ready-brightgreen.svg)]()
 
-## 目录
-
-- [功能总览](#功能总览)
-- [安装与启动](#安装与启动)
-- [绕过 Gatekeeper（未签名应用）](#绕过-gatekeeper未签名应用)
-- [同事一键接入 Qoder / OpenCode / Cursor / WorkBuddy](#同事一键接入-qoder--opencode--cursor--workbuddy)
-- [键盘答卡快捷键](#键盘答卡快捷键)
-- [图钉固定模式](#图钉固定模式)
-- [刘海屏行为](#刘海屏行为)
-- [状态栏菜单](#状态栏菜单)
-- [数据与文件位置](#数据与文件位置)
-- [自检（Doctor）](#自检doctor)
+</div>
 
 ---
 
-## 功能总览
+当 Qoder / OpenCode / Cursor / WorkBuddy 里的 AI Agent 需要**向你提问**、**申请权限**、或**完成一轮回复**时，BetterFocusIDE 会在刘海区域弹出可交互卡片——**一键回答、点一下跳回 IDE、键盘秒答**，全程不打断你正在敲的代码。
 
-| 能力 | 说明 |
+BetterFocusIDE is a native macOS menu-bar accessory app (no Dock icon) that surfaces agent **questions**, **permission requests**, and **turn-completion notices** as interactive cards in the notch. It's a Swift rewrite of the Python prototype `dynamic-Island-python-validate`, with animation and UI inspired by [Vorssaint](https://github.com/Vorssaint).
+
+---
+
+## ✨ Features
+
+- 🫧 **灵动岛动画** — 弹簧逐帧形变，展开/收起是「液态」刘海轮廓，不是硬弹
+- 🪟 **玻璃 + 投影** — 展开态磨砂材质 + 窗口外投影，收起态纯黑融入物理刘海
+- ❓ **提问卡片** — 单选/多选、「其他…」自定义输入、多题翻页
+- 🔐 **权限卡片** — 工具调用审批：允许 / 始终允许 / 拒绝
+- ✅ **回复完成通知** — 点一下跳回对应 IDE 窗口，标题取会话真实首条原话
+- ⌨️ **键盘答卡** — 数字键、`Y`/`A`/`N` 决策、`Enter` 发送、`Esc` 收起
+- 📌 **图钉固定** — 固定保持展开 ⇄ 按需自动收起
+- 🕘 **通知历史** — 点空闲的岛回顾最近 5 条通知
+- ⚙️ **设置面板** — 通知开关、声音/震动、卡片行为偏好
+- 🔌 **一键接入** — 幂等安装 Qoder / OpenCode / Cursor / WorkBuddy 四处 hook
+- 🛡️ **单实例互斥** — `flock` 启动锁，防止重复启动
+- 🖥️ **刘海屏优先** — 固定钉在内置刘海屏，不随焦点在两屏间跳
+- 🩺 **Doctor 自检** — 一键排查 socket / hook 注册 / 答案目录是否就绪
+
+> 🖼️ **截图**：项目运行截图待补充。欢迎 PR 提交你的实拍图（`design/` 目录下现有 App 图标设计稿可参考）。
+
+---
+
+## 📦 Requirements
+
+| 项 | 要求 |
 |---|---|
-| **灵动岛动画** | 参考 Vorssaint 的弹簧逐帧形变（`CAKeyframeAnimation` 驱动 mask 路径），展开/收起是"液态"的刘海轮廓，不是硬弹 |
-| **玻璃 + 投影** | 展开态用 `NSVisualEffectView` 磨砂材质 + 窗口外投影；收起态纯黑融入物理刘海 |
-| **提问卡片** | Agent 的选择题在刘海里作答：单选/多选、"其他…"自定义输入、多题翻页 |
-| **权限卡片** | 工具调用的审批：允许 / 始终允许 / 拒绝 |
-| **回复完成通知** | 一轮回复完成弹横幅，**点一下跳回对应 IDE 窗口**；标题取会话真实首条原话（非套话） |
-| **键盘答卡** | 数字键选项、Y/A/N 决策、Enter 发送、Esc 收起、⌘, 设置、⌘⇧P 固定 |
-| **图钉固定** | 钉住保持展开 ⇄ 按需自动收起 |
-| **通知历史** | 点空闲的岛回顾最近 5 条通知，点某条跳回来源 |
-| **设置面板** | 通知开关、声音/震动、卡片行为、默认固定偏好 |
-| **声音与触感** | 系统提示音 + 触控板震动 |
-| **Hook / Plugin 安装器** | 一键接入 Qoder / OpenCode / Cursor / WorkBuddy 四处集成，幂等、只动自己的条目 |
-| **单实例互斥** | `flock` 启动锁，防止重复启动多个灵动岛 |
-| **刘海屏优先** | 固定钉在内置刘海屏，不随焦点在两屏间跳 |
-| **落盘日志** | `logs/betterfocus.log`，5MB×3 轮转，跨进程消息脱敏 |
-| **Doctor 自检** | 一键排查 socket / hook 注册 / 答案目录 / 设置是否就绪 |
+| OS | macOS 14+ (Sonoma) |
+| 芯片 | Apple Silicon (`arm64`) |
+| 工具链 | Swift 5.9+ / Xcode 15+ |
 
 ---
 
-## 安装与启动
+## 🚀 Getting Started
+
+### 构建
 
 用仓库里的 `build.sh` 打包（SwiftPM 编译 → 手动组装 `.app` → ad-hoc 签名）：
 
 ```bash
+git clone git@github.com:1264116203/better-focus-ide.git
 cd better-focus-ide
 ./build.sh
 # 产物：.build/debug/BetterFocusIDE.app
 ```
 
-安装到应用程序目录并启动：
+### 安装并启动
 
 ```bash
 cp -R .build/debug/BetterFocusIDE.app /Applications/
-xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app   # 见下一节
+xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app   # 绕过 Gatekeeper
 open /Applications/BetterFocusIDE.app
 ```
 
-启动后屏幕顶部刘海会出现胶囊，状态栏也有一个图标。
+启动后，屏幕顶部刘海会出现胶囊，状态栏也会出现一个图标。
 
----
+### 接入你的 AI 编码工具
 
-## 绕过 Gatekeeper（未签名应用）
+点状态栏图标 → **一键安装 Hook / Plugin**，自动写入四组集成（幂等、只增删自己的条目，绝不碰你已有的其它 hook）：
 
-本应用**不做开发者签名**（仅内部使用），首次从 `/Applications` 或下载目录打开时，macOS 会拦截"无法验证开发者"。任选一种绕过：
-
-**方式 A：命令行去掉隔离属性（推荐，最省事）**
-
-```bash
-xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app
-```
-
-**方式 B：访达里右键打开**
-
-在 Finder 中选中 `BetterFocusIDE.app` → **右键 / 双指点按 → 打开 → 打开**（首次右键确认后即可正常双击启动）。
-
-**方式 C：系统设置放行**
-
-`系统设置 → 隐私与安全性` → 底部会出现"已阻止 BetterFocusIDE"，点**仍要打开**。
-
-> ad-hoc 签名（`codesign --sign -`）只保证本地能跑，不替代 Apple 公证；换机器 / 重新下载后隔离属性会回来，需再执行方式 A。
-
----
-
-## 同事一键接入 Qoder / OpenCode / Cursor / WorkBuddy
-
-装好应用后，点状态栏图标 → **一键安装 Hook / Plugin**。它会自动写入四组集成，**幂等、且只增删自己的条目**（Qoder 用 `_betterfocus_marker` 标记，其余宿主靠 `command` 指向 `betterfocus-notify.sh` 识别，绝不碰你已有的其它 hook）：
-
-**Qoder**（写入 `~/.qoder/`）
-- `hooks/betterfocus-notify.sh` —— 启动器
-- `hooks/betterfocus-hook.py` —— hook 体（转发事件、轮询答案）
-- `settings.json` —— 注册 4 个事件（`PreToolUse` / `PermissionRequest` / `SessionEnd` / `Stop`）
-
-**OpenCode**（写入 `~/.config/opencode/plugins/betterfocus-notify.js`）
-- 接管 `question` 工具 + 监听 `session.idle` 发回复完成事件
-
-**Cursor**（写入 `~/.cursor/`）
-- `hooks/betterfocus-notify.sh` / `hooks/betterfocus-hook.py`
-- `hooks.json` —— 只注册观测型事件 `stop` / `sessionEnd`，恒回 `{}`
-
-**WorkBuddy**（写入 `~/.workbuddy/`）
-- `hooks/betterfocus-notify.sh` / `hooks/betterfocus-hook.py`
-- `settings.json` 的 `hooks` —— 注册 `PreToolUse`（提问）、`Notification` + `PermissionRequest`（权限提醒）、`Stop`、`SessionEnd`；账号/插件等其余设置原样保留
-
-> **两家宿主的差异**
-> - **Cursor 只做"完成/结束"通知**：它的权限类 hook 必须在 stdout 返回 `allow`/`deny`，那等于替你拍板或拦工具，输出不合法还会直接阻塞调用。所以审批仍留在 Cursor 自己的界面。
-> - **WorkBuddy 的 hook 改动不热加载**：装完需要新开一个会话（或在 `/hooks` 面板确认注册）才生效。权限提醒只弹横幅，审批仍在 WorkBuddy 原生对话框里完成。
-
-安装摘要（成功/失败逐条）会弹窗提示。要移除：状态栏图标 → **卸载 Hook / Plugin**。
-
-**接入后验证**：在对应宿主里让 Agent 提一个选择题，刘海应弹出提问卡片；让它跑完一轮，应弹完成横幅（Cursor / WorkBuddy 都会有）。没反应就用下面的 [Doctor 自检](#自检doctor)。
-
-> 安装器只做语法校验级别的自检，**不会**替你改正在使用的 IDE 配置以外的东西；它只写上述带 `betterfocus` 标记的文件。
-
----
-
-## 键盘答卡快捷键
-
-> ⚠️ 前提：键盘快捷键**只在灵动岛成为当前焦点窗口后生效**——先**点一下岛**（卡片/胶囊）让它聚焦。岛是后台应用，绝不会主动抢走你终端 / 编辑器里正在敲的字；没被认领的按键原样交还系统。
-
-**提问卡片**
-
-| 键 | 动作 |
-|---|---|
-| `1` – `9` | 选中第 N 个选项 |
-| `←` / `→` | 多题时翻上一题 / 下一题 |
-| `Enter` | 发送答案 |
-| `Tab` | 跳到"其他…"自定义输入框 |
-
-**权限卡片**
-
-| 键 | 动作 |
-|---|---|
-| `Y` 或 `1` | 允许（本次） |
-| `A` 或 `2` | 始终允许 |
-| `N` 或 `3` | 拒绝 |
-
-> 权限卡**刻意不认 `Enter`**：高危操作要有明确的 Y/A/N 意图，防误批。
-
-**通用**
-
-| 键 | 动作 |
-|---|---|
-| `Esc` | 收起卡片 |
-| `⌘ ,` | 打开设置 |
-| `⌘ ⇧ P` | 切换图钉固定 |
-
-**内置防误触保护**（与鼠标点击同一口径）：卡片刚出现 0.5 秒内、正在"其他…"里打字时、卡片淡出中、卡片收在气泡里——这四种情况下按键一律不响应，避免"手正搭在键盘上就误批了一条 `rm -rf`"。
-
----
-
-## 图钉固定模式
-
-每张卡右上角的图钉 = **固定 ⇄ 按需** 开关（点图钉或按 `⌘ ⇧ P` 切换）：
-
-- **固定（`pin.fill` 高亮）**：卡片保持展开，回复完成横幅**不自动收起**，等你点击或手动收起。
-- **按需（`pin` 斜置）**：横幅按设置的停留时长（默认 5 秒）自动 retract，把屏幕让回给你。
-
-新出现的卡片默认走哪个模式，由 `设置 → 卡片行为 → 新卡片默认固定（保持展开）` 决定；单张卡上的临时切换不影响这个偏好。
-
----
-
-## 刘海屏行为
-
-- 灵动岛**固定钉在内置刘海屏**（`safeAreaInsets.top > 0` 的那块显示器），而不是跟随键盘焦点的主屏。
-- 多显示器下，即使你把焦点切到外接屏、或外接屏是主屏，岛也**不会漂到外接屏**——它始终贴着物理刘海。
-- 插上 / 拔掉显示器时会自动重算位置。
-- 若机器没有刘海屏（纯外接），退化为在该屏顶部居中显示。
-
----
-
-## 状态栏菜单
-
-点状态栏胶囊图标：
-
-| 菜单项 | 快捷键 | 作用 |
+| 宿主 | 写入位置 | 注册的事件 |
 |---|---|---|
-| 展开 / 收起灵动岛 | `T` | 手动切换 |
-| 最近通知 | `H` | 打开历史面板 |
-| 一键安装 Hook / Plugin | — | 接入 Qoder + OpenCode |
-| 卸载 Hook / Plugin | — | 移除集成 |
-| 自检（Doctor）… | `D` | 打开自检窗口 |
-| 设置… | `⌘ ,` | 打开设置 |
-| 退出 BetterFocusIDE | `⌘ Q` | 退出 |
+| **Qoder** | `~/.qoder/` | `PreToolUse` / `PermissionRequest` / `SessionEnd` / `Stop` |
+| **OpenCode** | `~/.config/opencode/plugins/` | `question` 工具 + `session.idle` |
+| **Cursor** | `~/.cursor/` | `stop` / `sessionEnd`（观测型，恒回 `{}`） |
+| **WorkBuddy** | `~/.workbuddy/` | `PreToolUse` / `Notification` + `PermissionRequest` / `Stop` / `SessionEnd` |
+
+> **宿主的差异**
+> - **Cursor 只做「完成/结束」通知**：它的权限类 hook 必须在 stdout 返回 `allow`/`deny`，那等于替你拍板或拦工具，所以审批仍留在 Cursor 自己的界面。
+> - **WorkBuddy 的 hook 改动不热加载**：装完需新开一个会话才生效；权限提醒只弹横幅，审批在 WorkBuddy 原生对话框完成。
+
+**接入后验证**：在宿主里让 Agent 提一个选择题，刘海应弹出提问卡片；让它跑完一轮，应弹完成横幅。没反应就用下面的 [Doctor 自检](#doctor-自检)。
 
 ---
 
-## 数据与文件位置
+## ⌨️ 键盘快捷键
 
-全部在独立命名空间 `BetterFocusIDE` 下，可与 Vorssaint / Python 版并存不争用：
+> ⚠️ 键盘快捷键**只在灵动岛成为当前焦点窗口后生效**——先点一下岛让它聚焦。岛是后台应用，绝不会主动抢走你终端 / 编辑器里正在敲的字。
+
+| 场景 | 键 | 动作 |
+|---|---|---|
+| 提问卡片 | `1`–`9` | 选中第 N 个选项 |
+| 提问卡片 | `←` / `→` | 多题翻页 |
+| 提问卡片 | `Enter` | 发送答案 |
+| 提问卡片 | `Tab` | 跳到「其他…」自定义输入框 |
+| 权限卡片 | `Y` / `1` | 允许（本次） |
+| 权限卡片 | `A` / `2` | 始终允许 |
+| 权限卡片 | `N` / `3` | 拒绝 |
+| 通用 | `Esc` | 收起卡片 |
+| 通用 | `⌘ ,` | 打开设置 |
+| 通用 | `⌘ ⇧ P` | 切换图钉固定 |
+
+> 权限卡**刻意不认 `Enter`**：高危操作要有明确的 `Y`/`A`/`N` 意图，防误批。
+
+**内置防误触保护**：卡片刚出现 0.5 秒内、正在「其他…」里打字时、卡片淡出中、卡片收在气泡里——这四种情况按键一律不响应。
+
+---
+
+## 📌 图钉固定模式
+
+每张卡右上角的图钉 = **固定 ⇄ 按需** 开关：
+
+- **固定（`pin.fill` 高亮）**：卡片保持展开，回复完成横幅不自动收起。
+- **按需（`pin` 斜置）**：横幅按停留时长（默认 5 秒）自动收起。
+
+新卡片默认模式由 `设置 → 卡片行为 → 新卡片默认固定` 决定；单张卡上的临时切换不影响该偏好。
+
+---
+
+## 🖥️ 刘海屏行为
+
+- 灵动岛**固定钉在内置刘海屏**（`safeAreaInsets.top > 0` 的那块显示器），不跟随键盘焦点的主屏。
+- 多显示器下，即使焦点切到外接屏、或外接屏是主屏，岛也**不会漂到外接屏**。
+- 插上 / 拔掉显示器时会自动重算位置。
+- 机器没有刘海屏时，退化为在该屏顶部居中显示。
+
+---
+
+## 🗂️ 文件位置
+
+全部在独立命名空间 `BetterFocusIDE` 下，可与 Vorssaint / Python 版并存：
 
 ```
 ~/Library/Application Support/BetterFocusIDE/
 ├── agent-events.sock          # 事件通道（Unix socket，换行分隔 JSON）
-├── agent-events.sock.lock     # 单实例 flock 锁（内含持有者 pid）
+├── agent-events.sock.lock     # 单实例 flock 锁
 ├── answers/                   # 作答结果回写目录
 ├── settings.json              # 用户设置
 └── logs/betterfocus.log       # 运行日志（5MB × 3 轮转，脱敏）
 
-~/.qoder/hooks/betterfocus-notify.sh      # Qoder Hook 启动器
-~/.qoder/hooks/betterfocus-hook.py        # Qoder Hook 体
-~/.qoder/settings.json                    # Qoder Hook 注册（带 betterfocus 标记）
+~/.qoder/hooks/betterfocus-*.{sh,py}          # Qoder Hook
 ~/.config/opencode/plugins/betterfocus-notify.js   # OpenCode Plugin
-
-~/.cursor/hooks/betterfocus-notify.sh     # Cursor Hook 启动器
-~/.cursor/hooks/betterfocus-hook.py       # Cursor Hook 体（仅 stop / sessionEnd）
-~/.cursor/hooks.json                      # Cursor Hook 注册（version + hooks）
-
-~/.workbuddy/hooks/betterfocus-notify.sh  # WorkBuddy Hook 启动器
-~/.workbuddy/hooks/betterfocus-hook.py    # WorkBuddy Hook 体
-~/.workbuddy/settings.json                # WorkBuddy Hook 注册（只动 hooks 字段）
+~/.cursor/hooks/betterfocus-*.{sh,py}         # Cursor Hook
+~/.workbuddy/hooks/betterfocus-*.{sh,py}      # WorkBuddy Hook
 ```
 
 **日志环境变量**（排障用）：
 
 ```bash
 BETTERFOCUS_LOG_STDERR=1   # 同步打到终端
-BETTERFOCUS_LOG_LEVEL=info # 调整级别（debug/info/warning/error）
+BETTERFOCUS_LOG_LEVEL=info # 级别：debug/info/warning/error
 ```
 
 ---
 
-## 自检（Doctor）
+## 🩺 Doctor 自检
 
 状态栏 → **自检（Doctor）…**，逐项检查并给修复建议：
 
-- **Socket 是否存活**（探活连接）
-- **各宿主的 Hook / Plugin 文件是否就位**（Qoder / OpenCode / Cursor / WorkBuddy 分别检查；本机没装的宿主自动跳过）
-- **宿主配置里是否登记了我们的条目**（Qoder 的 `_betterfocus_marker`、WorkBuddy / Cursor 的 `command` 路径）
-- **答案目录是否可写**
-- **设置文件是否可读**
+- Socket 是否存活（探活连接）
+- 各宿主 Hook / Plugin 文件是否就位（本机没装的宿主自动跳过）
+- 宿主配置里是否登记了我们的条目
+- 答案目录是否可写、设置文件是否可读
 
-点"重新自检"可再次扫描。装了但卡片不弹，八成是宿主端 hook 没注册成功或 socket 没起来，先跑这个。
+> 装了但卡片不弹，八成是宿主端 hook 没注册成功或 socket 没起来，先跑这个。
 
 ---
 
-## 许可
+## 🏗️ Architecture
 
-GPL-3.0-or-later。本仓库含从 Vorssaint（GPL-3.0）参考裁剪的灵动岛窗口/动画代码，整体按 GPL 分发，内部使用请保留许可证头。
+四层灵动岛栈（继承自 Python 参考实现）：
+
+1. **窗口外壳** — `NotchPanel`（`NSPanel`）：无边框、透明、`level = statusBar + 1`
+2. **动画层** — `NotchCanvas`（`NSView`）：`CAKeyframeAnimation` 驱动遮罩路径
+3. **桥接层** — `NotchHostingView`（`NSHostingView`）：桥接 AppKit ↔ SwiftUI
+4. **内容层** — `NotchView`（SwiftUI）：所有卡片 UI，状态由 `NotchService` 驱动
+
+四种卡片各有一个专用状态机控制器：
+
+| 卡片类型 | 控制器 | 触发事件 | 回答机制 |
+|---|---|---|---|
+| 提问 | `QuestionController` | `question_requested` | 写 JSON 到 `answers/<session>_<question>.json` |
+| 权限 | `PermissionController` | `permission_requested` | 写 JSON 到 `answers/<session>_<request>.json` |
+| 通知 | `NoticeController` | `turn_finished` / `session_ended` | 超时后自动消失 |
+| 历史 | `HistoryController` | 内部 | 只读面板（最近 5 条） |
+
+完整的架构说明见 [`AGENTS.md`](AGENTS.md)。
+
+---
+
+## 📁 Project Structure
+
+```
+├── Package.swift              # SwiftPM 清单（库目标 + 瘦可执行目标）
+├── build.sh                   # 构建 + .app 组装 + ad-hoc 签名
+├── Resources/                 # Info.plist、entitlements、图标
+├── Sources/BetterFocusIDE/
+│   ├── Models/                # 纯数据类型
+│   ├── Services/              # Socket / Installer / 各控制器 / Doctor
+│   └── UI/                    # SwiftUI 视图（强制深色模式）
+└── Tests/                     # 单元测试
+```
+
+---
+
+## 🧪 运行测试
+
+```bash
+swift test
+```
+
+---
+
+## 📜 License
+
+[GPL-3.0-or-later](LICENSE) © 2026 BetterFocusIDE
+
+本仓库含从 [Vorssaint](https://github.com/Vorssaint)（GPL-3.0）参考裁剪的灵动岛窗口 / 动画代码，整体按 GPL 分发，内部使用请保留许可证头。
+
+---
+
+## 🙏 Acknowledgments
+
+- [Vorssaint](https://github.com/Vorssaint) — 灵动岛动画与 UI 参考
+- `dynamic-Island-python-validate` — 原始 Python 原型
+
+---
+
+<div align="center">
+
+Made with ❤️ for developers who live in the terminal.
+
+</div>
