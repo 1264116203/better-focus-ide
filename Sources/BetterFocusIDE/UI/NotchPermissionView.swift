@@ -32,34 +32,16 @@ struct NotchPermissionView: View {
 
     var body: some View {
         if let req = request {
-            ZStack(alignment: .topTrailing) {
-                VStack(alignment: .leading, spacing: 8) {
-                    header(req)
-                    bodyText(req)
-                    if !req.detail.isEmpty {
-                        detailBlock(req)
-                    }
-                    buttonsView(req)
+            VStack(alignment: .leading, spacing: 8) {
+                header(req)
+                bodyText(req)
+                if !req.detail.isEmpty {
+                    detailBlock(req)
                 }
-                .padding(.horizontal, inset)
-                .padding(.vertical, 10)
-
-                // 钉住开关：ZStack 覆盖层，统一使用主题色
-                Button(action: onTogglePin) {
-                    Image(systemName: pinned ? "pin.fill" : "pin")
-                        .font(.system(size: 12, weight: .semibold))
-                        .rotationEffect(.degrees(pinned ? 0 : 45))
-                        .foregroundStyle(pinned
-                            ? Color(red: settings.accentRGB.r,
-                                    green: settings.accentRGB.g,
-                                    blue: settings.accentRGB.b)
-                            : Color.white.opacity(0.4))
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 6)
-                .padding(.trailing, inset)
-                .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
+                buttonsView(req)
             }
+            .padding(.horizontal, inset)
+            .padding(.vertical, 10)
         }
     }
 
@@ -100,6 +82,9 @@ struct NotchPermissionView: View {
                                 in: Capsule())
                     .layoutPriority(1)
             }
+            // 钉住开关：作为行内元素排在头部末尾，避免与计数徽标抢右上角空间。
+            PinButton(pinned: pinned, action: onTogglePin)
+                .layoutPriority(2)
         }
     }
 

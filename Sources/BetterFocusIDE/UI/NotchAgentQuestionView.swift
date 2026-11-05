@@ -44,48 +44,30 @@ struct NotchAgentQuestionView: View {
 
     var body: some View {
         if let prompt = prompt, let question = currentQuestion {
-            ZStack(alignment: .topTrailing) {
-                VStack(alignment: .leading, spacing: 8) {
-                    header(prompt: prompt, question: question)
-                    if !projectName.isEmpty {
-                        Text(projectName)
-                            .font(.system(size: 9))
-                            .foregroundStyle(.white.opacity(0.45))
-                            .lineLimit(1)
-                    }
-                    if !question.question.isEmpty {
-                        Text(question.question)
-                            .font(.system(size: bodyFontSize))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    ScrollView {
-                        VStack(spacing: 6) {
-                            optionsView(question: question)
-                            otherRow(question: question)
-                        }
-                    }
-                    sendButton(prompt: prompt)
+            VStack(alignment: .leading, spacing: 8) {
+                header(prompt: prompt, question: question)
+                if !projectName.isEmpty {
+                    Text(projectName)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .lineLimit(1)
                 }
-                .padding(.horizontal, inset)
-                .padding(.vertical, 10)
-
-                // 钉住开关：ZStack 覆盖层，统一使用主题色
-                Button(action: onTogglePin) {
-                    Image(systemName: pinned ? "pin.fill" : "pin")
-                        .font(.system(size: 12, weight: .semibold))
-                        .rotationEffect(.degrees(pinned ? 0 : 45))
-                        .foregroundStyle(pinned
-                            ? Color(red: settings.accentRGB.r,
-                                    green: settings.accentRGB.g,
-                                    blue: settings.accentRGB.b)
-                            : Color.white.opacity(0.4))
+                if !question.question.isEmpty {
+                    Text(question.question)
+                        .font(.system(size: bodyFontSize))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.plain)
-                .padding(.top, 6)
-                .padding(.trailing, inset)
-                .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
+                ScrollView {
+                    VStack(spacing: 6) {
+                        optionsView(question: question)
+                        otherRow(question: question)
+                    }
+                }
+                sendButton(prompt: prompt)
             }
+            .padding(.horizontal, inset)
+            .padding(.vertical, 10)
         }
     }
 
@@ -139,6 +121,9 @@ struct NotchAgentQuestionView: View {
                 .foregroundStyle(.white.opacity(0.85))
                 .layoutPriority(1)
             }
+            // 钉住开关：作为行内元素排在头部末尾，避免与翻页步进器抢右上角空间。
+            PinButton(pinned: pinned, action: onTogglePin)
+                .layoutPriority(2)
         }
     }
 
