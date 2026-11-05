@@ -20,6 +20,12 @@ final class NoticeController: ObservableObject {
     /// 为 true 时横幅被钉住展开，不得自动消失。
     var isPinned: () -> Bool = { false }
 
+    /// 调试注入用：为 true 时跳过 `turnNotifyEnabled` / `permissionEnabled` 门控。
+    ///
+    /// 只有调试面板会打开它（用户可能在设置里把提醒全关掉了，但预览仍要能弹出来），
+    /// 正常 socket 分发恒为 false。见 `NotchService.injectDebugMessage`。
+    var bypassGates = false
+
     /// 每个会话上次横幅的时间，用于去抖。
     private var lastNoticeAt: [String: Date] = [:]
     /// 等待展示的通知队列；当前通知展示期间新到的通知排入此队列。
@@ -47,7 +53,7 @@ final class NoticeController: ObservableObject {
     /// 处理一条 `turn_finished` 消息：开关校验 → 去抖 → 解析 → 记历史 → 入队或展示。
     func handleTurnFinished(message: AgentSocketMessage) {
         let settings = Settings.shared
-        guard settings.turnNotifyEnabled else { return }
+        guard settings.turnNotifyEnabled || bypassGates else { return }
 
         let sessionID = message.sessionID
         let now = Date()
@@ -78,7 +84,7 @@ final class NoticeController: ObservableObject {
     func handlePermissionNotice(message: AgentSocketMessage) {
         let settings = Settings.shared
         Log.debug("handlePermissionNotice: entry, permissionEnabled=\(settings.permissionEnabled), session=\(message.sessionID)", topic: "permission")
-        guard settings.permissionEnabled else {
+        guard settings.permissionEnabled || bypassGates else {
             Log.debug("handlePermissionNotice: blocked by permissionEnabled=false", topic: "permission")
             return
         }
@@ -183,6 +189,15 @@ final class NoticeController: ObservableObject {
         notice = nil
         onDismiss?()
         // promoteNext 由 NotchService.handleCardDismissal 统一处理，避免双重弹出。
+    }
+
+    /// 清空横幅、排队项与「收起后可恢复」的缓存（**不写应答、不播放动画**）。
+    ///
+    /// 只给调试面板用：注入下一条场景前先清场，避免同一帧里先收起再展开。
+    func flushAll() {
+        queue.removeAll()
+        lastDismissedNotice = nil
+        notice = nil
     }
 
     /// 用户点击"已读"按钮：不跳转 IDE，直接标记已读并关闭当前通知。
