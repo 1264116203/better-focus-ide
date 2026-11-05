@@ -80,13 +80,21 @@ struct TurnNotice: Equatable, Identifiable {
         let payloadPrompt = Transcript.shorten(
             message.payload?["prompt"]?.stringValue ?? "", limit: Transcript.bodyLimit)
 
+        // 标题优先级：会话真实标题 → hook 直报的标题 → 用户这一轮的输入 →
+        // 中性兜底。第三档很重要：WorkBuddy 这类宿主不给 transcript 路径时，
+        // 「他这一轮问了什么」仍比「WorkBuddy 回复完成」有信息量——而且左列
+        // 已经有 IDE 图标，再把产品名写成标题是纯粹的重复。
         let resolvedTitle: String
         if !summary.title.isEmpty {
             resolvedTitle = summary.title
         } else if !payloadTitle.isEmpty {
             resolvedTitle = payloadTitle
+        } else if !summary.latest.isEmpty {
+            resolvedTitle = summary.latest
+        } else if !payloadPrompt.isEmpty {
+            resolvedTitle = payloadPrompt
         } else {
-            resolvedTitle = "\(name) 回复完成"
+            resolvedTitle = "未命名会话"
         }
 
         let resolvedBody: String
@@ -119,9 +127,13 @@ struct TurnNotice: Equatable, Identifiable {
     }
 
     /// 项目目录的最后一个路径组件（即窗口标题）。
+    ///
+    /// 工作目录就是家目录时返回空：那会把用户名（`yujie.xu`）当成项目名，
+    /// 既不是项目、也不提供任何定位信息。
     private static func projectLeaf(from host: HostInfo) -> String {
-        let cwd = host.cwd
-        guard !cwd.isEmpty else { return "" }
+        let cwd = (host.cwd as NSString).standardizingPath
+        guard !cwd.isEmpty, cwd != "/" else { return "" }
+        if cwd == (NSHomeDirectory() as NSString).standardizingPath { return "" }
         return (cwd as NSString).lastPathComponent
     }
 }

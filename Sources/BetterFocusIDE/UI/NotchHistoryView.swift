@@ -210,15 +210,15 @@ struct NotchHistoryView: View {
 
     // MARK: - 辅助方法
 
-    /// 生成元数据文本：`来源 · 时间` 或 `项目名 · 时间`
+    /// 生成元数据文本：`项目 · 时间`；没有项目名时只留时间。
     ///
-    /// 优先级：项目名 > 来源 > "通知"
+    /// 不再回退到来源名——行首的 IDE 图标已经说明来源，再写一遍
+    /// 「OpenCode · 15:20」只是重复。
     /// 时间格式：HH:mm（24 小时制）
     private func metaText(_ entry: HistoryEntry) -> String {
-        let base = entry.project.isEmpty
-            ? (entry.source.isEmpty ? "通知" : entry.source)
-            : entry.project
-        return entry.clockText.isEmpty ? base : "\(base) · \(entry.clockText)"
+        let clock = entry.clockText
+        if entry.project.isEmpty { return clock }
+        return clock.isEmpty ? entry.project : "\(entry.project) · \(clock)"
     }
 }
 
