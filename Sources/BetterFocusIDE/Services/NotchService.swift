@@ -457,6 +457,37 @@ final class NotchService: ObservableObject {
         QoderCnHookInstaller.uninstall()
     }
 
+    /// 启动时校验**已装**的集成，内容与本构建不一致就重写回去。
+    ///
+    /// 为什么需要：这些脚本/插件一旦内容不合法，宿主会整份拒绝加载，
+    /// 而应用侧只看到「已安装」——OpenCode 插件里残留一行半截表达式，
+    /// 就会让提问、权限、完成通知同时静默消失，排查成本极高。
+    /// `install()` 本身是幂等的（内容相同不写），所以这里只负责触发；
+    /// 只对已存在的文件动手，不给没装宿主的人凭空建配置。
+    func repairInstalledIntegrations() {
+        var repaired: [String] = []
+        func repair(_ label: String, _ installed: Bool, _ work: () throws -> Void) {
+            guard installed else { return }
+            do {
+                try work()
+                repaired.append(label)
+            } catch {
+                Log.error("\(label) 自愈失败：\(error.localizedDescription)", topic: "install")
+            }
+        }
+        repair("OpenCode Plugin", OpenCodePluginInstaller.isInstalled,
+               OpenCodePluginInstaller.install)
+        repair("Qoder Hook", QoderHookInstaller.isInstalled,
+               QoderHookInstaller.install)
+        repair("Cursor Hook", CursorHookInstaller.isInstalled,
+               CursorHookInstaller.install)
+        repair("WorkBuddy Hook", WorkBuddyHookInstaller.isInstalled,
+               WorkBuddyHookInstaller.install)
+        if !repaired.isEmpty {
+            Log.info("已校验安装态集成：" + repaired.joined(separator: "、"), topic: "install")
+        }
+    }
+
     /// 显示最近通知历史面板（从空闲状态的灵动岛触发）
     ///
     /// ## 布局公式

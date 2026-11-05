@@ -95,4 +95,57 @@ final class OpenCodePluginTemplateTests: XCTestCase {
         XCTAssertFalse(installed.contains("__ANSWER_TIMEOUT_MS__"))
         XCTAssertTrue(installed.contains(InstallerPaths.socketPath))
     }
+
+    // MARK: - 语法可解析
+
+    /// 测试：安装态正文必须是合法 JavaScript。
+    ///
+    /// 插件的失效方式极其隐蔽：文件里只要残留一行半截表达式（例如编辑时
+    /// 只删掉了 `console.log(` 却留下 `+ ' argv=' + …);`），OpenCode 就整份
+    /// 放弃加载——提问、权限、完成通知**全部**静默失效，而应用侧只会显示
+    /// 「已安装」。用 `node --check` 把这种崩坏挡在提交之前。
+    func testInstalledSourceParsesAsJavaScript() throws {
+        let node = Self.nodePath()
+        guard let node else {
+            throw XCTSkip("未找到 node，跳过 JS 语法校验")
+        }
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("betterfocus-plugin-syntax-\(UUID().uuidString).mjs")
+        try installed.write(to: tmp, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: node)
+        proc.arguments = ["--check", tmp.path]
+        let errPipe = Pipe()
+        proc.standardError = errPipe
+        proc.standardOutput = Pipe()
+        try proc.run()
+        proc.waitUntilExit()
+        let errText = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(),
+                             encoding: .utf8) ?? ""
+        XCTAssertEqual(proc.terminationStatus, 0,
+                       "安装态插件不是合法 JS，OpenCode 会整份拒绝加载：\n\(errText)")
+    }
+
+    /// 测试：模板不得残留编辑中途的半截语句。
+    ///
+    /// 捕获 `+ ' …` 这种没有左值的续行（真出过一次：调试日志只删掉前半截）。
+    func testTemplateHasNoDanglingConcatenation() {
+        for (i, line) in body.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            XCTAssertFalse(trimmed.hasPrefix("+ '") || trimmed.hasPrefix("+ \""),
+                           "第 \(i + 1) 行是孤立的三目/拼接续行，缺少左值：\(trimmed)")
+        }
+    }
+
+    /// 常见 node 安装位置；找不到返回 nil（测试跳过而不是失败）。
+    private static func nodePath() -> String? {
+        let candidates = [
+            "/opt/homebrew/bin/node",
+            "/usr/local/bin/node",
+            "/usr/bin/node",
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
 }
