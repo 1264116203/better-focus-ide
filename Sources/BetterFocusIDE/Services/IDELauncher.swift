@@ -10,6 +10,11 @@ struct HostInfo: Codable, Equatable {
     var name: String = ""
     var path: String = ""
     var cwd: String = ""
+    /// 浏览器会话的落地地址（如 `http://127.0.0.1:4096/`）。
+    ///
+    /// 只有 `opencode serve` + Web UI 这类「没有窗口、只有本机端口」的会话会填。
+    /// 非空时跳转直接打开浏览器，不再去激活产品自己的桌面端。
+    var url: String = ""
 
     /// 已知 bundle ID → 展示名称映射（internal 以便 HistoryEntry 解码时复用）。
     ///
@@ -56,6 +61,17 @@ struct HostInfo: Codable, Equatable {
     ]
 
     init() {}
+
+    /// 解码时容忍缺字段：历史记录里存下的 host 没有 `url`（以及早期版本的
+    /// 其它新增键），用默认值兜底，避免整条历史读不出来。
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bundle = try c.decodeIfPresent(String.self, forKey: .bundle) ?? ""
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        path = try c.decodeIfPresent(String.self, forKey: .path) ?? ""
+        cwd = try c.decodeIfPresent(String.self, forKey: .cwd) ?? ""
+        url = try c.decodeIfPresent(String.self, forKey: .url) ?? ""
+    }
 
     /// 从 socket 消息的 host 字典 + 可选 cwd 构造；缺失字段留空。
     ///
@@ -168,6 +184,15 @@ enum IDELauncher {
     /// - 其他/失败：回退 App 级激活
     @discardableResult
     static func activate(provider: String, host: HostInfo?) -> Bool {
+        // 浏览器会话（`opencode serve` + Web UI）：没有窗口可激活，也不该把
+        // 产品桌面端叫到前台——用户在浏览器里等着，落地就该是那个页面。
+        if let raw = host?.url, !raw.isEmpty, let target = URL(string: raw) {
+            if NSWorkspace.shared.open(target) {
+                Log.info("已在浏览器打开 \(raw)", topic: "launcher")
+                return true
+            }
+            Log.warning("浏览器打开失败：\(raw)", topic: "launcher")
+        }
         guard let targets = target(for: provider, host: host) else {
             Log.info("\(provider) 跑在终端里，没有可跳转的窗口", topic: "launcher")
             return false

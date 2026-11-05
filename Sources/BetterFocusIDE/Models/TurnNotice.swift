@@ -46,23 +46,28 @@ struct TurnNotice: Equatable, Identifiable {
     static func parse(message: AgentSocketMessage,
                      terminalHost: (String) -> HostInfo? = {
                          OpenCodeHostProbe.currentTerminalHost(directory: $0)
+                     },
+                     webHost: (String, Int?) -> HostInfo? = {
+                         OpenCodeHostProbe.currentWebHost(pid: $1, directory: $0)
                      }) -> TurnNotice? {
         let providerEnum = message.resolvedProvider
         let provider = providerEnum.rawValue
         let sessionID = message.sessionID
         // OpenCode 的插件拿不到客户端类型，改由事件流缓存会话目录一起上报。
         let directory = message.payload?["directory"]?.stringValue ?? ""
-        var host = HostInfo(from: message.host,
-                            cwd: message.cwd)
-        // OpenCode 的插件跑在桌面端常驻服务里，事件流里没有客户端类型：
-        // 桌面端会话和终端会话上报的 host 都为空。从进程表反推真实终端，
-        // 否则点通知只会把 OpenCode 桌面端叫到前台，而不是用户等待的 iTerm。
-        if providerEnum == .opencode,
-           host.bundle.isEmpty || host.bundle == "ai.opencode.desktop",
-           let terminal = terminalHost(directory) {
-            host = terminal
-            host.cwd = directory.isEmpty ? (message.cwd ?? "") : directory
-        }
+        // 插件自报的进程号：用来确定这一轮到底是浏览器里的 serve、终端 TUI
+        // 还是桌面端服务——三者的事件长得完全一样。
+        let pluginPID = message.payload?["pid"]?.intValue
+        // OpenCode 的插件跑在 serve 进程里，事件流里没有客户端类型：
+        // 桌面端、终端、浏览器会话上报的 host 都为空。从进程表反推真实宿主，
+        // 否则点通知只会把 OpenCode 桌面端叫到前台，而不是用户等待的地方。
+        let host = OpenCodeHostProbe.resolveHost(
+            provider: providerEnum,
+            host: HostInfo(from: message.host, cwd: message.cwd),
+            directory: directory,
+            pid: pluginPID,
+            terminalHost: terminalHost,
+            webHost: webHost)
         let project = projectLeaf(from: host)
         // 来源展示名：统一走 label——GUI 宿主用 hook 上报的真实应用名
         // （如 "IntelliJ IDEA"），CLI 宿主标成「产品（终端）」如

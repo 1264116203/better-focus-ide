@@ -130,6 +130,16 @@ enum AnyCodableValue: Codable, Equatable {
         }
     }
 
+    /// 以整数读取：兼容真正的数字与数字字符串（hook 有语言差异，两种都给）。
+    var intValue: Int? {
+        switch self {
+        case .int(let i): return i
+        case .double(let d): return Int(d)
+        case .string(let s): return Int(s)
+        default: return nil
+        }
+    }
+
     /// 以数组读取（非数组返回 nil）。
     var arrayValue: [AnyCodableValue]? {
         if case .array(let a) = self { return a }

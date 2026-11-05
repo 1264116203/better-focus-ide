@@ -372,12 +372,6 @@ final class Settings: ObservableObject {
 }
 
 private extension AnyCodableValue {
-    /// 宽松取 Int：int 直接取，double 截断取整，其余 nil。
-    var intValue: Int? {
-        if case .int(let i) = self { return i }
-        if case .double(let d) = self { return Int(d) }
-        return nil
-    }
     /// 宽松取 Double：double 直接取，int 提升为 Double，其余 nil。
     var doubleValue: Double? {
         if case .double(let d) = self { return d }
