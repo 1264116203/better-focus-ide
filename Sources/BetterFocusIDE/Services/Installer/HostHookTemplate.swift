@@ -186,6 +186,75 @@ enum HostHookTemplate {
             return isinstance(tool_input, dict) and bool(tool_input.get("questions"))
 
 
+        def _collect_tool_blocks(node, uses, results):
+            if isinstance(node, dict):
+                kind = node.get("type")
+                if kind == "tool_use" and isinstance(node.get("input"), dict):
+                    uses.append(node)
+                elif kind == "tool_result":
+                    tid = node.get("tool_use_id") or node.get("toolUseId")
+                    if isinstance(tid, str) and tid:
+                        results.add(tid)
+                for value in node.values():
+                    _collect_tool_blocks(value, uses, results)
+            elif isinstance(node, list):
+                for value in node:
+                    _collect_tool_blocks(value, uses, results)
+
+
+        def pending_question(payload):
+            # 宿主的提问面板一出现就发一条 Notification（permission_prompt），
+            # 但那条载荷里**没有题面**——只有一句
+            # "needs your permission to use AskUserQuestion"。题面在转录里：
+            # 模型发出的 tool_use 早就落盘了（比通知还早）。读尾部、找最后一
+            # 条还没有 tool_result 的提问调用，岛就能在宿主面板刚出现时把同一
+            # 道题画出来——这是唯一一条早于“用户作答”的通道。
+            path = payload.get("transcript_path") or payload.get("transcriptPath") or ""
+            if not isinstance(path, str) or not path:
+                return None
+            try:
+                size = os.path.getsize(path)
+                with open(path, "rb") as fh:
+                    if size > 512 * 1024:
+                        fh.seek(size - 512 * 1024)
+                        fh.readline()          # 丢掉被截断的首行
+                    raw = fh.read().decode("utf-8", "ignore")
+            except Exception:
+                return None
+            uses, results = [], set()
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    _collect_tool_blocks(json.loads(line), uses, results)
+                except Exception:
+                    continue
+            for use in reversed(uses):
+                name = str(use.get("name") or "").lower()
+                if "question" not in name:
+                    continue
+                ident = use.get("id") or use.get("tool_use_id") or ""
+                if isinstance(ident, str) and ident and ident in results:
+                    continue
+                questions = normalise(use.get("input") or {})
+                if questions:
+                    return (ident, questions)
+            return None
+
+
+        def preview_question(session_id, payload, questions, tool_use_id):
+            # 只出卡、不作答：Notification 这条通道没有可回灌的决策，所以发完
+            # 事件就退出。用户在岛上先答，等宿主真正执行工具（PreToolUse）时，
+            # run_question 会发现答案已经在了，直接 deny 回灌，不会再问一遍。
+            request_id = safe_id(tool_use_id or ("q" + str(int(time.time()))))
+            msg = base_event("question_requested", session_id, payload)
+            msg["request_id"] = request_id
+            msg["payload"] = {"questions": questions, "request_id": request_id,
+                              "channel": "Notification"}
+            send(msg)
+
+
         def normalise(tool_input):
             raw = tool_input.get("questions") if isinstance(tool_input, dict) else None
             if not isinstance(raw, list) or not raw:
@@ -381,7 +450,11 @@ enum HostHookTemplate {
             signature = "q-" + "_".join(q["question"][:40] for q in questions)[:120]
             if not claim(session_id, payload, "question", signature):
                 return
-            request_id = safe_id(payload.get("request_id") or ("q" + str(int(time.time()))))
+            request_id = safe_id(payload.get("tool_use_id")
+                                 or payload.get("toolUseId")
+                                 or payload.get("call_id")
+                                 or payload.get("request_id")
+                                 or ("q" + str(int(time.time()))))
             msg = base_event("question_requested", session_id, payload)
             msg["request_id"] = request_id
             msg["payload"] = {"questions": questions, "request_id": request_id,
@@ -393,6 +466,22 @@ enum HostHookTemplate {
                 emit(host_decides(hook_event),
                      "BetterFocusIDE is not running; ask in the host dialog.", hook_event)
                 return
+            # 岛可能早就弹过卡（Notification 预取那条通道），用户也已经答完：
+            # 直接把答案回灌，绝不再问第二遍，也不必再等一个超时。
+            # 只处理单题——多题卡片是逐步写的，提前取会吃掉一半。
+            if len(questions) == 1:
+                found, label, index = read_answer(session_id, request_id,
+                                                  questions[0]["id"], 0)
+                if found and index >= 0:
+                    reason = ("The person answered on the BetterFocusIDE island. "
+                              "Use these answers and continue." + chr(10)
+                              + "  - %s: %s" % (questions[0]["header"], label))
+                    emit("deny", reason, hook_event)
+                    return
+                if found and index == -4:
+                    emit(host_decides(hook_event),
+                         "The person will answer in the host dialog.", hook_event)
+                    return
             since = time.time()
             deadline = since + QUESTION_TIMEOUT
             while time.time() < deadline:
@@ -523,6 +612,23 @@ enum HostHookTemplate {
             # 和「自动执行档」给它当门——auto 档在那一层直接 return，岛连事件都收
             # 不到，宿主顺手弹出自己的问卷，看起来就是「IDE 先弹」。
             tool_name = str(payload.get("tool_name") or "")
+            # 宿主自己弹提问面板的那一刻只发一条 Notification：没有 tool_name、
+            # 没有 tool_input，只有一句 "needs your permission to use
+            # AskUserQuestion"。这是**唯一**一条早于用户作答的信号（PreToolUse
+            # 要等面板答完才来），题面只能从转录里捞。捞到就先出卡。
+            if event == "Notification" and not looks_like_question(payload, tool_name):
+                kind = str(payload.get("notification_type") or "")
+                hint = str(payload.get("message") or "").lower()
+                if ((not kind or kind == "permission_prompt")
+                        and any(name in hint for name in ("askuserquestion",
+                                                          "ask_user_question",
+                                                          "ask_followup_question"))
+                        and alerts_enabled("question")
+                        and os.path.exists(SOCKET_PATH)):
+                    found = pending_question(payload)
+                    if found:
+                        preview_question(session_id, payload, found[1], found[0])
+                        return
             if looks_like_question(payload, tool_name):
                 if not alerts_enabled("question") or not os.path.exists(SOCKET_PATH):
                     emit(host_decides(event),

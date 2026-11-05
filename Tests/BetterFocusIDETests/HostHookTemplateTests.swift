@@ -119,6 +119,36 @@ final class HostHookTemplateTests: XCTestCase {
         XCTAssertTrue(body.contains(#""channel": hook_event"#))
     }
 
+    /// 宿主弹面板的瞬间只发一条 Notification（载荷里**没有题面**），
+    /// 而 PreToolUse 要等用户答完才来——实测 18:10:09 收到通知、18:11:02
+    /// 才收到 PreToolUse，中间那 52 秒就是用户在 IDE 里作答的时间。
+    ///
+    /// 所以「岛先出现」唯一能站住的地方是那条 Notification：从转录里捞出
+    /// 题面先出卡；等 PreToolUse 真到了，把岛上已有的答案直接回灌。
+    func testNotificationPreemptsHostPanel() throws {
+        let body = HostHookTemplate.body
+
+        // 1) 预取分支必须在提问分发之前，否则 Notification 会先掉进权限门。
+        let preview = try XCTUnwrap(body.range(of: "if event == \"Notification\" and not looks_like_question"))
+        let question = try XCTUnwrap(body.range(of: "if looks_like_question(payload, tool_name):"))
+        XCTAssertLessThan(preview.lowerBound, question.lowerBound, "预取分支被放到提问分发之后了")
+
+        // 2) 题面来自转录尾部，而不是载荷。
+        XCTAssertTrue(body.contains("def pending_question(payload):"))
+        XCTAssertTrue(body.contains(#"payload.get("transcript_path")"#))
+        XCTAssertTrue(body.contains("def _collect_tool_blocks(node, uses, results):"))
+
+        // 3) 预取只出卡、不作答：通道标成 Notification，发完就退出。
+        XCTAssertTrue(body.contains("def preview_question(session_id, payload, questions, tool_use_id):"))
+        XCTAssertTrue(body.contains(#""channel": "Notification""#))
+
+        // 4) 两条通道必须算出同一个 request id（tool_use_id），答案文件才对得上。
+        XCTAssertTrue(body.contains(#"or payload.get("call_id")"#))
+
+        // 5) PreToolUse 先看岛上是否已经答过；答过就直接回灌，不再问第二遍。
+        XCTAssertTrue(body.contains("questions[0][\"id\"], 0)"))
+    }
+
     // MARK: - 注册表
 
     /// Cursor 只注册观测型事件：权限类事件会强制 allow/deny，绝不碰。
