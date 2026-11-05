@@ -39,6 +39,8 @@ final class NotchService: ObservableObject {
     @Published private(set) var hasUnprocessedNotice: Bool = false
     /// 未处理通知的提供方主题色（用于呼吸灯颜色）。
     @Published private(set) var unprocessedNoticeTint: Color?
+    /// 上一次的呼吸灯亮/灭状态，仅用于「状态翻转时才打日志」。
+    private var lastGlowLit: Bool?
     /// 正在撤下的卡片（收起动画期间可见，随后清空）。
     @Published private(set) var closingCard: ActiveCard?
 
@@ -758,37 +760,42 @@ final class NotchService: ObservableObject {
         updateBreathingTint()
     }
     
-    /// 更新气泡外缘呼吸辉光的颜色与开关。
+    /// 呼吸灯该亮什么颜色；`nil` 表示熄灭。
     ///
-    /// 测试期间：总是以主题色显示。
-    /// 正式逻辑：只有当通知卡片未操作自动收起后（hasUnprocessedNotice = true），
-    /// 才显示呼吸灯提醒，颜色取该通知的提供方主题色。
+    /// 规则只有一条：**通知卡片未被查看就自动收起**（`hasUnprocessedNotice`）时才亮，
+    /// 颜色取那条通知的提供方主题色。其余任何时刻（空闲、展开中、已读）都必须熄灭——
+    /// 呼吸灯是「你错过了一条通知」的提示，常亮会把它降级成装饰，反而失去提醒作用。
+    ///
+    /// 颜色缺失时退回强调色而不是「保持上一次的颜色」：否则会出现读取了通知、
+    /// 状态已清，灯却还亮着的错觉。
+    static func glowColor(hasUnprocessedNotice: Bool, noticeTint: Color?) -> Color? {
+        guard hasUnprocessedNotice else { return nil }
+        if let noticeTint { return noticeTint }
+        let accent = NotchLayout.accentColor
+        return Color(red: accent.r, green: accent.g, blue: accent.b)
+    }
+
+    /// 按当前状态更新气泡外缘呼吸辉光。
     ///
     /// 辉光由 AppKit 画布层（NotchCanvas.glowLayer：单层位图 = 轮廓填充 + 高斯模糊 + 描边芯）
     /// 绘制，而非 SwiftUI 层——因为黑色岛面轮廓由 AppKit 遮罩裁剪，SwiftUI 内容无法越出气泡外缘。
     private func updateBreathingTint() {
-        // 测试模式：总是显示主题色辉光
-        let accent = NotchLayout.accentColor
-        breathingTint = Color(red: accent.r, green: accent.g, blue: accent.b)
-        let ns = NSColor(srgbRed: CGFloat(accent.r),
-                         green: CGFloat(accent.g),
-                         blue: CGFloat(accent.b),
-                         alpha: 1)
-        windowHost?.setGlow(color: ns, breathing: !Settings.shared.reduceMotionResolved)
-
-        // 正式逻辑（暂时注释）
-        /*
-        if hasUnprocessedNotice {
-            breathingTint = unprocessedNoticeTint
-            if let c = unprocessedNoticeTint {
-                let ns = NSColor(c)
-                windowHost?.setGlow(color: ns, breathing: !Settings.shared.reduceMotionResolved)
-            }
-        } else {
-            breathingTint = nil
-            windowHost?.setGlow(color: nil, breathing: false)
+        let color = Self.glowColor(hasUnprocessedNotice: hasUnprocessedNotice,
+                                   noticeTint: unprocessedNoticeTint)
+        breathingTint = color
+        // 只在亮/灭翻转时记一行：这条路径由 updatePendingTotal 频繁触发，
+        // 每次都打会把日志刷满，反而看不清状态到底什么时候变的。
+        if lastGlowLit != (color != nil) {
+            lastGlowLit = color != nil
+            Log.info("呼吸灯：\(color == nil ? "熄灭" : "点亮")（未读通知=\(hasUnprocessedNotice)）",
+                     topic: "glow")
         }
-        */
+        guard let color else {
+            windowHost?.setGlow(color: nil, breathing: false)
+            return
+        }
+        windowHost?.setGlow(color: NSColor(color),
+                            breathing: !Settings.shared.reduceMotionResolved)
     }
     
     // MARK: - 悬停状态机
@@ -900,6 +907,10 @@ final class NotchService: ObservableObject {
                         hasUnprocessedNotice = true
                         unprocessedNoticeTint = savedTint
                         collapse()
+                        // 必须显式刷新：上面的 dismiss() 已同步触发
+                        // handleCardDismissal，岛在那时就收起了，collapse() 会命中
+                        // `guard expanded` 提前返回，灯就永远不亮。
+                        updateBreathingTint()
                     }
                     // promoteNext 成功时 showNoticeBanner 已重设 autoCollapse，无需额外处理。
                 } else {
