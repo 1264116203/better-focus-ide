@@ -117,17 +117,16 @@ final class QuestionTakeoverTests: XCTestCase {
         XCTAssertTrue(body.contains("if (deferred) return original(input, context);"))
     }
 
-    /// WorkBuddy 的提问面板是宿主在工具执行时自己画的，deny 关不掉；
-    /// 所以对 workbuddy 改用 `allow + updatedInput.answers` 直接代答，
-    /// 让宿主根本没有机会弹面板。
-    func testWorkBuddyAnswersThroughUpdatedInput() {
+    /// 作答一律走 `deny + reason`：`allow + updatedInput.answers` 那条代答
+    /// 捷径试过、也撤了——宿主自己的面板关不掉不是我们要解决的问题，
+    /// 岛只需要**尽快出现**（见启动器的 `-S`）。这里钉住「不再有按宿主
+    /// 分叉的代答路径」，免得有人又把它请回来。
+    func testAnswersAlwaysGoBackThroughDenyReason() {
         let body = HostHookTemplate.body
-        XCTAssertTrue(body.contains(#"if PROVIDER == "workbuddy":"#))
-        XCTAssertTrue(body.contains("emit_native_answer"))
-        XCTAssertTrue(body.contains(#"merged["answers"] = answers"#))
-        XCTAssertTrue(body.contains(#""updatedInput": merged"#))
-        // 代答必须是 allow——harness 只在 allow 时把 updatedInput 传下去。
-        XCTAssertTrue(body.contains(#""permissionDecision": "allow""#))
+        XCTAssertFalse(body.contains("emit_native_answer"))
+        XCTAssertFalse(body.contains("updatedInput"))
+        XCTAssertTrue(body.contains(#"reason = ("The person answered on the BetterFocusIDE island. ""#))
+        XCTAssertTrue(body.contains(#"emit("deny", reason, hook_event)"#))
     }
 
     // MARK: - 权限通道上的提问

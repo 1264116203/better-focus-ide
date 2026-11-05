@@ -182,7 +182,9 @@ enum QoderHookInstaller {
           exit 0
         fi
 
-        exec "$PYTHON" "$SELF_DIR/betterfocus-hook.py"
+        # `-S` 见 HostHookTemplate.scriptContent 的说明：跳过 site 初始化，
+        # 把「岛上出卡」往前抢两三百毫秒。
+        exec "$PYTHON" -S "$SELF_DIR/betterfocus-hook.py"
         """
     }
 
