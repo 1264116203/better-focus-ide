@@ -489,6 +489,24 @@ final class NotchService: ObservableObject {
             repair("Qoder CN Hook", QoderCnHookInstaller.isInstalled,
                    QoderCnHookInstaller.install)
         }
+        // 升级后的脚本多了「让位」分支：老副本读到 answer_index = -4 会当成未知
+        // 下标，等于把工具晾在那儿。GUI 宿主（Trae）拿到的正是这条信号，
+        // 所以凡是装过的都要跟着本构建刷新，不能只挑几个。
+        repair("Claude Code Hook", ClaudeCodeHookInstaller.isInstalled,
+               ClaudeCodeHookInstaller.install)
+        for flavor in [TraeHookInstaller.Flavor.international, .cn] {
+            guard flavor.isPresent else { continue }
+            repair("Trae Hook (\(flavor.dir))",
+                   TraeHookInstaller.isInstalled(flavor)) {
+                try TraeHookInstaller.install(flavor)
+            }
+        }
+        if KimiHookInstaller.isPresent {
+            repair("Kimi Hook", KimiHookInstaller.isInstalled, KimiHookInstaller.install)
+        }
+        if CodexHookInstaller.isPresent {
+            repair("Codex Hook", CodexHookInstaller.isInstalled, CodexHookInstaller.install)
+        }
         if !repaired.isEmpty {
             Log.info("已校验安装态集成：" + repaired.joined(separator: "、"), topic: "install")
         }
