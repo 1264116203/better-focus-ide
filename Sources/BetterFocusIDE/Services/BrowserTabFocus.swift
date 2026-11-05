@@ -50,12 +50,15 @@ enum BrowserTabFocus {
 
         /// 浏览器地址栏里同一服务可能的写法：`127.0.0.1:4096` / `localhost:4096` 等。
         /// 用户手敲 `localhost`、插件上报 `127.0.0.1` 是常态，两种都要认。
+        /// 最后兜一个 `:4096/`——覆盖 `0.0.0.0`、`[::1]`、局域网 IP 等写法，
+        /// 带斜杠是为了不把 `:40960` 误判成同端口。
         var needles: [String] {
             var seen: [String] = []
             for candidate in [host, "localhost", "127.0.0.1", "[::1]"] {
                 let needle = "\(candidate):\(port)"
                 if !candidate.isEmpty, !seen.contains(needle) { seen.append(needle) }
             }
+            seen.append(":\(port)/")
             return seen
         }
     }
@@ -85,8 +88,18 @@ enum BrowserTabFocus {
             case .notFound(let windows, let tabs, let localPages):
                 // 扫过多少要留下痕迹：命中不了时才能区分「浏览器里没这个页面」与
                 // 「脚本根本没看到窗口」（无权限 / 窗口类型不支持）。
-                Log.info("\(browser.name) 未命中：\(windows) 窗口 / \(tabs) 标签页"
-                         + "（本机页面 \(localPages) 个）", topic: "launcher")
+                if windows == 0 {
+                    // 实测：同一个 app 跑两个实例时（例如 Qoder 内嵌浏览器另开了
+                    // 一个 `--user-data-dir` 的 Chrome），AppleScript 只会连上其中一个。
+                    // 连上的那个没有窗口 → 永远读到 0，用户的标签页在另一个实例里，
+                    // 脚本层面无论如何都够不着，只能退回「新开一个 tab」。
+                    Log.info("\(browser.name) 脚本接口看不到任何窗口——可能另有同 app 的"
+                             + "实例（如 IDE 内嵌浏览器）占用了 AppleScript 入口",
+                             topic: "launcher")
+                } else {
+                    Log.info("\(browser.name) 未命中：\(windows) 窗口 / \(tabs) 标签页"
+                             + "（本机页面 \(localPages) 个）", topic: "launcher")
+                }
                 continue
             case .failed:
                 // 多半是没给「自动化」权限：换浏览器没意义，直接去回退分支。
