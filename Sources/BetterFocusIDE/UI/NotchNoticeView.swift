@@ -197,6 +197,8 @@ struct NotchNoticeView_Previews: PreviewProvider {
             sessionID: "preview-session",
             title: "预览模式：代码重构已完成",
             body: "是否将当前工程拆分为 library + executable 双目标以支持 SwiftUI Preview？",
+            bodyIsFallback: false,
+            kind: .turn,
             project: "better-focus-ide",
             host: {
                 var h = HostInfo()

@@ -80,6 +80,7 @@ final class HistoryController: ObservableObject {
         return HistoryEntry(
             title: prompt.question.header,
             body: prompt.question.question,
+            kind: .question,
             state: state,
             source: source,
             project: "",
@@ -96,6 +97,7 @@ final class HistoryController: ObservableObject {
         return HistoryEntry(
             title: request.title,
             body: request.detail,
+            kind: .permission,
             state: state,
             source: source,
             project: "",
@@ -120,7 +122,9 @@ final class HistoryController: ObservableObject {
         } ?? notice.providerName
         return HistoryEntry(
             title: notice.title,
-            body: notice.body,
+            // 兜底文案「点击跳转回 X」不含实质内容，历史行留空更清爽。
+            body: notice.bodyIsFallback ? "" : notice.body,
+            kind: notice.kind,
             state: state,
             source: source,
             project: notice.project,
