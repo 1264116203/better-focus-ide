@@ -483,6 +483,12 @@ final class NotchService: ObservableObject {
                CursorHookInstaller.install)
         repair("WorkBuddy Hook", WorkBuddyHookInstaller.isInstalled,
                WorkBuddyHookInstaller.install)
+        // Qoder CN 只在装了才碰：它的配置里若残留指向英文版脚本的注册，
+        // 通知会丢掉 BETTERFOCUS_VARIANT=cn，国内版被记成国际版。
+        if QoderCnHookInstaller.isPresent {
+            repair("Qoder CN Hook", QoderCnHookInstaller.isInstalled,
+                   QoderCnHookInstaller.install)
+        }
         if !repaired.isEmpty {
             Log.info("已校验安装态集成：" + repaired.joined(separator: "、"), topic: "install")
         }

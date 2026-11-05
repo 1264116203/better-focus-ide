@@ -92,14 +92,21 @@ enum QoderHookInstaller {
         return hooks
     }
 
-    /// 判断某分组是否属于我们：优先看标记，兼容旧的扁平结构（command 指向我们脚本）。
+    /// 判断某分组是否属于我们：优先看标记，其次看 command 指向哪个脚本。
+    ///
+    /// 必须认同「有 `hooks` 数组、但没有 marker」的分组——早期版本、以及
+    /// Qoder CN 装到英文版配置里的分组都是这种形状。旧实现在这里直接
+    /// `return false`，于是每次 install 都会在它旁边再追加一份带 marker 的
+    /// 分组，两份并存后 Qoder 每个 Stop 都调两次 hook，人就在一次任务结束时
+    /// 收到两条「回复完成」。
     private static func isOurGroup(_ group: [String: Any]) -> Bool {
         if (group["_betterfocus_marker"] as? String) == marker { return true }
+        // 嵌套形态：hooks 数组里任一 command 指向我们的脚本。
+        if let entries = group["hooks"] as? [[String: Any]] {
+            return entries.contains { HookInstallerSupport.isOurCommand($0["command"]) }
+        }
         // 遗留扁平形态：无 hooks 数组，command 直接指向我们的脚本。
-        if group["hooks"] is [Any] { return false }
-        if let command = group["command"] as? String,
-           command.contains("betterfocus-notify.sh") { return true }
-        return false
+        return HookInstallerSupport.isOurCommand(group["command"])
     }
 
     /// 把合并后的 hooks 原子写回 `~/.qoder/settings.json`。

@@ -182,6 +182,24 @@ enum InstallerPaths {
             && isDirectory.boolValue
     }
 
+    /// 宿主目录是不是一个**独立**安装，而不是指向另一个宿主的软链。
+    ///
+    /// 常见情形：`~/.qoder-cn` 被链到 `~/.qoder`，两个入口名指同一个安装。
+    /// 这时不该认为「装了 CN 版」——否则 CN 安装器会把英文版的 hook 注册
+    /// 改写成 CN 脚本（多一行 `BETTERFOCUS_VARIANT=cn`），此后英文版的每条
+    /// 通知都被记成「Qoder CN」，同一个事件也会被注册两遍。
+    static func hostDirectoryIsDistinct(_ path: String, from other: String) -> Bool {
+        guard hostDirectoryExists(path) else { return false }
+        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: path)
+        else { return true }  // 不是软链 → 独立目录
+        let sibling = (path as NSString).deletingLastPathComponent
+        let resolved = (target as NSString).isAbsolutePath
+            ? target
+            : (sibling as NSString).appendingPathComponent(target)
+        return (resolved as NSString).standardizingPath
+            != (other as NSString).standardizingPath
+    }
+
     // MARK: 超时参数
 
     /// 卡片侧等待上限；Hook / Plugin 的轮询超时跟随它，确保卡片总是先于平台过期。

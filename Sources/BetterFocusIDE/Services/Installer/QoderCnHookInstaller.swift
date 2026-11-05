@@ -16,8 +16,12 @@ enum QoderCnHookInstaller {
     static let configPath = InstallerPaths.qoderCnSettingsPath
 
     /// 宿主是否装在本机。
+    ///
+    /// `~/.qoder-cn` 常被链到 `~/.qoder`（同一安装的两个入口名），那种情况
+    /// 算装了英文版，不算装了 CN 版——否则 CN 的安装器会覆盖英文版的注册。
     static var isPresent: Bool {
-        InstallerPaths.hostDirectoryExists(InstallerPaths.qoderCnDir)
+        InstallerPaths.hostDirectoryIsDistinct(InstallerPaths.qoderCnDir,
+                                               from: InstallerPaths.qoderDir)
     }
 
     /// 事件与 Qoder 一致：权限是真正通道，PreToolUse 兜提问，
