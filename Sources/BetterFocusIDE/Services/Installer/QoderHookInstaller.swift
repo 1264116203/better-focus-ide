@@ -40,10 +40,12 @@ enum QoderHookInstaller {
 
     /// 在 `hooks` 内新增或刷新我们自己的 matcher 分组，其余事件与分组原样保留。
     ///
-    /// 注册四个事件：
+    /// 注册五个事件：
     ///   - PermissionRequest（matcher `*`）：真正的权限通道。
     ///   - PreToolUse（matcher `*`）：遗留提问入口；hook 只处理 AskUserQuestion，
     ///     其他立即退出。
+    ///   - PostToolUse（matcher `TodoWrite|todo_write`）：待办整表转发，驱动
+    ///     灵动岛的分段进度卡片。
     ///   - SessionEnd / Stop：发后即忘，短超时，绝不阻塞会话。
     static func mergedHooks(_ hooks: [String: Any]) -> [String: Any] {
         var hooks = hooksAfterRemoval(hooks)
@@ -63,6 +65,9 @@ enum QoderHookInstaller {
         let specs: [(String, String, Int)] = [
             ("PreToolUse", "*", InstallerPaths.hookTimeoutSeconds),
             ("PermissionRequest", "*", InstallerPaths.hookTimeoutSeconds),
+            // 待办进度：只挂 TodoWrite（Qoder 原生名 todo_write，两者都要匹配）。
+            // PostToolUse 是发后即忘事件，脚本进到 todo 分支后立刻返回，不等待。
+            ("PostToolUse", "TodoWrite|todo_write", 5),
             ("SessionEnd", "*", 5),
             ("Stop", "*", 5),
         ]
@@ -83,7 +88,7 @@ enum QoderHookInstaller {
     /// 从各事件中剔除属于我们的分组；某事件剔空后连键一起移除。
     static func hooksAfterRemoval(_ hooks: [String: Any]) -> [String: Any] {
         var hooks = hooks
-        for event in ["PreToolUse", "PermissionRequest", "SessionEnd", "Stop"] {
+        for event in ["PreToolUse", "PostToolUse", "PermissionRequest", "SessionEnd", "Stop"] {
             guard var groups = hooks[event] as? [[String: Any]] else { continue }
             groups.removeAll { isOurGroup($0) }
             if groups.isEmpty { hooks.removeValue(forKey: event) }

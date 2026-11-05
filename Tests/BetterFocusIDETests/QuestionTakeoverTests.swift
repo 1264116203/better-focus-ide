@@ -117,6 +117,19 @@ final class QuestionTakeoverTests: XCTestCase {
         XCTAssertTrue(body.contains("if (deferred) return original(input, context);"))
     }
 
+    /// WorkBuddy 的提问面板是宿主在工具执行时自己画的，deny 关不掉；
+    /// 所以对 workbuddy 改用 `allow + updatedInput.answers` 直接代答，
+    /// 让宿主根本没有机会弹面板。
+    func testWorkBuddyAnswersThroughUpdatedInput() {
+        let body = HostHookTemplate.body
+        XCTAssertTrue(body.contains(#"if PROVIDER == "workbuddy":"#))
+        XCTAssertTrue(body.contains("emit_native_answer"))
+        XCTAssertTrue(body.contains(#"merged["answers"] = answers"#))
+        XCTAssertTrue(body.contains(#""updatedInput": merged"#))
+        // 代答必须是 allow——harness 只在 allow 时把 updatedInput 传下去。
+        XCTAssertTrue(body.contains(#""permissionDecision": "allow""#))
+    }
+
     // MARK: - 权限通道上的提问
 
     /// 提问工具也会从权限通道冒一遍，但不能当权限横幅弹出来。

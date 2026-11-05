@@ -71,6 +71,12 @@ enum SocketEvent: String {
     case permissionNotice = "permission_notice"
     case sessionEnded = "session_ended"
     case turnFinished = "turn_finished"
+    /// 待办整表覆盖：`TodoWrite` / `todowrite` / `SetTodoList` 每次重发完整列表。
+    case todoUpdated = "todo_updated"
+    /// 待办单条写入：Claude Code V2 / WorkBuddy 的 `TaskCreate` / `TaskUpdate`。
+    case todoItemUpdated = "todo_item_updated"
+    /// 待办清空：宿主主动撤销（如 `TaskUpdate` 置 deleted 后的整表收敛）。
+    case todoCleared = "todo_cleared"
     case activity
 }
 

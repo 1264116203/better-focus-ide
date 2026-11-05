@@ -54,24 +54,56 @@ struct NotchView: View {
     
     /// 气泡内容（仅有待处理项时显示圆点 + 计数）
     private var bubbleContent: some View {
-        HStack(spacing: 4) {
-            if service.pendingTotal > 0 {
-                Circle()
-                    .fill(Color(red: service.pendingTint.r,
-                                green: service.pendingTint.g,
-                                blue: service.pendingTint.b))
-                    .frame(width: NotchLayout.idleDotRadius * 2,
-                           height: NotchLayout.idleDotRadius * 2)
-                if service.pendingTotal > 1 {
-                    Text("\(service.pendingTotal)")
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color(red: service.pendingTint.r,
-                                               green: service.pendingTint.g,
-                                               blue: service.pendingTint.b))
+        ZStack(alignment: .bottom) {
+            HStack(spacing: 4) {
+                if service.pendingTotal > 0 {
+                    Circle()
+                        .fill(Color(red: service.pendingTint.r,
+                                    green: service.pendingTint.g,
+                                    blue: service.pendingTint.b))
+                        .frame(width: NotchLayout.idleDotRadius * 2,
+                               height: NotchLayout.idleDotRadius * 2)
+                    if service.pendingTotal > 1 {
+                        Text("\(service.pendingTotal)")
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color(red: service.pendingTint.r,
+                                                   green: service.pendingTint.g,
+                                                   blue: service.pendingTint.b))
+                    }
                 }
+                // 空闲状态不显示任何内容，仅靠外缘呼吸灯提示
             }
-            // 空闲状态不显示任何内容，仅靠外缘呼吸灯提示
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // 收起态进度：零额外高度，余光即可看到推进；全部完成后自动消失。
+            if service.todoController.hasTodo,
+               !service.todoController.progress.isFinished {
+                todoProgressLine
+            }
         }
+    }
+
+    /// 贴气泡下沿的进度线。
+    ///
+    /// 高度只有 2pt 且留了左右内边距——气泡的圆角轮廓由 AppKit 遮罩裁出，
+    /// 让线条贴到边缘会被切掉端头，看起来像「线画歪了」。
+    private var todoProgressLine: some View {
+        let fraction = service.todoController.progress.fraction
+        let tint = service.todoController.provider.tint
+        return GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.16))
+                Capsule()
+                    .fill(tint)
+                    .frame(width: max(2, geo.size.width * fraction))
+            }
+        }
+        .frame(height: 2)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 3)
+        .allowsHitTesting(false)
+        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: fraction)
+        .transition(.opacity)
     }
     
     /// 气泡内容。外缘呼吸辉光由 AppKit 画布层绘制（NotchCanvas.glowLayer），
@@ -117,6 +149,10 @@ struct NotchView: View {
                     service.historyController.tapped(entry)
                     service.collapse()
                 }
+            case .todo:
+                NotchTodoView(controller: service.todoController,
+                              pinned: service.pinned,
+                              onTogglePin: { service.togglePin() })
             case .none:
                 // 无卡片活动——不显示任何东西（toggle 不会展开到 .none）。
                 EmptyView()

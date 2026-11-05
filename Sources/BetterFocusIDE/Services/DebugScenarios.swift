@@ -122,6 +122,8 @@ enum DebugPayload {    /// 提问请求：数组内多问题 = 卡片分页。
     case permissionNotice(toolName: String, resource: String)
     /// 回复完成横幅：标题 / 正文由合成的 transcript 提供，留空则走兜底文案。
     case turnFinished(title: String, body: String)
+    /// 任务进度：`todos[]` 每项一句正文 + 原始状态字符串。
+    case todo([(content: String, status: String)])
     case sessionEnded
     /// 不走 socket，直接调服务方法。
     case history
@@ -142,7 +144,7 @@ struct DebugScene: Identifiable {
 
 /// 调试页的场景清单：按卡片类型分组，覆盖 hook 能上报的每一种事件形态。
 enum DebugCatalog {
-    static let groups = ["提问卡片", "权限卡片", "通知横幅", "其他"]
+    static let groups = ["提问卡片", "权限卡片", "通知横幅", "任务进度", "其他"]
 
     static func scenes(in group: String) -> [DebugScene] {
         scenes.filter { $0.group == group }
@@ -315,6 +317,41 @@ enum DebugCatalog {
             payload: .permissionNotice(toolName: "Bash",
                                        resource: "npm publish --access public")),
 
+        // ---------------- 任务进度 ----------------
+        DebugScene(
+            id: "todo.running",
+            group: "任务进度",
+            title: "进行中（6 项）",
+            note: "3 项已完成、1 项进行中、2 项待开始；收起后气泡下沿有进度线",
+            payload: .todo([
+                (content: "读一遍各宿主的 hook 文档", status: "completed"),
+                (content: "定下任务条的信息层级", status: "completed"),
+                (content: "实现分段进度条与呼吸态", status: "completed"),
+                (content: "补充 hooks 模板的 todo matcher", status: "in_progress"),
+                (content: "验证事件回传与断线重连", status: "pending"),
+                (content: "补齐收起态下沿进度线", status: "pending"),
+            ])),
+        DebugScene(
+            id: "todo.many",
+            group: "任务进度",
+            title: "12 项（自动分桶）",
+            note: "超过 8 项时改成 8 段，每段按桶内完成比例部分填充",
+            payload: .todo((0..<12).map { index in
+                (content: "第 \(index + 1) 步：梳理接入细节",
+                 status: index < 5 ? "completed" : (index == 5 ? "in_progress" : "pending"))
+            })),
+        DebugScene(
+            id: "todo.finished",
+            group: "任务进度",
+            title: "全部完成",
+            note: "4 项全部打勾后进入收尾态，2.5s 后自动收起",
+            payload: .todo([
+                (content: "读一遍各宿主的 hook 文档", status: "completed"),
+                (content: "定下任务条的信息层级", status: "completed"),
+                (content: "实现分段进度条与呼吸态", status: "completed"),
+                (content: "验证事件回传与断线重连", status: "completed"),
+            ])),
+
         // ---------------- 其他 ----------------
         DebugScene(
             id: "other.sessionEnded",
@@ -397,6 +434,19 @@ enum DebugInjector {
             }
             service.injectDebugMessage(message(
                 event: .turnFinished, payload: payload,
+                target: target, sessionID: session, project: project))
+
+        case .todo(let items):
+            service.flushDebugChannels()
+            let todos: [AnyCodableValue] = items.enumerated().map { index, item in
+                .dictionary([
+                    "id": .string("t\(index + 1)"),
+                    "content": .string(item.content),
+                    "status": .string(item.status),
+                ])
+            }
+            service.injectDebugMessage(message(
+                event: .todoUpdated, payload: ["todos": .array(todos)],
                 target: target, sessionID: session, project: project))
 
         case .sessionEnded:
