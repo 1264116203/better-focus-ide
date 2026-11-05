@@ -61,10 +61,14 @@ enum Doctor {
             label: "Kimi", hostDir: KimiHookInstaller.targetDir,
             script: KimiHookInstaller.scriptPath, helper: KimiHookInstaller.helperPath,
             registered: { KimiHookInstaller.isRegistered }))
-        checks.append(contentsOf: hostIntegration(
-            label: "Qoder CN", hostDir: InstallerPaths.qoderCnDir,
-            script: InstallerPaths.qoderCnScriptPath, helper: InstallerPaths.qoderCnHelperPath,
-            registered: { QoderCnHookInstaller.isRegistered }))
+        // 注意不能只看目录是否存在：`~/.qoder-cn` 常被链到 `~/.qoder`，
+        // 那种情况是同一个安装，列出来只会让自检页出现重复的「Qoder CN」。
+        if QoderCnHookInstaller.isPresent {
+            checks.append(contentsOf: hostIntegration(
+                label: "Qoder CN", hostDir: InstallerPaths.qoderCnDir,
+                script: InstallerPaths.qoderCnScriptPath, helper: InstallerPaths.qoderCnHelperPath,
+                registered: { QoderCnHookInstaller.isRegistered }))
+        }
         checks.append(answerDirWritable())
         checks.append(settingsReadable())
         return checks
