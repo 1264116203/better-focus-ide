@@ -7,10 +7,11 @@ import XCTest
 /// 「这道题要不要接到岛上」的判定，以及**让位信号在每条通道里都能被读懂**。
 ///
 /// 背景：WorkBuddy IDE 在模型发起 `AskUserQuestion` 的瞬间就把自己的提问面板画出来了，
-/// 不等 `PreToolUse` hook 返回。岛上再弹一张卡，同一道题要答两遍，而且 IDE 里那次选择
-/// 会被 hook 的 deny 覆盖。修法是「GUI 宿主在前台就让位」，但让位是**跨进程协议**：
-/// 只要有一个通道（hook / helper / 插件）不认识这个信号，用户就会看到「卡片不出现、
-/// 工具却一直卡着」——比原来更糟。所以这里同时钉住判定与三条通道的契约。
+/// 不等 `PreToolUse` hook 返回。宿主那份面板 hook 拦不住，所以策略是**岛优先**：
+/// 岛一定接管，宿主面板成为「看得见但不算数」的残影。`-4` 让位信号因此保留为
+/// 可选策略（`Policy.deferToHostWhenFrontmost`），一旦启用，三条通道（hook / helper /
+/// 插件）都必须读懂它——漏一条就是「卡片不出现、工具却一直卡着」。
+/// 所以这里同时钉住两种策略与三条通道的契约。
 final class QuestionTakeoverTests: XCTestCase {
 
     private func host(_ bundle: String, name: String = "", url: String = "") -> HostInfo {
@@ -23,53 +24,52 @@ final class QuestionTakeoverTests: XCTestCase {
 
     // MARK: - 判定
 
-    /// GUI 宿主正在前台：让位给它自己的提问面板。
-    func testGUIHostInForegroundDefers() {
+    /// 默认策略：一律接管。
+    ///
+    /// 宿主那份面板是它在 hook 返回前自绘的，拦不住；让位只会让岛静默、而用户
+    /// 在 IDE 里那次作答照样被 deny 丢掉。所以岛的卡必须是唯一有效入口。
+    func testDefaultPolicyAlwaysTakesOver() {
+        let cases: [(HostInfo?, String?)] = [
+            (host("com.tencent.workbuddy.mac", name: "WorkBuddy"), "com.tencent.workbuddy.mac"),
+            (host("com.tencent.workbuddy.mac", name: "WorkBuddy"), "com.google.Chrome"),
+            (host("com.googlecode.iterm2", name: "iTerm"), "com.googlecode.iterm2"),
+            (host("betterfocus.web", url: "http://127.0.0.1:4096/"), "com.apple.Safari"),
+            (nil, "com.apple.Safari"),
+            (host(""), "com.apple.Safari"),
+        ]
+        for (hostInfo, frontmost) in cases {
+            XCTAssertTrue(QuestionTakeover.shouldTakeOver(host: hostInfo,
+                                                          frontmostBundle: frontmost),
+                          "默认策略下应一律接管：\(hostInfo?.bundle ?? "nil") / \(frontmost ?? "nil")")
+        }
+    }
+
+    /// 可选策略（仅在实测确认某宿主的原生面板能自行作答后才启用）。
+    func testDeferPolicyDefersOnlyForForegroundGUIHost() {
+        let policy = QuestionTakeover.Policy.deferToHostWhenFrontmost
+        // GUI 宿主正在前台：让位给它自己的提问面板。
         XCTAssertFalse(QuestionTakeover.shouldTakeOver(
             host: host("com.tencent.workbuddy.mac", name: "WorkBuddy"),
-            frontmostBundle: "com.tencent.workbuddy.mac"))
-    }
-
-    /// 同一个宿主，但用户跑去别的 App 了：岛上接管，这才是灵动岛的价值。
-    func testGUIHostInBackgroundTakesOver() {
+            frontmostBundle: "com.tencent.workbuddy.mac", policy: policy))
+        // 同一个宿主，但用户跑去别的 App 了：岛上接管。
         XCTAssertTrue(QuestionTakeover.shouldTakeOver(
             host: host("com.tencent.workbuddy.mac", name: "WorkBuddy"),
-            frontmostBundle: "com.google.Chrome"))
-    }
-
-    /// 终端宿主恒接管：hook 的 deny 先于工具执行生效，终端那边不会出现第二份。
-    func testTerminalHostAlwaysTakesOver() {
+            frontmostBundle: "com.google.Chrome", policy: policy))
+        // 终端宿主恒接管：hook 的 deny 先于工具执行生效，终端不会出现第二份。
         XCTAssertTrue(QuestionTakeover.shouldTakeOver(
             host: host("com.googlecode.iterm2", name: "iTerm"),
-            frontmostBundle: "com.googlecode.iterm2"))
-        XCTAssertTrue(QuestionTakeover.shouldTakeOver(
-            host: host("com.apple.Terminal", name: "Terminal"),
-            frontmostBundle: "com.apple.Terminal"))
-    }
-
-    /// 浏览器会话（serve + Web UI）没有可对照的应用窗口，恒接管。
-    func testBrowserHostAlwaysTakesOver() {
+            frontmostBundle: "com.googlecode.iterm2", policy: policy))
+        // 浏览器会话（serve + Web UI）没有可对照的应用窗口，恒接管。
         XCTAssertTrue(QuestionTakeover.shouldTakeOver(
             host: host("betterfocus.web", url: "http://127.0.0.1:4096/"),
-            frontmostBundle: "betterfocus.web"))
-    }
-
-    /// 宿主身份未知（老插件、父进程链断了）：保持旧行为，照常接管。
-    func testUnknownHostTakesOver() {
+            frontmostBundle: "betterfocus.web", policy: policy))
+        // 宿主身份未知、取不到前台 App 时不敢让位。
         XCTAssertTrue(QuestionTakeover.shouldTakeOver(host: nil,
-                                                      frontmostBundle: "com.apple.Safari"))
-        XCTAssertTrue(QuestionTakeover.shouldTakeOver(host: host(""),
-                                                      frontmostBundle: "com.apple.Safari"))
-    }
-
-    /// 取不到前台应用时不敢让位：宁多多一张卡，也不能让问题悬空没人问。
-    func testMissingFrontmostTakesOver() {
+                                                      frontmostBundle: "com.apple.Safari",
+                                                      policy: policy))
         XCTAssertTrue(QuestionTakeover.shouldTakeOver(
             host: host("com.tencent.workbuddy.mac", name: "WorkBuddy"),
-            frontmostBundle: nil))
-        XCTAssertTrue(QuestionTakeover.shouldTakeOver(
-            host: host("com.tencent.workbuddy.mac", name: "WorkBuddy"),
-            frontmostBundle: ""))
+            frontmostBundle: nil, policy: policy))
     }
 
     // MARK: - 让位信号
