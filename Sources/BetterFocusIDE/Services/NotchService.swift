@@ -669,22 +669,30 @@ final class NotchService: ObservableObject {
         // VStack(spacing: 8) between header and body.
         height += 8 + clampedLines * bodyLineH
 
-        // Option rows: .padding(.vertical, 7) × 2 = 14 + option label (fontSize*1.3).
-        // Desc text can add extra, so use a conservative single-desc-line bump.
+        // 选项行（去掉 ScrollView 后全部展开，逐项精确测量实际高度）：
+        // 每行 = 左侧图标 16 + 间距 8，右侧 label(12pt) + 可选 description(10.5pt)，
+        // 上下 padding 7×2=14；label/desc 均可换行。行间距 VStack(spacing:6)。
         let optionRowH = NotchLayout.questionOptionRowMin
-        let optionCount = CGFloat(q?.question.options.count ?? 0)
+        let optionCount = q?.question.options.count ?? 0
         var optionsH: CGFloat = 0
         if optionCount > 0 {
-            // Each option inside VStack(spacing: 6); baseline = optionRowH.
-            optionsH = optionCount * optionRowH + max(0, optionCount - 1) * 6
-            // Assume at least one option has a description → 2 extra lines per option.
-            // (A real text-measure would read actual desc texts; this is a safe heuristic.)
-            let descBump = optionCount * NotchLayout.questionBodyFont * 0.7
-            optionsH += descBump
+            // 选项文本可用宽度：卡片宽 - 内边距×2 - 图标16 - 图标间距8 - 行内水平padding 9×2
+            let optionTextW = max(40, textWidth - 16 - 8 - 18)
+            for option in q!.question.options {
+                let labelH = textHeight(option.label, width: optionTextW,
+                                        font: NotchLayout.optionFont)
+                let descH = option.description.isEmpty
+                    ? 0
+                    : textHeight(option.description, width: optionTextW,
+                                 font: NotchLayout.descFont)
+                // label + desc 间距 1（VStack(spacing:1)），加行上下 padding 14。
+                let rowH = max(optionRowH, 14 + labelH + (descH > 0 ? 1 + descH : 0))
+                optionsH += rowH
+            }
+            optionsH += CGFloat(max(0, optionCount - 1)) * 6
         }
-        // Other row: 14 padding + label + possible text field (height 26)
-        let otherH: CGFloat = (questionController.writingOwn.contains(q?.question.id ?? "")
-            ? (optionRowH + 26) : optionRowH)
+        // Other row：输入框与文字同行（不再另起一行），高度恒为单行 optionRowH。
+        let otherH: CGFloat = optionRowH
         // VStack(spacing: 8) between body and ScrollView, and inside ScrollView's VStack(spacing: 6)
         // between options and other row.
         height += 8 + optionsH + 6 + otherH
@@ -738,6 +746,27 @@ final class NotchService: ObservableObject {
         let charsPerLine = max(1, Int(width / avgCharWidth))
         let lines = max(1, CGFloat(text.count) / CGFloat(charsPerLine))
         return ceil(lines) * lineHeight
+    }
+
+    /// 精确文本高度：按字符类型累计宽度（全角 ≈ 1.0×font，半角 ≈ 0.55×font），
+    /// 逐行折行后乘以行高（font × 1.3）。用于选项 label / description 的精确测量。
+    private func textHeight(_ text: String, width: CGFloat, font: CGFloat) -> CGFloat {
+        guard !text.isEmpty, width > 0 else { return font * 1.3 }
+        let lineHeight = font * 1.3
+        var lineWidth: CGFloat = 0
+        var lines: CGFloat = 1
+        for ch in text {
+            // 全角字符（中文、全角标点等）按约 1.0 倍字号计宽，其余按 0.55 倍。
+            let w: CGFloat = ch.unicodeScalars.allSatisfy({ $0.value >= 0x2E80 || $0.value >= 0x3000 && $0.value <= 0x303F || $0.value >= 0xFF00 })
+                ? font * 1.0 : font * 0.55
+            if lineWidth + w > width {
+                lines += 1
+                lineWidth = w
+            } else {
+                lineWidth += w
+            }
+        }
+        return lines * lineHeight
     }
     
     // MARK: - 待处理总数
