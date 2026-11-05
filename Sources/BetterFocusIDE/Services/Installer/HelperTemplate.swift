@@ -53,17 +53,21 @@ enum HelperTemplate {
 
 
         def alerts_enabled(kind):
-            key = {"question": "question_enabled", "permission": "permission_enabled",
-                   "turn": "turn_notify_enabled"}.get(kind)
-            if not key:
+            # 设置文件里 `values` 的键是驼峰（Settings 的 @Published 名），
+            # 旧版 Python 实现用的是下划线键。两种都认，驼峰优先。
+            keys = {"question": ("questionEnabled", "question_enabled"),
+                    "permission": ("permissionEnabled", "permission_enabled"),
+                    "turn": ("turnNotifyEnabled", "turn_notify_enabled")}.get(kind)
+            if not keys:
                 return True
             try:
                 with open(SETTINGS_PATH) as f:
                     parsed = json.load(f)
                 values = (parsed or {}).get("values", {})
-                if key not in values:
-                    return True
-                return values[key] is not False
+                for key in keys:
+                    if key in values:
+                        return values[key] is not False
+                return True
             except Exception:
                 return True
 

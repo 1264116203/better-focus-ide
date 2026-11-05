@@ -72,15 +72,19 @@ enum PluginTemplate {
         const POLL_MS = 250;
 
         function alertsEnabled(kind) {
-          const key = kind === 'question' ? 'question_enabled'
-            : (kind === 'permission' ? 'permission_enabled'
-              : (kind === 'turn' ? 'turn_notify_enabled' : null));
-          if (!key) return true;
+          // 设置文件里 `values` 的键是驼峰（Settings 的 @Published 名），
+          // 旧版 Python 实现用的是下划线键。两种都认，驼峰优先。
+          const keys = kind === 'question' ? ['questionEnabled', 'question_enabled']
+            : (kind === 'permission' ? ['permissionEnabled', 'permission_enabled']
+              : (kind === 'turn' ? ['turnNotifyEnabled', 'turn_notify_enabled'] : null));
+          if (!keys) return true;
           try {
             const parsed = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
             const values = (parsed && parsed.values) || {};
-            if (!(key in values)) return true;
-            return values[key] !== false;
+            for (const key of keys) {
+              if (key in values) return values[key] !== false;
+            }
+            return true;
           } catch { return true; }
         }
 

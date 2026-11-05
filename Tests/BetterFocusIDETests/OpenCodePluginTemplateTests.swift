@@ -61,6 +61,30 @@ final class OpenCodePluginTemplateTests: XCTestCase {
         XCTAssertTrue(body.contains("d.info"), "info 回退路径保留")
     }
 
+    // MARK: - 提醒开关键名
+
+    /// 测试：提醒开关必须读设置里的驼峰键（`Settings` 的 @Published 名）。
+    ///
+    /// 旧模板只读 `turn_notify_enabled`，而 settings.json 的 `values` 里是
+    /// `turnNotifyEnabled` —— 键永远找不到，`alertsEnabled` 恒走"默认开启"分支，
+    /// 于是应用内的「回复完成通知」等开关关掉也不生效。
+    func testAlertToggleReadsCamelCaseKeys() {
+        XCTAssertTrue(body.contains("turnNotifyEnabled"), "必须读 turnNotifyEnabled")
+        XCTAssertTrue(body.contains("questionEnabled"), "必须读 questionEnabled")
+        XCTAssertTrue(body.contains("permissionEnabled"), "必须读 permissionEnabled")
+    }
+
+    /// 测试：保留下划线键作为兼容回退（旧版 Python 实现的命名）。
+    func testAlertToggleKeepsSnakeCaseFallback() {
+        XCTAssertTrue(body.contains("turn_notify_enabled"), "下划线键作为回退保留")
+    }
+
+    /// 测试：开关判断必须遍历候选键，而不是只看单个键。
+    func testAlertToggleIteratesCandidateKeys() {
+        XCTAssertTrue(body.contains("for (const key of keys)"),
+                      "驼峰优先、下划线回退，需要遍历候选键")
+    }
+
     // MARK: - 安装完整性
 
     /// 测试：安装态正文不含任何占位符（全部替换）。
