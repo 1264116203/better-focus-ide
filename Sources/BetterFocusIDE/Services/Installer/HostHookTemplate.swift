@@ -149,13 +149,14 @@ enum HostHookTemplate {
             return (False, "", -1)
 
 
-        def claim(session_id, payload, kind):
+        def claim(session_id, payload, kind, signature=""):
             # 同一个事件可能被两套配置同时注册：Trae 会一并读取 ~/.claude 的
             # hooks，于是同一个 AskUserQuestion 会被两条脚本各处理一次，弹出
             # 两张一模一样的卡片。用一个短命占位文件做互斥——先到先得，
             # 后到的安静退出，把决定权留给先到的那条。
             key = safe_id("%s_%s_%s" % (session_id, kind,
-                                        payload.get("tool_use_id")
+                                        signature
+                                        or payload.get("tool_use_id")
                                         or payload.get("toolUseId")
                                         or payload.get("request_id")
                                         or payload.get("tool_name")))
@@ -169,6 +170,20 @@ enum HostHookTemplate {
                 return True
             except Exception:
                 return True
+
+
+        def looks_like_question(payload, tool_name):
+            # 工具名各家写法不一（AskUserQuestion / ask_user_question / question /
+            # ask_followup_question），有的宿主只给 tool_input.questions 不给名字
+            # （Qoder 的 PermissionRequest 里 tool_name 是权限种类 "permission"）。
+            folded = str(tool_name or "").strip().lower()
+            if folded in ("askuserquestion", "ask_user_question",
+                          "ask_followup_question", "question"):
+                return True
+            if "askuserquestion" in folded:
+                return True
+            tool_input = payload.get("tool_input")
+            return isinstance(tool_input, dict) and bool(tool_input.get("questions"))
 
 
         def normalise(tool_input):
@@ -352,15 +367,31 @@ enum HostHookTemplate {
             send(msg)
 
 
+        def host_decides(hook_event):
+            # PermissionRequest 是我们和宿主抢「谁先弹」的那条通道：平台正等我们
+            # 的答复，`ask` = 把它自己的弹窗放出来。PreToolUse 平台不等答复，
+            # 只认 allow/deny，那里用 allow 退场（等于不干预）。
+            return "ask" if hook_event == "PermissionRequest" else "allow"
+
+
         def run_question(session_id, payload, questions, hook_event):
-            if not claim(session_id, payload, "question"):
+            # 同一个提问会从两条通道各来一次（PermissionRequest 与 PreToolUse），
+            # 载荷里的 tool_use_id 不保证两边都有，所以按**问题内容**去重：
+            # 先到的那条占位并开卡，后到的安静退出，绝不让同一道题问两遍。
+            signature = "q-" + "_".join(q["question"][:40] for q in questions)[:120]
+            if not claim(session_id, payload, "question", signature):
                 return
             request_id = safe_id(payload.get("request_id") or ("q" + str(int(time.time()))))
             msg = base_event("question_requested", session_id, payload)
             msg["request_id"] = request_id
-            msg["payload"] = {"questions": questions, "request_id": request_id}
+            msg["payload"] = {"questions": questions, "request_id": request_id,
+                              # 哪条通道送来的（PermissionRequest / PreToolUse / …）。
+                              # 「岛先出现」能不能成立全看这个：PermissionRequest 上
+                              # 平台正等着我们的答复，宿主还没画自己的面板。
+                              "channel": hook_event}
             if not send(msg):
-                emit("allow", "BetterFocusIDE is not running; ask in the host dialog.", hook_event)
+                emit(host_decides(hook_event),
+                     "BetterFocusIDE is not running; ask in the host dialog.", hook_event)
                 return
             since = time.time()
             deadline = since + QUESTION_TIMEOUT
@@ -390,7 +421,10 @@ enum HostHookTemplate {
             timeout_msg["payload"] = {"question_id": questions[0]["id"] if questions else "q1",
                                       "request_id": request_id}
             send(timeout_msg)
-            emit("deny", "The person left the island question unanswered. Continue without it.",
+            # 没人回答：交回宿主自己的对话框，而不是 deny。deny 等于替人答了
+            # 「拒绝回答」，工具会以失败收场；`ask` 才是「平台你接着问」。
+            emit(host_decides(hook_event),
+                 "The person left the island question unanswered; ask in the host dialog.",
                  hook_event)
 
 
@@ -476,47 +510,47 @@ enum HostHookTemplate {
                 emit_session_ended(session_id, payload)
                 return
 
-            # Permission surfaces. Notification is the documented, observational
-            # entry point; PermissionRequest (newer 27+ event family) carries the
-            # tool payload. Both are observe-only, and the island-side
-            # NoticeController debounces the duplicate banner.
+            # 提问先于一切权限判定分发。
+            #
+            # 两条通道的语义完全不同（实测结论，参考 dynamic-Island-python-validate）：
+            # - PermissionRequest：平台**等**我们的答复。等的这段时间里，宿主还没
+            #   画出它自己的问卷——这就是「岛先出现」的窗口：岛开卡、作答、回
+            #   deny + reason，答案直接灌给工具，宿主那份面板根本没机会出现。
+            # - PreToolUse：fire-and-forget，平台不等答复。只用来兜住不发
+            #   PermissionRequest 的旧入口，谁先到谁占位（见 run_question 去重）。
+            #
+            # 提问也不是权限：以前把它挂在下面的权限分支里，等于拿「权限提醒开关」
+            # 和「自动执行档」给它当门——auto 档在那一层直接 return，岛连事件都收
+            # 不到，宿主顺手弹出自己的问卷，看起来就是「IDE 先弹」。
+            tool_name = str(payload.get("tool_name") or "")
+            if looks_like_question(payload, tool_name):
+                if not alerts_enabled("question") or not os.path.exists(SOCKET_PATH):
+                    emit(host_decides(event),
+                         "BetterFocusIDE question cards are off; ask in the host dialog.",
+                         event or "PreToolUse")
+                    return
+                questions = normalise(payload.get("tool_input") or {})
+                if questions:
+                    run_question(session_id, payload, questions, event or "PreToolUse")
+                else:
+                    emit(host_decides(event), "Nothing to ask; continue.",
+                         event or "PreToolUse")
+                return
+
+            # 权限提醒：Notification 是文档化的观测入口，PermissionRequest 是真正
+            # 会等人的那条。两边都只递一条提醒、不替人拍板（岛侧 NoticeController
+            # 负责去掉重复横幅）。
             if event in ("Notification", "PermissionRequest"):
                 kind = str(payload.get("notification_type") or "")
                 if event == "Notification" and kind and kind != "permission_prompt":
                     return
                 if mode in AUTO_MODES or not alerts_enabled("permission") or not os.path.exists(SOCKET_PATH):
                     return
-                tool_name = str(payload.get("tool_name") or "")
-                if "AskUserQuestion" in tool_name:
-                    # Some builds route the question tool through PermissionRequest
-                    # rather than PreToolUse. It is blocking, so answers can be
-                    # fed back to the agent via a deny reason.
-                    if not alerts_enabled("question"):
-                        emit("allow", "BetterFocusIDE question cards are off; ask in the host dialog.",
-                             event)
-                        return
-                    questions = normalise(payload.get("tool_input") or {})
-                    if questions:
-                        run_question(session_id, payload, questions, event)
-                    else:
-                        emit("allow", "Nothing to ask; continue.", event)
-                    return
                 run_permission(session_id, payload)
                 return
 
-            if event == "PreToolUse":
-                tool_name = str(payload.get("tool_name") or "")
-                if "AskUserQuestion" in tool_name:
-                    if not alerts_enabled("question") or not os.path.exists(SOCKET_PATH):
-                        emit("allow", "BetterFocusIDE question cards are off; ask in the host dialog.",
-                             "PreToolUse")
-                        return
-                    questions = normalise(payload.get("tool_input") or {})
-                    if questions:
-                        run_question(session_id, payload, questions, "PreToolUse")
-                    else:
-                        emit("allow", "Nothing to ask; continue.", "PreToolUse")
-                return
+            # PreToolUse 上的其余工具：静默退出。平台不等这个事件的答复，
+            # 在这里提醒只会「闪一下什么都没发生」。
 
 
         if __name__ == "__main__":

@@ -46,6 +46,8 @@ final class QuestionController: ObservableObject {
             let questions = AgentQuestionPrompt.parseQuestions(from: message.payload)
             guard !questions.isEmpty else { return }
             let requestID = message.payload?["request_id"]?.stringValue ?? ""
+            let channel = message.payload?["channel"]?.stringValue ?? "-"
+            Log.info("question: 收到提问 channel=\(channel) session=\(message.sessionID)", topic: "question")
             let provider = message.resolvedProvider
             let host = HostInfo(from: message.host,
                                 cwd: message.cwd)
