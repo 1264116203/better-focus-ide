@@ -258,6 +258,7 @@ struct NotchHistoryView_Previews: PreviewProvider {
         controller.remember(HistoryEntry(
             title: "要把这次改动部署到哪个环境？",
             body: "预发环境；产品经理",
+            sessionID: "preview-question",
             state: "已回答",
             source: "Qoder",
             project: "",
@@ -269,6 +270,7 @@ struct NotchHistoryView_Previews: PreviewProvider {
         controller.remember(HistoryEntry(
             title: "终端命令",
             body: "rm -rf node_modules && npm install",
+            sessionID: "preview-shell",
             state: "已提醒",
             source: "Qoder",
             project: "",
@@ -277,10 +279,12 @@ struct NotchHistoryView_Previews: PreviewProvider {
             tintRGB: (red: 0.55, green: 0.35, blue: 0.95),
             timestamp: Date().addingTimeInterval(-60)
         ))
+        // 同会话的第二次通知：预览里应替换上一条，而不是各占一行。
         controller.remember(HistoryEntry(
             title: "终端命令",
-            body: "rm -rf node_modules && npm install",
-            state: "已提醒",
+            body: "npm run build",
+            sessionID: "preview-shell",
+            state: "回复完成",
             source: "Qoder",
             project: "",
             provider: "qoder",

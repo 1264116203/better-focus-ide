@@ -7,10 +7,14 @@ import Combine
 /// 保留最近若干条通知（提问、权限、轮次完成），
 /// 让用户点击空闲灵动岛时能回顾"哪些应用找过自己"。
 ///
+/// **按会话归并**：同一个会话每回复一轮都会产生一条通知（标题相同、用户消息不同），
+/// 列表里逐条铺开会让一屏五条全被同一会话占满。因此以 `provider + sessionID`
+/// 为键去重，每个会话只保留最新的一条——`limit` 计的是会话数，不是通知数。
+///
 /// 持久化到 `~/Library/Application Support/BetterFocusIDE/history.json`，
 /// 启动时加载，每次变更后原子写盘。
 final class HistoryController: ObservableObject {
-    /// 最多保留的条目数。
+    /// 最多保留的条目数（会话数）。
     static let limit = 5
 
     @Published private(set) var entries: [HistoryEntry] = []
@@ -34,8 +38,9 @@ final class HistoryController: ObservableObject {
             entries = []
             return
         }
-        // 只保留最近 limit 条（文件可能包含旧版本的更多条目）。
-        entries = Array(stored.prefix(Self.limit))
+        // 旧版本可能把同一会话的多条通知都写进了文件，先归并再截断，
+        // 否则一个新会话的重复条目会把别的会话挤掉。
+        entries = Array(Self.grouped(stored).prefix(Self.limit))
     }
 
     /// 原子写盘；失败时静默忽略（历史记录非关键数据）。
@@ -49,13 +54,45 @@ final class HistoryController: ObservableObject {
 
     // MARK: - 公开接口
 
-    /// 记录一条新通知：新条目插到最前，超出 `limit` 时裁掉最旧的。
+    /// 记录一条新通知：新条目插到最前，同一会话的旧条目被它取代。
+    /// 超出 `limit`（会话数）时裁掉最旧的会话。
     func remember(_ entry: HistoryEntry) {
-        entries.insert(entry, at: 0)
-        if entries.count > Self.limit {
-            entries.removeLast(entries.count - Self.limit)
-        }
+        entries = Self.upserting(entry, into: entries)
         save()
+    }
+
+    /// 把一条通知并入列表：同会话的旧条目被摘掉，新条目插到队首，
+    /// 再按 `limit` 截断。纯函数便于测试（不触碰磁盘）。
+    static func upserting(_ entry: HistoryEntry, into list: [HistoryEntry]) -> [HistoryEntry] {
+        // 同会话只留最新的一条：先摘掉旧条目，新条目再插到队首。
+        // 这样"用户消息不同"的多轮通知不会在列表里各占一行。
+        let sessionKey = entry.sessionKey
+        let heuristicKey = entry.heuristicKey
+        var next = list.filter { existing in
+            if let sessionKey, existing.sessionKey == sessionKey { return false }
+            // 升级前遗留的行没有会话号，只能靠近似身份认亲——否则新一轮通知只是
+            // 换了个新行，旧行还赖在面板上，看起来仍像重复。
+            if existing.sessionKey == nil, let heuristicKey,
+               existing.heuristicKey == heuristicKey { return false }
+            return true
+        }
+        next.insert(entry, at: 0)
+        if next.count > limit {
+            next.removeLast(next.count - limit)
+        }
+        return next
+    }
+
+    /// 按会话归并（保持原有先后顺序，同会话只保留位置最靠前的最新条目）。
+    ///
+    /// 分组键优先用真实会话号，旧数据退化为「产品 + 来源 + 标题 + 项目」，
+    /// 两者都没有时（标题为空）按独立条目保留。
+    static func grouped(_ list: [HistoryEntry]) -> [HistoryEntry] {
+        var seen = Set<String>()
+        return list.filter { entry in
+            guard let key = entry.groupKey else { return true }
+            return seen.insert(key).inserted
+        }
     }
 
     /// 清空全部历史（同时删除文件）。
@@ -81,6 +118,7 @@ final class HistoryController: ObservableObject {
             title: prompt.question.header,
             body: prompt.question.question,
             kind: .question,
+            sessionID: prompt.sessionID,
             state: state,
             source: source,
             project: "",
@@ -98,6 +136,7 @@ final class HistoryController: ObservableObject {
             title: request.title,
             body: request.detail,
             kind: .permission,
+            sessionID: request.sessionID,
             state: state,
             source: source,
             project: "",
@@ -125,6 +164,7 @@ final class HistoryController: ObservableObject {
             // 兜底文案「点击跳转回 X」不含实质内容，历史行留空更清爽。
             body: notice.bodyIsFallback ? "" : notice.body,
             kind: notice.kind,
+            sessionID: notice.sessionID,
             state: state,
             source: source,
             project: notice.project,
