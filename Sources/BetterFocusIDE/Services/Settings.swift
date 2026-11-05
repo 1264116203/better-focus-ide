@@ -53,9 +53,9 @@ final class Settings: ObservableObject {
     /// （卡片:刘海 = 1.5:0.618，机型自适应），此时 notifyWidth 手动值不生效；
     /// 关闭后用手动值。无刘海屏恒用手动值。
     @Published var cardFollowsNotch = true
-    @Published var notifyHeight: Double = 74
+    @Published var notifyHeight: Double = 106
     /// 刘海屏下卡片内容到摄像头区域的额外间距（pt），可为负值使内容更贴近刘海
-    @Published var notchTopPadding: Double = 4
+    @Published var notchTopPadding: Double = -3
     /// 气泡水平偏移（pt）：正值向右，负值向左，0 表示居中。用于将气泡移到屏幕右上角
     @Published var bubbleHorizontalOffset: Double = 0
     /// 卡片水平偏移（pt）：正值向右，负值向左，0 表示居中。展开态卡片通常保持居中
@@ -64,7 +64,7 @@ final class Settings: ObservableObject {
     // MARK: - 外观 (appearance)；颜色以 "r,g,b" 字符串存储
     @Published var backgroundColor = "0.05,0.05,0.07"
     @Published var backgroundAlpha: Double = 0.96
-    @Published var accentColor = "0.29,0.62,1.0"
+    @Published var accentColor = "0.5679,0.03151,1"
     @Published var qoderTint = "0.58,0.45,0.82"
     @Published var opencodeTint = "0.06,0.73,0.51"
     @Published var cursorTint = "0.00,0.55,0.75"
@@ -72,7 +72,7 @@ final class Settings: ObservableObject {
     @Published var radiusExpanded: Double = 22
     @Published var radiusBubble: Double = 13
     /// 呼吸灯辉光范围（pt）：值越大辉光扩散越远
-    @Published var glowRadius: Double = 6
+    @Published var glowRadius: Double = 10
     /// 呼吸灯幅度（0…1）：辉光不透明度在 `1-幅度 … 1` 之间往返；
     /// 0 = 恒亮不呼吸，值越大明暗差越明显。
     @Published var glowBreathAmplitude: Double = 0.65
@@ -137,7 +137,7 @@ final class Settings: ObservableObject {
     // MARK: - 派生颜色
 
     var backgroundRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(backgroundColor, fallback: (0.05, 0.05, 0.07)) }
-    var accentRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(accentColor, fallback: (0.29, 0.62, 1.0)) }
+    var accentRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(accentColor, fallback: (0.5679, 0.03151, 1.0)) }
     var qoderTintRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(qoderTint, fallback: (0.58, 0.45, 0.82)) }
     var opencodeTintRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(opencodeTint, fallback: (0.06, 0.73, 0.51)) }
     var cursorTintRGB: (r: Double, g: Double, b: Double) { Self.parseRGB(cursorTint, fallback: (0.00, 0.55, 0.75)) }
@@ -349,12 +349,12 @@ final class Settings: ObservableObject {
         optionFont = 12; descFont = 10.5; optionRowMin = 30
         bubbleWidth = 44; bubbleHeight = 26; bubbleFollowsNotch = true
         bubbleWidthPadding = 0; bubbleHeightPadding = 0
-        notifyWidth = 380; cardFollowsNotch = true; notifyHeight = 100; notchTopPadding = 4
+        notifyWidth = 380; cardFollowsNotch = true; notifyHeight = 106; notchTopPadding = -3
         bubbleHorizontalOffset = 0; cardHorizontalOffset = 0
         backgroundColor = "0.05,0.05,0.07"; backgroundAlpha = 0.96
-        accentColor = "0.29,0.62,1.0"; qoderTint = "0.58,0.45,0.82"; opencodeTint = "0.06,0.73,0.51"
+        accentColor = "0.5679,0.03151,1"; qoderTint = "0.58,0.45,0.82"; opencodeTint = "0.06,0.73,0.51"
         cursorTint = "0.00,0.55,0.75"; workbuddyTint = "0.85,0.55,0.20"
-        radiusExpanded = 22; radiusBubble = 13; glowRadius = 6
+        radiusExpanded = 22; radiusBubble = 13; glowRadius = 10
         glowBreathAmplitude = 0.65; glowBreathPeriod = 2.4
         motionGrowBounce = 0.25; reduceMotion = "system"; animationSpeed = 1.0; animationFps = 0
         hoverExpandDelay = 0.18; hoverCollapseDelay = 0.35

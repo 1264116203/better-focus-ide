@@ -123,9 +123,11 @@ enum SettingCatalog {
     ]
 
     /// 每个分组的 SF Symbol 图标名。
+    /// 末尾的「调试」不是设置分组（见 `SettingsView.debugPage`），仅在此登记图标。
     static let groupSymbols: [String: String] = [
         "提醒": "bell", "尺寸": "ruler", "外观": "paintpalette", "动画": "sparkles",
         "声音与触感": "speaker.wave.2", "行为": "hand.tap", "超时与排队": "clock",
+        "调试": "ladybug",
     ]
 
     /// 所有设置项的定义列表（声明式；面板据此渲染，不硬编码 UI 行）。
@@ -167,7 +169,7 @@ enum SettingCatalog {
         SettingDefinition(key: "notifyHeight", label: "卡片高度", kind: .slider, group: "尺寸",
             min: 56, max: 180, step: 2, unit: "pt", digits: 0,
             note: "通知横幅与历史面板的高度",
-            defaultValue: .double(74), get: getD(\.notifyHeight), set: setD(\.notifyHeight)),
+            defaultValue: .double(106), get: getD(\.notifyHeight), set: setD(\.notifyHeight)),
         SettingDefinition(key: "cardInset", label: "卡片内边距", kind: .slider, group: "尺寸",
             min: 8, max: 40, step: 1, unit: "pt", digits: 0,
             note: "卡片内容到边缘的水平距离",
@@ -175,7 +177,7 @@ enum SettingCatalog {
         SettingDefinition(key: "notchTopPadding", label: "刘海顶部间距", kind: .slider, group: "尺寸",
             min: -20, max: 20, step: 1, unit: "pt", digits: 0,
             note: "刘海屏下卡片内容到摄像头区域的额外间距，负值 = 侵入刘海区域",
-            defaultValue: .double(4), get: getD(\.notchTopPadding), set: setD(\.notchTopPadding)),
+            defaultValue: .double(-3), get: getD(\.notchTopPadding), set: setD(\.notchTopPadding)),
         SettingDefinition(key: "bubbleHorizontalOffset", label: "气泡水平偏移", kind: .slider, group: "尺寸",
             min: -300, max: 300, step: 5, unit: "pt", digits: 0,
             note: "收起态气泡的水平位置，正值向右移动，负值向左移动，0 = 居中。推荐 180 使气泡位于右上角",
@@ -212,7 +214,7 @@ enum SettingCatalog {
             defaultValue: .double(0.96), get: getD(\.backgroundAlpha), set: setD(\.backgroundAlpha)),
         SettingDefinition(key: "accentColor", label: "主题色", kind: .color, group: "外观",
             note: "空闲脉冲圆点、装饰色",
-            defaultValue: .rgb(0.29, 0.62, 1.0), get: getRGB(\.accentColor), set: setRGB(\.accentColor)),
+            defaultValue: .rgb(0.5679, 0.03151, 1.0), get: getRGB(\.accentColor), set: setRGB(\.accentColor)),
         SettingDefinition(key: "qoderTint", label: "Qoder 主题色", kind: .color, group: "外观",
             defaultValue: .rgb(0.58, 0.45, 0.82), get: getRGB(\.qoderTint), set: setRGB(\.qoderTint)),
         SettingDefinition(key: "opencodeTint", label: "OpenCode 主题色", kind: .color, group: "外观",
@@ -231,7 +233,7 @@ enum SettingCatalog {
             min: 3, max: 40, step: 1, unit: "pt", digits: 0,
             note: "气泡外缘辉光的扩散范围，值越大光晕越宽越淡",
             keywords: ["呼吸灯", "辉光", "范围", "glow", "radius", "光晕"],
-            defaultValue: .double(6), get: getD(\.glowRadius), set: setD(\.glowRadius)),
+            defaultValue: .double(10), get: getD(\.glowRadius), set: setD(\.glowRadius)),
         SettingDefinition(key: "glowBreathAmplitude", label: "呼吸灯幅度", kind: .slider, group: "外观",
             min: 0, max: 100, step: 5, unit: "%", digits: 0,
             note: "呼吸时辉光最暗降到多暗：0% = 恒亮不呼吸，越大明暗差越明显",
