@@ -106,6 +106,21 @@ final class PermissionController: ObservableObject {
         }
     }
 
+    /// 清空当前权限请求与排队项（**不写应答文件**，仅用于调试面板）。
+    ///
+    /// - Parameter notify: `true` 走正常收起流程（灵动岛随之收拢）；`false` 只清状态，
+    ///   供「先清同类再注入」使用——避免同一帧内先播收起动画再播展开动画。
+    func flushAll(notify: Bool = true) {
+        queue.removeAll()
+        guard request != nil else { return }
+        if notify {
+            dismiss()
+        } else {
+            request = nil
+            choice = nil
+        }
+    }
+
     /// 收起当前请求，随后提升队列里的下一个。
     private func dismiss() {
         request = nil

@@ -21,6 +21,11 @@ struct SettingsView: View {
     @State private var writebackWork: DispatchWorkItem?
     @State private var showResetConfirmation = false
 
+    /// 允许从指定分类开始展示（预览与调试页截图用；默认仍是第一个分类）。
+    init(initialGroup: String = SettingCatalog.groups[0]) {
+        _selectedGroup = State(initialValue: initialGroup)
+    }
+
     // MARK: - 布局常量（对齐 Python settings_window.py）
 
     private enum Metric {
@@ -56,10 +61,17 @@ struct SettingsView: View {
         return f
     }()
 
+    /// 侧边栏末尾的「调试」页：不参与设置项搜索，也不是持久化配置，
+    /// 因此不进 `SettingCatalog.groups`（那个数组是纯设置分组）。
+    private static let debugPage = "调试"
+
     /// 去除首尾空白后的搜索词。
     private var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespaces)
     }
+
+    /// 当前是否停在调试页。
+    private var showingDebugPage: Bool { selectedGroup == Self.debugPage }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -70,8 +82,11 @@ struct SettingsView: View {
                 Divider()
                 content
             }
-            Divider()
-            bottomBar.frame(height: Metric.barHeight)
+            // 调试页没有"设置项"，也就没有恢复默认与写回状态可言，底部栏整体隐藏。
+            if !showingDebugPage {
+                Divider()
+                bottomBar.frame(height: Metric.barHeight)
+            }
         }
         .frame(minWidth: 620, idealWidth: 760, minHeight: 420, idealHeight: 620)
         .onDisappear { flushOnClose() }
@@ -123,7 +138,7 @@ struct SettingsView: View {
 
     // MARK: - 侧边栏
 
-    /// 左侧分类导航栏：侧边材质背板 + 各分类行。
+    /// 左侧分类导航栏：侧边材质背板 + 各分类行 + 末尾的调试入口。
     private var sidebar: some View {
         ZStack(alignment: .topLeading) {
             SidebarMaterial()
@@ -131,6 +146,9 @@ struct SettingsView: View {
                 ForEach(SettingCatalog.groups, id: \.self) { group in
                     sidebarRow(group)
                 }
+                Divider()
+                    .padding(.vertical, 4)
+                sidebarRow(Self.debugPage)
                 Spacer(minLength: 0)
             }
             .padding(8)
@@ -189,7 +207,26 @@ struct SettingsView: View {
     /// 右侧详情区：空态文案，或当前分类的分组页面（头部 + 提示 + 行序列）。
     private var content: some View {
         Group {
-            if showEmpty {
+            if showingDebugPage {
+                // 调试页自成一个视图：它不是"若干设置行"，而是可点的触发按钮。
+                // 标题与提示另给一层水平内边距，与下方调试面板的内边距对齐。
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: Metric.rowGap) {
+                        HStack {
+                            Text(Self.debugPage)
+                                .font(.system(size: 13, weight: .semibold))
+                            Spacer()
+                        }
+                        Text("手动触发各家 IDE 的提问、权限与完成通知，不必回 IDE 里跑一轮。")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, Metric.margin)
+                    .padding(.top, Metric.margin)
+                    DebugPanelView()
+                }
+            } else if showEmpty {
                 Text("没有匹配的设置，换个词试试")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)

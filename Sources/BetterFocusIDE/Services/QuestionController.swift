@@ -125,6 +125,24 @@ final class QuestionController: ObservableObject {
         }
     }
 
+    /// 清空当前提问与排队项（**不写应答文件**，仅用于调试面板）。
+    ///
+    /// - Parameter notify: `true` 走正常收起流程（灵动岛随之收拢）；`false` 只清状态，
+    ///   供「先清同类再注入」使用——避免同一帧内先播收起动画再播展开动画。
+    func flushAll(notify: Bool = true) {
+        queue.removeAll()
+        guard prompt != nil else { return }
+        if notify {
+            dismiss()
+        } else {
+            prompt = nil
+            choice = nil
+            picks = [:]
+            texts = [:]
+            writingOwn = []
+        }
+    }
+
     /// 收起当前卡片并清空其临时状态，随后提升队列里的下一个。
     private func dismiss() {
         prompt = nil
