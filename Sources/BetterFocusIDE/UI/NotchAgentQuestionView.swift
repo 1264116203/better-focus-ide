@@ -58,11 +58,11 @@ struct NotchAgentQuestionView: View {
                         .foregroundStyle(.white.opacity(0.92))
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                ScrollView {
-                    VStack(spacing: 6) {
-                        optionsView(question: question)
-                        otherRow(question: question)
-                    }
+                // 选项列表直接展开（不再套 ScrollView），所有选项一次性可见；
+                // 卡片高度由 NotchService.questionCardHeight() 按内容自适应。
+                VStack(spacing: 6) {
+                    optionsView(question: question)
+                    otherRow(question: question)
                 }
                 sendButton(prompt: prompt)
             }
@@ -174,52 +174,54 @@ struct NotchAgentQuestionView: View {
 
     // MARK: - "其他…"行
 
-    /// "其他…"行：点击进入自定义作答，展开一个输入框；焦点由 focusOtherTick 驱动。
+    /// "其他…"行：点击后**同一行内**直接变为输入框（不再下方另起一行），
+    /// 焦点由 focusOtherTick 驱动。
     @ViewBuilder
     private func otherRow(question: AgentQuestion) -> some View {
         let picked = isOwnAnswer(question: question)
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                controller.beginOwnAnswer(for: question.id)
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(picked ? AnyShapeStyle(prompt?.provider.tint ?? .blue)
-                                         : AnyShapeStyle(.white.opacity(0.4)))
-                        .frame(width: 16)
-                    Text("其他…")
-                        .font(.system(size: optionFontSize, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.95))
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 7)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(picked ? (prompt?.provider.tint ?? .blue).opacity(0.22) : .white.opacity(0.06),
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(controller.choice != nil)
+        let writing = controller.writingOwn.contains(question.id)
 
-            if controller.writingOwn.contains(question.id) {
+        HStack(spacing: 8) {
+            Image(systemName: "square.and.pencil")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(picked ? AnyShapeStyle(prompt?.provider.tint ?? .blue)
+                                 : AnyShapeStyle(.white.opacity(0.4)))
+                .frame(width: 16)
+
+            if writing {
+                // 激活后同行走输入框：直接在此输入，无需再点一下。
                 TextField("输入自定义回答…",
                           text: Binding(
                             get: { controller.texts[question.id] ?? "" },
                             set: { controller.setText($0, for: question.id) }))
                     .textFieldStyle(.plain)
                     .font(.system(size: optionFontSize))
+                    .foregroundStyle(.white.opacity(0.95))
                     .focused($otherFocused)
                     .onSubmit { controller.submit() }
                     .disabled(controller.choice != nil)
-                    .padding(.horizontal, 9)
-                    .frame(height: 26)
-                    .background(.white.opacity(0.09),
-                                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .onChange(of: controller.focusOtherTick) {
                         otherFocused = true
                     }
+            } else {
+                Text("其他…")
+                    .font(.system(size: optionFontSize, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.95))
             }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 30)
+        .background(picked ? (prompt?.provider.tint ?? .blue).opacity(0.22) : .white.opacity(0.06),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onTapGesture {
+            // 点击整行即进入自定义作答，并请求焦点移入同行的输入框。
+            guard !writing else { return }
+            controller.requestFocusOther(for: question.id)
         }
     }
 

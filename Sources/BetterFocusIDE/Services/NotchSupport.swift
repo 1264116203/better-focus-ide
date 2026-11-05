@@ -65,6 +65,10 @@ enum NotchLayout {
     static let cardGap: CGFloat = 8
     static var questionBodyFont: CGFloat { CGFloat(Settings.shared.bodyFont) }
     static var questionOptionRowMin: CGFloat { CGFloat(Settings.shared.optionRowMin) }
+    /// 选项标签字号（与 NotchAgentQuestionView 硬编码的 optionFontSize 对齐）。
+    static let optionFont: CGFloat = 12
+    /// 选项描述字号（与 NotchAgentQuestionView 硬编码的 descFontSize 对齐）。
+    static let descFont: CGFloat = 10.5
     static let questionOtherRowHeight: CGFloat = 30
     static let questionSendHeight: CGFloat = 30
     static let questionMaxBodyLines: Int = 4
