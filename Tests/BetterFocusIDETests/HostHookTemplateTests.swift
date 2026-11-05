@@ -96,6 +96,29 @@ final class HostHookTemplateTests: XCTestCase {
         XCTAssertTrue(body.contains("if HOST_BUNDLE or HOST_NAME:"), "GUI 宿主又开始爬进程祖先链了")
     }
 
+    // MARK: - 提问通道
+
+    /// 提问必须**先于**权限门分发，而且不看事件族。
+    ///
+    /// 这是「岛先出现」的全部技术含量：`PermissionRequest` 上平台正等我们的答复，
+    /// 此时宿主还没画出自己那份问卷；而 `PreToolUse` 是 fire-and-forget，平台不等。
+    /// 一旦把提问塞回权限分支里（旧做法），它就会被「权限提醒开关」和 auto 档的
+    /// `return` 连坐——岛连事件都收不到，宿主顺手弹自己的面板。
+    func testQuestionDispatchPrecedesPermissionGate() throws {
+        let body = HostHookTemplate.body
+        let question = try XCTUnwrap(body.range(of: "if looks_like_question(payload, tool_name):"))
+        let gate = try XCTUnwrap(body.range(of: #"if event in ("Notification", "PermissionRequest"):"#))
+        XCTAssertLessThan(question.lowerBound, gate.lowerBound, "提问分发又被放回权限门之后了")
+
+        // 通道不同，退场的语义也不同：PermissionRequest 交给宿主去问，PreToolUse 不干预。
+        XCTAssertTrue(body.contains("def host_decides(hook_event):"))
+        XCTAssertTrue(body.contains(#"return "ask" if hook_event == "PermissionRequest" else "allow""#))
+        // 同一个提问会从两条通道各来一次，去重必须按问题内容，而不是载荷里不一定存在的 id。
+        XCTAssertTrue(body.contains(#""q-" + "_".join"#))
+        // 事件里带上通道标记，日志才看得出是谁先到。
+        XCTAssertTrue(body.contains(#""channel": hook_event"#))
+    }
+
     // MARK: - 注册表
 
     /// Cursor 只注册观测型事件：权限类事件会强制 allow/deny，绝不碰。
