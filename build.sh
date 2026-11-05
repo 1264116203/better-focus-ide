@@ -19,8 +19,10 @@ rm -rf .build/$BUILD_CONFIGURATION/$APP_NAME.app
 rm -rf .build/$BUILD_CONFIGURATION/$EXECUTABLE
 
 # Build with Swift Package Manager
+# --disable-sandbox：本机环境下 SwiftPM 的 sandbox-exec 会报
+# `sandbox_apply: Operation not permitted`，与代码无关，必须关沙箱才能构建。
 echo "▸ Building $APP_NAME..."
-swift build -c $BUILD_CONFIGURATION
+swift build -c $BUILD_CONFIGURATION --disable-sandbox
 
 # Create .app bundle structure
 echo "▸ Assembling .app bundle..."
