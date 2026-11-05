@@ -75,7 +75,13 @@ final class NotchCanvas: NSView {
     let host: NotchHostingView
     private let silhouette = CAShapeLayer()
     private let edge = CAShapeLayer()
-    private let glass = NSVisualEffectView()
+    /// 展开卡片时的磨砂玻璃层。
+    ///
+    /// 只模糊窗口后面的内容，故只在展开卡片时显现，收起的细条保持纯黑融入物理刘海。
+    ///
+    /// 预留门控：未来升级 Xcode 26 / macOS SDK 26 后，可在此层替换为系统原生
+    /// Liquid Glass（`NSGlassEffectView`），见 `makeGlass()` 内注释。
+    private let glass: NSVisualEffectView
     /// 覆在磨砂玻璃上的一层暗色洗色。`.hudWindow` 会模糊窗口后面的内容，而屏幕顶部
     /// 往往是（偏亮的）菜单栏，会把整张卡片冲成浅灰。这层恒定暗化把磨砂拉回深邃、
     /// 含蓄的暗色。收起时玻璃透明，暗层直接落在黑色底上、保持纯黑。
@@ -116,6 +122,29 @@ final class NotchCanvas: NSView {
     override var isOpaque: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    /// 构建磨砂玻璃层。
+    ///
+    /// 保留 `.hudWindow` 作为基础模糊——灵动岛贴屏幕顶边，背景是偏亮的菜单栏 /
+    /// 桌面，需要重磨砂压住，否则整张卡被冲成浅灰。
+    ///
+    /// 预留门控：未来升级 Xcode 26 / macOS SDK 26 后，可在此切换原生 Liquid Glass：
+    /// ```swift
+    /// if #available(macOS 26, *) {
+    ///     let liquid = NSGlassEffectView()
+    ///     liquid.state = .active
+    ///     return liquid
+    /// }
+    /// ```
+    private static func makeGlass() -> NSVisualEffectView {
+        let glass = NSVisualEffectView()
+        glass.material = .hudWindow
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.appearance = NSAppearance(named: .darkAqua)
+        glass.wantsLayer = true
+        return glass
+    }
+
     init(content: AnyView, size: CGSize) {
         contentSize = size
         host = NotchHostingView(rootView: content)
@@ -123,6 +152,8 @@ final class NotchCanvas: NSView {
         host.wantsLayer = true
         host.layer?.masksToBounds = true  // 裁剪溢出 host bounds 的 SwiftUI 内容
         host.autoresizingMask = []
+        // 磨砂玻璃层须在 super.init 前完成初始化（let 属性）。
+        glass = NotchCanvas.makeGlass()
         super.init(frame: CGRect(origin: .zero, size: size))
         autoresizesSubviews = false
         wantsLayer = true
@@ -137,13 +168,7 @@ final class NotchCanvas: NSView {
         body.layer?.mask = silhouette
         addSubview(body)
 
-        // 内容之后的暗色磨砂材质。它模糊窗口后面的东西，故只在展开卡片时才显现；
-        // 收起的细条保持纯黑以融入物理刘海。
-        glass.material = .hudWindow
-        glass.blendingMode = .behindWindow
-        glass.state = .active
-        glass.appearance = NSAppearance(named: .darkAqua)
-        glass.wantsLayer = true
+        // 磨砂玻璃淡入：仅展开卡片时可见（由 updateContrast 按 contentSize 控制 alpha）。
         glass.alphaValue = 0
         body.addSubview(glass, positioned: .below, relativeTo: host)
         body.addSubview(host)
