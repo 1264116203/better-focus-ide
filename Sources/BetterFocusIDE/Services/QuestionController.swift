@@ -49,11 +49,9 @@ final class QuestionController: ObservableObject {
             let provider = message.resolvedProvider
             let host = HostInfo(from: message.host,
                                 cwd: message.cwd)
-            // 宿主自己会画提问面板、而且此刻就在前台 → 让位。
-            //
-            // 这类 IDE（WorkBuddy 等）在模型发起工具的瞬间就把面板渲染出来了，
-            // 不等 PreToolUse 返回；岛上再弹一张卡就是同一道题问两遍，
-            // 而且 IDE 里那次选择会被 hook 的 deny 覆盖掉。
+            // 岛优先：宿主自己会画提问面板，但那是它在 hook 返回前自绘的，
+            // 拦不住；让位的唯一结果是岛上不弹、用户在 IDE 里那次作答被 deny 丢掉。
+            // 所以这里默认一律接管（见 QuestionTakeover.Policy）。
             if !QuestionTakeover.shouldTakeOver(
                 host: host.isEmpty ? nil : host,
                 frontmostBundle: QuestionTakeover.frontmostBundle()) {
