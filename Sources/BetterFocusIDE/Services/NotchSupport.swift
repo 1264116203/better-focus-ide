@@ -70,7 +70,8 @@ enum NotchLayout {
     /// 选项描述字号（与 NotchAgentQuestionView 硬编码的 descFontSize 对齐）。
     static let descFont: CGFloat = 10.5
     static let questionOtherRowHeight: CGFloat = 30
-    static let questionSendHeight: CGFloat = 30
+    /// 发送按钮高度：必须与 NotchAgentQuestionView.sendButton 的 .frame(height:) 一致。
+    static let questionSendHeight: CGFloat = 26
     static let questionMaxBodyLines: Int = 4
     static let permissionButtonHeight: CGFloat = 32
     static let permissionButtonGap: CGFloat = 8

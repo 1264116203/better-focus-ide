@@ -653,56 +653,27 @@ final class NotchService: ObservableObject {
         }
     }
     
-    /// Question card height (mirrors Python QuestionCard.total_height).
+    /// 提问卡片的目标高度（含刘海安全区）。
+    ///
+    /// 内容高度由 `QuestionCardLayout` 这个纯函数算出（与视图结构逐段对齐、可单测），
+    /// 这里只负责注入运行时的度量值并补上 `safeContentTop`。
     private func questionCardHeight() -> CGFloat {
         let q = questionController.prompt
-        let textWidth = NotchLayout.questionCardWidth - NotchLayout.cardInset * 2
-        // Outer .padding(.vertical, 10) = 20; header badge tightly fits 18pt.
-        var height: CGFloat = 20 + 18
-
-        let body = q?.question.question ?? "Agent has a question for you:"
-        // Each body line: fontSize * 1.3 (SwiftUI system font default line height).
-        let bodyLineH = NotchLayout.questionBodyFont * 1.3
-        let bodyLines = ceil(bodyHeight(body, width: textWidth - 36, font: NotchLayout.questionBodyFont)
-                             / bodyLineH)
-        let clampedLines = min(bodyLines, CGFloat(NotchLayout.questionMaxBodyLines))
-        // VStack(spacing: 8) between header and body.
-        height += 8 + clampedLines * bodyLineH
-
-        // 选项行（去掉 ScrollView 后全部展开，逐项精确测量实际高度）：
-        // 每行 = 左侧图标 16 + 间距 8，右侧 label(12pt) + 可选 description(10.5pt)，
-        // 上下 padding 7×2=14；label/desc 均可换行。行间距 VStack(spacing:6)。
-        let optionRowH = NotchLayout.questionOptionRowMin
-        let optionCount = q?.question.options.count ?? 0
-        var optionsH: CGFloat = 0
-        if optionCount > 0 {
-            // 选项文本可用宽度：卡片宽 - 内边距×2 - 图标16 - 图标间距8 - 行内水平padding 9×2
-            let optionTextW = max(40, textWidth - 16 - 8 - 18)
-            for option in q!.question.options {
-                let labelH = textHeight(option.label, width: optionTextW,
-                                        font: NotchLayout.optionFont)
-                let descH = option.description.isEmpty
-                    ? 0
-                    : textHeight(option.description, width: optionTextW,
-                                 font: NotchLayout.descFont)
-                // label + desc 间距 1（VStack(spacing:1)），加行上下 padding 14。
-                let rowH = max(optionRowH, 14 + labelH + (descH > 0 ? 1 + descH : 0))
-                optionsH += rowH
-            }
-            optionsH += CGFloat(max(0, optionCount - 1)) * 6
-        }
-        // Other row：输入框与文字同行（不再另起一行），高度恒为单行 optionRowH。
-        let otherH: CGFloat = optionRowH
-        // VStack(spacing: 8) between body and ScrollView, and inside ScrollView's VStack(spacing: 6)
-        // between options and other row.
-        height += 8 + optionsH + 6 + otherH
-        // VStack(spacing: 8) between ScrollView and send button.
-        height += 8 + NotchLayout.questionSendHeight
-
-        // Floor the content height at card_min_height (0 = fit content exactly).
-        height = max(height, CGFloat(Settings.shared.cardMinHeight))
-        // Add safeContentTop for our window-at-screen-top geometry.
-        return height + geometry.safeContentTop
+        let metrics = QuestionCardLayout.Metrics(
+            cardWidth: NotchLayout.questionCardWidth,
+            cardInset: NotchLayout.cardInset,
+            badgeSize: IDEIconProvider.badgeSize,
+            bodyFont: NotchLayout.questionBodyFont,
+            optionFont: NotchLayout.optionFont,
+            descFont: NotchLayout.descFont,
+            optionRowMin: NotchLayout.questionOptionRowMin,
+            sendHeight: NotchLayout.questionSendHeight,
+            minHeight: CGFloat(Settings.shared.cardMinHeight))
+        let hasProject = !(q?.host?.cwd ?? "").isEmpty
+        return QuestionCardLayout.contentHeight(question: q?.question,
+                                                hasProject: hasProject,
+                                                metrics: metrics)
+            + geometry.safeContentTop
     }
     
     /// Permission card height (mirrors Python PermissionCard.total_height).
@@ -746,27 +717,6 @@ final class NotchService: ObservableObject {
         let charsPerLine = max(1, Int(width / avgCharWidth))
         let lines = max(1, CGFloat(text.count) / CGFloat(charsPerLine))
         return ceil(lines) * lineHeight
-    }
-
-    /// 精确文本高度：按字符类型累计宽度（全角 ≈ 1.0×font，半角 ≈ 0.55×font），
-    /// 逐行折行后乘以行高（font × 1.3）。用于选项 label / description 的精确测量。
-    private func textHeight(_ text: String, width: CGFloat, font: CGFloat) -> CGFloat {
-        guard !text.isEmpty, width > 0 else { return font * 1.3 }
-        let lineHeight = font * 1.3
-        var lineWidth: CGFloat = 0
-        var lines: CGFloat = 1
-        for ch in text {
-            // 全角字符（中文、全角标点等）按约 1.0 倍字号计宽，其余按 0.55 倍。
-            let w: CGFloat = ch.unicodeScalars.allSatisfy({ $0.value >= 0x2E80 || $0.value >= 0x3000 && $0.value <= 0x303F || $0.value >= 0xFF00 })
-                ? font * 1.0 : font * 0.55
-            if lineWidth + w > width {
-                lines += 1
-                lineWidth = w
-            } else {
-                lineWidth += w
-            }
-        }
-        return lines * lineHeight
     }
     
     // MARK: - 待处理总数
