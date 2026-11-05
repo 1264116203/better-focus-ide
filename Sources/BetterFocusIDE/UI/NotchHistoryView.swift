@@ -18,7 +18,7 @@ import SwiftUI
 /// │     问：副文字            来源 · 时间         │
 /// │                                             │
 /// │ [Q] 标题文字              状态               │  ← gap (4pt)
-/// │     你说：副文字          来源 · 时间         │
+/// │     用户：副文字          来源 · 时间         │
 /// └─────────────────────────────────────────────┘
 /// ```
 ///
@@ -168,7 +168,7 @@ struct NotchHistoryView: View {
                             .foregroundStyle(Color(red: 1, green: 1, blue: 1, opacity: 0.92))
                             .lineLimit(1)
 
-                        // 副文字：10pt，淡灰色。前缀按来源类型区分（问 / 详情 / 你说），
+                        // 副文字：10pt，淡灰色。前缀按来源类型区分（问 / 详情 / 用户），
                         // 正文为空或与标题重复时整行不渲染。
                         if !entry.bodyLine.isEmpty {
                             Text(entry.bodyLine)

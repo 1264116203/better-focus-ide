@@ -19,10 +19,10 @@ final class HistoryEntryLabelTests: XCTestCase {
 
     // MARK: - 前缀语义
 
-    /// 轮次完成：body 是用户这一轮的输入 → 「你说：」。
+    /// 轮次完成：body 是用户这一轮的输入 → 「用户：」。
     func testTurnBodyUsesUserPrefix() {
         let e = entry(title: "实现这个 prd", body: "把登录页改成邮箱登录", kind: .turn)
-        XCTAssertEqual(e.bodyLine, "你说：把登录页改成邮箱登录")
+        XCTAssertEqual(e.bodyLine, "用户：把登录页改成邮箱登录")
     }
 
     /// 提问卡片：body 是智能体问用户的正文 → 「问：」。
@@ -59,7 +59,7 @@ final class HistoryEntryLabelTests: XCTestCase {
     func testLaterTurnBodyIsShown() {
         let e = entry(title: "使用 ask question 工具推荐一个方案",
                       body: "nia", kind: .turn)
-        XCTAssertEqual(e.bodyLine, "你说：nia")
+        XCTAssertEqual(e.bodyLine, "用户：nia")
     }
 
     func testEmptyBodyIsHidden() {

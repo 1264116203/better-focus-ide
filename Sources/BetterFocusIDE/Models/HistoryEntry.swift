@@ -22,7 +22,7 @@ enum HistoryKind: String, Codable {
         switch self {
         case .question: return "问："
         case .permission: return "详情："
-        case .turn: return "你说："
+        case .turn: return "用户："
         }
     }
 
