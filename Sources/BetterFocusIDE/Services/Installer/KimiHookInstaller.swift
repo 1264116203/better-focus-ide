@@ -47,12 +47,16 @@ enum KimiHookInstaller {
     }
 
     /// 事件与超时。Kimi 的 `timeout` 上限是 600s，超了会让配置加载失败。
+    ///
+    /// `PostToolUse` 匹配 todo 家族：Kimi 原生的 `SetTodoList` 是整表覆盖，
+    /// 其余（TodoWrite / TaskCreate / TaskUpdate）兼容 Claude 血统的旧入口。
     static var specs: [HookGroupSpec] {
         let wait = min(600, InstallerPaths.hookTimeoutSeconds)
         return [
             HookGroupSpec("PreToolUse", matcher: "AskUserQuestion", timeout: wait),
             HookGroupSpec("PermissionRequest", matcher: "", timeout: 5),
             HookGroupSpec("Notification", matcher: "permission_prompt", timeout: 5),
+            HookGroupSpec("PostToolUse", matcher: InstallerPaths.todoToolMatcher, timeout: 5),
             HookGroupSpec("Stop", matcher: "", timeout: 5),
             HookGroupSpec("SessionEnd", matcher: "", timeout: 5),
         ]

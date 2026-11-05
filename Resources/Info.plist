@@ -11,9 +11,9 @@
 	<key>CFBundleExecutable</key>
 	<string>BetterFocusIDEApp</string>
 	<key>CFBundleIconFile</key>
-	<string>AppIcon</string>
+	<string>AppIcon-NotchCard</string>
 	<key>CFBundleIconName</key>
-	<string>AppIcon</string>
+	<string>AppIcon-NotchCard</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.betterfocus.ide</string>
 	<key>CFBundleInfoDictionaryVersion</key>

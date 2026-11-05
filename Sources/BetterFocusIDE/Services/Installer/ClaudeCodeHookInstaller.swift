@@ -21,12 +21,17 @@ enum ClaudeCodeHookInstaller {
     static let configPath = InstallerPaths.claudeSettingsPath
 
     /// 注册的事件顺序固定，便于自检比对。
+    ///
+    /// `PostToolUse` 匹配 todo 家族工具名：Claude Code 旧版是 `TodoWrite`，
+    /// 新版 V2 换成 `TaskCreate` / `TaskUpdate`（一条任务一次调用，脚本按单条
+    /// UPSERT 转发）。matcher 是 JavaScript 正则，`|` 表示逻辑或。
     static var specs: [HookGroupSpec] {
         [
             HookGroupSpec("PreToolUse", matcher: "AskUserQuestion",
                           timeout: InstallerPaths.hookTimeoutSeconds),
             HookGroupSpec("PermissionRequest", matcher: "", timeout: 5),
             HookGroupSpec("Notification", matcher: "permission_prompt", timeout: 5),
+            HookGroupSpec("PostToolUse", matcher: InstallerPaths.todoToolMatcher, timeout: 5),
             HookGroupSpec("Stop", matcher: "", timeout: 5),
             HookGroupSpec("SessionEnd", matcher: "", timeout: 5),
         ]

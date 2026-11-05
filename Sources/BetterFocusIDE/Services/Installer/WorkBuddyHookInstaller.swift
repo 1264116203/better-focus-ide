@@ -25,10 +25,16 @@ enum WorkBuddyHookInstaller {
     static let settingsPath = InstallerPaths.workbuddySettingsPath
 
     /// 注册的事件与 matcher。`nil` 表示该事件不使用 matcher（Stop / SessionEnd）。
+    ///
+    /// `PostToolUse` 匹配 todo 家族：WorkBuddy 现行工具集是 `TaskCreate` /
+    /// `TaskUpdate`（V2 家族，单条 UPSERT），旧版 `TodoWrite` 整表覆盖也一并
+    /// 兼容——脚本按工具名分流到 todo_item_updated / todo_updated。
     static let specs: [(event: String, matcher: String?, timeout: Int)] = [
         ("PreToolUse", "AskUserQuestion", InstallerPaths.hookTimeoutSeconds),
         ("Notification", "permission_prompt", 5),
         ("PermissionRequest", nil, 5),
+        ("PostToolUse", InstallerPaths.todoToolMatcher, 5),
+        ("UserPromptSubmit", nil, 5),
         ("Stop", nil, 5),
         ("SessionEnd", nil, 5),
     ]

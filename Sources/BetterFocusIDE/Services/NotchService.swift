@@ -143,6 +143,7 @@ final class NotchService: ObservableObject {
             .sink { [weak self] _ in self?.handleSettingsChanged() }
             .store(in: &cancellables)
         startSweepTimer()
+        restartTodoIdleTimer()
     }
     
     // MARK: - 公开方法
@@ -1128,6 +1129,14 @@ final class NotchService: ObservableObject {
             if activeCard == .todo, !todoController.hasTodo { handleCardDismissal() }
         case .turnFinished:
             noticeController.handleTurnFinished(message: message)
+            // 回合结束：清掉本会话的任务进度。正常完成路径靠这里立即清空，
+            // 兜底超时（todoIdleTimeout）只需兜住「手动中断」这种不发事件的场景。
+            todoController.handleSessionEnded(message.sessionID)
+            if activeCard == .todo, !todoController.hasTodo { handleCardDismissal() }
+            // 回合结束同样意味着：阻塞式提问卡（AskUserQuestion）不再有宿主在等答案。
+            // 手动停止模型生成时宿主也发 Stop → turn_finished，此时应把挂在岛上的
+            // 提问卡一并收掉，否则它会一直等一个永远不会来的作答。
+            questionController.handleEvent(.sessionEnded, message: message)
         case .todoUpdated, .todoItemUpdated:
             // 待办不拦截任何请求，也不参与待处理计数：它只是过程可视化。
             let provider = message.resolvedProvider
@@ -1334,6 +1343,7 @@ final class NotchService: ObservableObject {
     private func handleSettingsChanged() {
         updatePendingTotal()
         restartSweepTimerIfNeeded()
+        restartTodoIdleTimer()
         // 设置面板切换「卡片默认固定展示」时以设置为准：清掉进程内的手动覆盖，
         // 否则用户点过一次图钉后，这个开关就永远不起作用了。
         // 其它设置变更仍按共享偏好重解析（手动偏好优先）。
@@ -1395,5 +1405,37 @@ final class NotchService: ObservableObject {
             Settings.shared.agentWaitLimit + 60 + max(0, Settings.shared.sweepGrace))
         questionController.sweepStale(olderThan: deadline)
         permissionController.sweepStale(olderThan: deadline)
+    }
+
+    // MARK: - 任务进度无事件兜底
+
+    /// 任务进度卡片的「无新事件」清扫定时器。
+    ///
+    /// 手动停止 Qoder/Claude 等宿主的 session 时，它们不触发任何 hook 事件
+    /// （无 Stop / SessionEnd / PostToolUseFailure），岛侧收不到清空信号，
+    /// 进度会一直挂在岛上。唯一可靠的兜底是「长时间没新事件就自动收起」。
+    ///
+    /// 周期取 `todoIdleTimeout` 的一半（至少 1s），保证判定滞后不超过 1~2 秒，
+    /// 而不是等到几十秒一次的常规清扫才轮到。
+    private var todoIdleTimer: Timer?
+
+    private func restartTodoIdleTimer() {
+        todoIdleTimer?.invalidate()
+        let timeout = max(3, Settings.shared.todoIdleTimeout)
+        let interval = TimeInterval(max(1, timeout / 2))
+        todoIdleTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.sweepIdleTodo()
+        }
+        if let timer = todoIdleTimer { RunLoop.main.add(timer, forMode: .common) }
+    }
+
+    /// 若任务进度已超过 `todoIdleTimeout` 秒没有新事件，则清空并收起。
+    private func sweepIdleTodo() {
+        guard todoController.hasTodo, activeCard == .todo else { return }
+        let timeout = TimeInterval(max(3, Settings.shared.todoIdleTimeout))
+        guard todoController.shouldDismissIdle(after: timeout) else { return }
+        Log.info("待办 \(timeout)s 无新事件，兜底清空收起", topic: "todo")
+        todoController.reset()
+        handleCardDismissal()
     }
 }
