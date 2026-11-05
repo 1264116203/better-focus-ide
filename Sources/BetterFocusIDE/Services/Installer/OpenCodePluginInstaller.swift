@@ -264,7 +264,10 @@ enum PluginTemplate {
                     payload: {
                       title: sessionTitles.get(sessionID) || '',
                       prompt: lastPrompt.get(sessionID) || '',
-                      directory: sessionDirs.get(sessionID) || ''
+                      directory: sessionDirs.get(sessionID) || '',
+                      // 插件所在的进程：应用侧据此判定这一轮是终端 TUI、
+                      // 浏览器（`opencode serve`）还是桌面端服务——三者事件一样。
+                      pid: process.pid
                     }
                   });
                 }
