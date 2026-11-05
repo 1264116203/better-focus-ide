@@ -109,4 +109,53 @@ final class HistoryEntryLabelTests: XCTestCase {
         let decoded = try JSONDecoder().decode([HistoryEntry].self, from: data)
         XCTAssertEqual(decoded[0].kind, .permission)
     }
+
+    // MARK: - 轮次完成的标题来源
+
+    /// 拿不到 transcript 时，标题退到用户这一轮的输入，而不是「WorkBuddy 回复完成」。
+    ///
+    /// 行首的 IDE 图标已经说明来源，把产品名写进标题只是重复；而「他问了什么」
+    /// 才是一屏五条里唯一能区分彼此的信息。
+    func testTitleFallsBackToPromptWhenTranscriptMissing() throws {
+        let message = AgentSocketMessage(
+            provider: "workbuddy", product: nil, event: "turn_finished",
+            sessionID: "s1", timestamp: nil,
+            payload: ["prompt": .string("帮我看下这个 diff 有没有问题")],
+            host: nil, cwd: "/Users/yujie.xu/Documents/lingyue-projects/better-focus-ide")
+        let notice = try XCTUnwrap(TurnNotice.parse(message: message, terminalHost: { _ in nil }))
+        XCTAssertEqual(notice.title, "帮我看下这个 diff 有没有问题")
+        XCTAssertFalse(notice.title.contains("WorkBuddy"), "标题里不该出现来源名")
+    }
+
+    /// hook 直接报了会话标题时优先用它（比用户输入更接近会话名）。
+    func testTitlePrefersReportedSessionTitle() throws {
+        let message = AgentSocketMessage(
+            provider: "workbuddy", product: nil, event: "turn_finished",
+            sessionID: "s1", timestamp: nil,
+            payload: ["title": .string("修复登录超时"),
+                      "prompt": .string("帮我看看这个登录问题")],
+            host: nil, cwd: "/tmp/demo")
+        let notice = try XCTUnwrap(TurnNotice.parse(message: message, terminalHost: { _ in nil }))
+        XCTAssertEqual(notice.title, "修复登录超时")
+    }
+
+    /// 什么信息都没有时给中性文案：不带产品名的兜底，避免与右侧状态重复成来源描述。
+    func testTitleFallsBackToNeutralWhenNothingAvailable() throws {
+        let message = AgentSocketMessage(
+            provider: "workbuddy", product: nil, event: "turn_finished",
+            sessionID: "s1", timestamp: nil, payload: [:],
+            host: nil, cwd: "")
+        let notice = try XCTUnwrap(TurnNotice.parse(message: message, terminalHost: { _ in nil }))
+        XCTAssertEqual(notice.title, "未命名会话")
+    }
+
+    /// 工作目录就是家目录时不算项目：否则 `yujie.xu` 会被当成项目名显示。
+    func testHomeDirectoryIsNotTreatedAsProject() throws {
+        let message = AgentSocketMessage(
+            provider: "opencode", product: nil, event: "turn_finished",
+            sessionID: "s1", timestamp: nil, payload: [:],
+            host: nil, cwd: NSHomeDirectory())
+        let notice = try XCTUnwrap(TurnNotice.parse(message: message, terminalHost: { _ in nil }))
+        XCTAssertEqual(notice.project, "")
+    }
 }

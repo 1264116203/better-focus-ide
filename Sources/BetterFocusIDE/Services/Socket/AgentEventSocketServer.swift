@@ -254,6 +254,18 @@ final class AgentEventSocketServer {
                                   session: message.sessionID,
                                   request: message.payload?["request_id"]?.stringValue),
                      topic: "socket")
+            if message.event == "turn_finished" {
+                // 标题/提示词为空时列表只能显示「X 回复完成」，和右侧状态重复。
+                // 这里只记字段的有无与长度，绝不落内容——畸形日志不该带用户原文。
+                let path = message.payload?["transcript_path"]?.stringValue ?? ""
+                let exists = !path.isEmpty && FileManager.default.fileExists(atPath: path)
+                let transcriptState = path.isEmpty ? "无" : (exists ? "可读" : "路径不存在")
+                let titleLen = message.payload?["title"]?.stringValue?.count ?? 0
+                let promptLen = message.payload?["prompt"]?.stringValue?.count ?? 0
+                Log.debug("turn 字段: transcript=\(transcriptState) title=\(titleLen)字 "
+                          + "prompt=\(promptLen)字 host=\(message.host?["name"]?.stringValue ?? "-")",
+                          topic: "socket")
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.onMessage?(message)
             }

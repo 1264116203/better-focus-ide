@@ -296,9 +296,35 @@ enum HostHookTemplate {
                     "host": current_host(), "cwd": project_cwd(payload)}
 
 
+        # 宿主偶尔会把会话主题直接放进 hook payload（而不是只给 transcript 路径）。
+        # 各家键名不一，按候选表取第一个非空值；取不到就留空，由应用侧
+        # 退回到读 transcript —— 这里绝不臆造标题。
+        TITLE_KEYS = ("session_title", "sessionTitle", "conversation_title",
+                      "conversationTitle", "title")
+        PROMPT_KEYS = ("prompt", "user_prompt", "userPrompt",
+                       "last_prompt", "lastPrompt", "message")
+
+
+        def first_text(payload, keys, limit=200):
+            for key in keys:
+                value = payload.get(key)
+                if isinstance(value, str):
+                    text = " ".join(value.split())
+                    if text:
+                        return text[:limit]
+            return ""
+
+
         def emit_turn_finished(session_id, payload):
             msg = base_event("turn_finished", session_id, payload)
-            msg["payload"] = {"transcript_path": transcript_path_of(payload)}
+            body = {"transcript_path": transcript_path_of(payload)}
+            title = first_text(payload, TITLE_KEYS)
+            prompt = first_text(payload, PROMPT_KEYS)
+            if title:
+                body["title"] = title
+            if prompt:
+                body["prompt"] = prompt
+            msg["payload"] = body
             send(msg)
 
 
