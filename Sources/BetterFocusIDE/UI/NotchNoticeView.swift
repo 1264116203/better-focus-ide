@@ -64,23 +64,23 @@ struct NotchNoticeView: View {
                             bundleID: iconID.bundle,
                             fallbackText: badgeText,
                             tint: tint,
-                            size: IDEIconProvider.badgeSize
+                            size: 36
                         )
                         .rotationEffect(.degrees(bellAngle))
                         .scaleEffect(bellScale)
 
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text("任务完成")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.95))
                                 .lineLimit(1)
                             Text(notice.body)
-                                .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.7))
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white.opacity(0.75))
                                 .lineLimit(1)
                             if !notice.project.isEmpty {
                                 Text(notice.project)
-                                    .font(.system(size: 12))
+                                    .font(.system(size: 11))
                                     .foregroundStyle(.white.opacity(0.45))
                                     .lineLimit(1)
                             }
@@ -98,8 +98,7 @@ struct NotchNoticeView: View {
                         }
                     }
                     .padding(.horizontal, inset)
-                    .padding(.vertical, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -108,10 +107,10 @@ struct NotchNoticeView: View {
                 HStack(spacing: 8) {
                     Button(action: onMarkRead) {
                         Text("已读")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.55))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 5)
                             .background(.white.opacity(0.1),
                                         in: RoundedRectangle(cornerRadius: 6,
                                                              style: .continuous))
@@ -121,7 +120,7 @@ struct NotchNoticeView: View {
 
                     Button(action: onTogglePin) {
                         Image(systemName: pinned ? "pin.fill" : "pin")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                             .rotationEffect(.degrees(pinned ? 0 : 45))
                             .foregroundStyle(PinColors.tint(pinned: pinned))
                     }
