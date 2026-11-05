@@ -177,15 +177,15 @@ struct HistoryEntry: Identifiable, Equatable, Codable {
 
     /// 历史行副文字的展示文本（含类型前缀）；为空串时整行不渲染。
     ///
-    /// 三种情况不展示：
+    /// 两种情况下不展示：
     /// - 正文为空；
-    /// - 正文与标题同源（单轮会话里首条与最近一条用户提问相同，只是截断长度不同）；
     /// - 正文是「点击跳转回 X」兜底文案（旧数据会把它存进 body）。
+    ///
+    /// 新 session 第一条对话里，标题与正文都取自首条提问（内容同源），
+    /// 但「用户：prompt」这一行仍有独立信息量（带类型前缀、展示完整输入），
+    /// 故不再做「同源前缀去重」，与第二条及之后的行为保持一致。
     var bodyLine: String {
         guard !body.isEmpty else { return "" }
-        // 标题截断更短且带省略号，去掉它即可判断正文是否只是标题的展开版。
-        let titleCore = title.hasSuffix("…") ? String(title.dropLast()) : title
-        if !titleCore.isEmpty, body.hasPrefix(titleCore) { return "" }
         if body.hasPrefix(TurnNotice.jumpHintPrefix) { return "" }
         return kind.bodyLabel + body
     }

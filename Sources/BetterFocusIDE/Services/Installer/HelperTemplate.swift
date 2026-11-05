@@ -453,7 +453,11 @@ enum HelperTemplate {
         # ── 待办进度 ────────────────────────────────────────────────────
         # Qoder 原生名是 todo_write，Claude 血统（CLI / 插件旧版）是 TodoWrite；
         # 匹配器与这里都要两个都认，否则换个宿主形态卡片就永远不出现。
+        # V2 家族（Claude Code 血统演进）用 TaskCreate / TaskUpdate 单条写入——
+        # Qoder 新版跟随这条线，所以这里也要认，否则「任务推进」只有第一次
+        # TodoWrite 整表能到，后续 TaskUpdate 全部漏掉（这正是进度不更新的根因）。
         TODO_TOOLS = ("TodoWrite", "todo_write", "todowrite", "SetTodoList")
+        TODO_UPSERT_TOOLS = ("TaskCreate", "TaskUpdate")
 
 
         def normalise_todos(raw):
@@ -482,6 +486,7 @@ enum HelperTemplate {
                 if not status:
                     status = "completed" if item.get("completed") else "pending"
                 todos.append({"id": str(item.get("id") or item.get("task_id")
+                                        or item.get("taskId")
                                         or ("t%d" % index)),
                               "content": content,
                               "status": str(status)})
@@ -489,12 +494,18 @@ enum HelperTemplate {
 
 
         def emit_todo(session_id, payload):
-            \"\"\"转发待办整表。tool_input 是首选来源：它就是要写进去的那张表。
+            \"\"\"转发待办。tool_input 是首选来源：它就是要写进去的那张表。
 
-            TodoWrite 每次重发完整列表，所以这里不需要做合并——岛侧按整表覆盖处理。
+            Qoder 的 TodoWrite 带一个 `merge` 参数（Claude Code V2 语义）：
+            - `merge=False`（或缺失）：整表覆盖，发 `todo_updated`，岛侧直接替换。
+            - `merge=True`：增量——只传变化的那几条，岛侧没有合并能力，必须在这里
+              拆成单条 `todo_item_updated` 交给岛侧按 id UPSERT，否则整表覆盖会把
+              没出现的那几条全抹掉（进度从 N/N 塌成 1/1）。
             \"\"\"
             tool_input = payload.get("tool_input")
-            raw = tool_input.get("todos") if isinstance(tool_input, dict) else None
+            if not isinstance(tool_input, dict):
+                return
+            raw = tool_input.get("todos")
             if not isinstance(raw, list):
                 # 少数宿主把结果放在 tool_response 里（写入后的回读）。
                 response = payload.get("tool_response")
@@ -505,12 +516,82 @@ enum HelperTemplate {
             todos = normalise_todos(raw)
             if not todos:
                 return
+            # merge=True 走逐条 UPSERT；否则整表覆盖。
+            if tool_input.get("merge") is True:
+                for item in todos:
+                    send({"provider": "qoder", "product": _get_product(session_id),
+                          "event": "todo_item_updated", "session_id": session_id,
+                          "host": host_app(),
+                          "cwd": payload.get("cwd") or os.getcwd(),
+                          "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                          "payload": {"todo": item}})
+                return
             send({"provider": "qoder", "product": _get_product(session_id),
                   "event": "todo_updated", "session_id": session_id,
                   "host": host_app(),
                   "cwd": payload.get("cwd") or os.getcwd(),
                   "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                   "payload": {"todos": todos}})
+
+
+        def emit_todo_upsert(session_id, payload):
+            \"\"\"单条写入（TaskCreate / TaskUpdate）。V2 家族一条任务一次调用。
+
+            Qoder CLI 的实测载荷（探针）：
+            - TaskCreate 入参 `{subject, description, activeForm}`（无 id），
+              但 `tool_response.task = {id, subject}` 里有服务端分配的真实 id。
+            - TaskUpdate 入参 `{taskId, status}`（无正文），只能靠 taskId 定位。
+
+            所以这里维护一张「taskId → 正文」映射（持久化到会话 state），
+            TaskCreate 用 response 的 id 登记正文，TaskUpdate 靠 taskId 反查。
+            全程 id 都用服务端分配的 taskId，保证岛侧 UPSERT 精确命中、不重复。
+            \"\"\"
+            tool_input = payload.get("tool_input")
+            if not isinstance(tool_input, dict):
+                return
+            response = payload.get("tool_response")
+            if not isinstance(response, dict):
+                response = {}
+            # 服务端分配的真实 id：TaskCreate 在 response.task.id，
+            # TaskUpdate 直接在入参 taskId。
+            task = response.get("task")
+            if isinstance(task, dict):
+                resp_id = str(task.get("id") or task.get("taskId") or "")
+                resp_subject = task.get("subject") or task.get("content") or ""
+            else:
+                resp_id = ""
+                resp_subject = ""
+            todo_id = str(tool_input.get("taskId") or tool_input.get("task_id")
+                          or tool_input.get("id") or resp_id or "").strip()
+            content = (tool_input.get("subject") or tool_input.get("content")
+                       or tool_input.get("title") or resp_subject or "")
+            content = content.strip() if isinstance(content, str) else ""
+
+            # 正文缺失时从会话映射表反查（TaskUpdate 的常态）。
+            state = _load_state(session_id)
+            mapping = state.get("tasks") or {}
+            if not content and todo_id:
+                content = mapping.get(todo_id) or ""
+                content = content.strip() if isinstance(content, str) else ""
+            if not content:
+                return
+
+            # 登记/回填映射：TaskCreate 把 response 的真实 id 与正文绑定。
+            if todo_id:
+                mapping[todo_id] = content
+                state["tasks"] = mapping
+                _save_state(session_id, state)
+
+            status = tool_input.get("status") or tool_input.get("state")
+            if not status:
+                status = "pending"
+            send({"provider": "qoder", "product": _get_product(session_id),
+                  "event": "todo_item_updated", "session_id": session_id,
+                  "host": host_app(),
+                  "cwd": payload.get("cwd") or os.getcwd(),
+                  "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                  "payload": {"todo": {"id": todo_id, "content": content,
+                                       "status": str(status)}}})
 
 
         def main():
@@ -573,6 +654,8 @@ enum HelperTemplate {
                 tool_name = payload.get("tool_name") or payload.get("toolName") or ""
                 if tool_name in TODO_TOOLS and os.path.exists(SOCKET_PATH):
                     emit_todo(session_id, payload)
+                elif tool_name in TODO_UPSERT_TOOLS and os.path.exists(SOCKET_PATH):
+                    emit_todo_upsert(session_id, payload)
                 return
 
             if event == "PreToolUse":

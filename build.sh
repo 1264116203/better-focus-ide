@@ -39,8 +39,8 @@ cp Resources/Info.plist "$APP_DIR/Contents/Info.plist"
 # Copy entitlements (for reference, not used in ad-hoc signing)
 cp "$ENTITLEMENTS" "$APP_DIR/Contents/Resources/"
 
-# Copy app icon (CFBundleIconFile = AppIcon in Info.plist)
-cp Resources/AppIcon.icns "$APP_DIR/Contents/Resources/AppIcon.icns"
+# Copy app icon (CFBundleIconFile = AppIcon-NotchCard in Info.plist)
+cp Resources/AppIcon-NotchCard.icns "$APP_DIR/Contents/Resources/AppIcon-NotchCard.icns"
 
 # Copy SwiftPM resource bundles (IDE icons, etc.)
 RESOURCE_BUNDLE=".build/arm64-apple-macosx/$BUILD_CONFIGURATION/BetterFocusIDE_BetterFocusIDE.bundle"

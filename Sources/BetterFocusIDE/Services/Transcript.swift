@@ -195,9 +195,16 @@ enum Transcript {
                 hasHumanInput(of: record))
     }
 
-    /// 按提供方选择解析器：cursor 走 Cursor 形态，其余走 Qoder 形态。
+    /// 按提供方选择解析器：cursor 走 Cursor 形态，workbuddy 走 WorkBuddy 形态，其余走 Qoder 形态。
     private static func prompt(of record: [String: Any], provider: String?) -> String {
-        provider?.lowercased() == "cursor" ? cursorPrompt(record) : qoderPrompt(record)
+        switch provider?.lowercased() {
+        case "cursor":
+            return cursorPrompt(record)
+        case "workbuddy":
+            return workbuddyPrompt(record)
+        default:
+            return qoderPrompt(record)
+        }
     }
 
     /// Qoder 形态：顶层 `type == "user"`；人类发言是 `str`，工具结果是 `list`
@@ -206,6 +213,15 @@ enum Transcript {
         guard record["type"] as? String == "user",
               let message = record["message"] as? [String: Any] else { return "" }
         return text(from: message["content"])
+    }
+
+    /// WorkBuddy 形态：顶层 `role == "user"`，`content` 直接在顶层（不在 message 里），
+    /// 是块列表、块类型 `input_text`，真正的用户输入包在 `<user_query>` 里。
+    private static func workbuddyPrompt(_ record: [String: Any]) -> String {
+        guard record["role"] as? String == "user" else { return "" }
+        let text = text(from: record["content"])
+        if let query = captureUserQuery(text) { return query }
+        return stripNoise(text)
     }
 
     /// Cursor 形态：顶层 `role == "user"`（不是 `type`）；content 恒为文本块列表，
@@ -219,12 +235,13 @@ enum Transcript {
     }
 
     /// `content` 为 `str` 时直接用；为块列表时拼接各块的 `text`（仅取 `type == "text"`
-    /// 的块——`tool_result` 不是发言）。
+    /// 或 WorkBuddy 的 `type == "input_text"` 的块——`tool_result` 不是发言）。
     private static func text(from content: Any?) -> String {
         if let s = content as? String { return s }
         if let blocks = content as? [[String: Any]] {
             let parts = blocks.compactMap { block -> String? in
-                guard block["type"] as? String == "text" else { return nil }
+                let type = block["type"] as? String
+                guard type == "text" || type == "input_text" else { return nil }
                 return block["text"] as? String
             }
             return parts.joined(separator: " ")

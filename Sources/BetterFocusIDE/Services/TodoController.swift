@@ -28,6 +28,13 @@ final class TodoController: ObservableObject {
     @Published private(set) var startedAt = Date()
     /// 全部结束的时刻；非 nil 时卡片处于「全部完成」收尾态。
     @Published private(set) var finishedAt: Date?
+    /// 最近一次收到 todo 事件的时间（驱动「无进展超时兜底」）。
+    ///
+    /// 手动停止 Qoder/Claude 等宿主的 session 时，它们**不触发任何 hook 事件**
+    /// （无 Stop / SessionEnd / PostToolUseFailure），岛侧永远收不到清空信号。
+    /// 唯一可靠的兜底是「长时间没新事件就自动收起」——这里记录最后一次写入时刻，
+    /// 供 `NotchService` 的陈旧卡片清扫据此判定。
+    @Published private(set) var lastUpdateAt = Date()
 
     /// 变化计数：供 `NotchService` 判断是否需要重新计算窗口尺寸。
     @Published private(set) var revision: Int = 0
@@ -58,13 +65,26 @@ final class TodoController: ObservableObject {
     /// - 新 id：追加到末尾。
     /// - 已有 id：原地更新正文与状态（保持位置不变，避免行在列表里乱跳）。
     /// - `deleted` 状态：直接从列表移除。
+    ///
+    /// **id 不稳定的兜底**：V2 的 `TaskCreate` 入参没有 id（服务端才分配），
+    /// 我们只能用正文哈希当 id；而紧随其后的 `TaskUpdate` 用的是服务端分配的
+    /// `taskId`——两者不同，若只按 id 匹配就会把同一条任务追加成两条。所以
+    /// 当 id 匹配不上时，退而按**正文**匹配（同一句话视为同一任务），命中则
+    /// 原地更新并回填真实 id。
     func upsert(_ item: TodoItem, sessionID: String, provider: AgentProvider,
                 providerName: String, project: String) {
         adopt(sessionID: sessionID, provider: provider,
               providerName: providerName, project: project)
-        if item.status == .cancelled, let index = items.firstIndex(where: { $0.id == item.id }) {
-            items.remove(at: index)
+        if item.status == .cancelled {
+            if let index = items.firstIndex(where: { $0.id == item.id }) {
+                items.remove(at: index)
+            } else if let index = items.firstIndex(where: { $0.content == item.content }) {
+                items.remove(at: index)
+            }
         } else if let index = items.firstIndex(where: { $0.id == item.id }) {
+            items[index] = item
+        } else if let index = items.firstIndex(where: { $0.content == item.content }) {
+            // id 对不上但正文相同：回填宿主这次给的真实 id，下次就能精确匹配。
             items[index] = item
         } else {
             items.append(item)
@@ -88,9 +108,11 @@ final class TodoController: ObservableObject {
                 providerName: String, project: String) {
         let value = payload.map { AnyCodableValue.dictionary($0) }
         if let list = TodoPayloadParser.list(from: value) {
+            Log.info("ingest 覆盖 count=\(list.count)", topic: "todo")
             apply(snapshot: list, sessionID: sessionID, provider: provider,
                   providerName: providerName, project: project)
         } else if let item = TodoPayloadParser.single(from: value) {
+            Log.info("ingest 单条 id=\(item.id) content=\(item.content) status=\(item.status.rawValue) 当前items=\(items.count)", topic: "todo")
             upsert(item, sessionID: sessionID, provider: provider,
                    providerName: providerName, project: project)
         } else {
@@ -119,6 +141,7 @@ final class TodoController: ObservableObject {
     /// 依据当前列表刷新「是否已收尾」。
     private func refreshLifecycle() {
         revision &+= 1
+        lastUpdateAt = Date()
         if items.isEmpty {
             finishedAt = nil
         } else if progress.isFinished {
@@ -139,6 +162,7 @@ final class TodoController: ObservableObject {
         providerName = ""
         finishedAt = nil
         revision &+= 1
+        lastUpdateAt = Date()
     }
 
     /// 会话结束：仅当结束的是本卡片所属会话时才清空。
@@ -151,5 +175,14 @@ final class TodoController: ObservableObject {
     func shouldDismissFinished(after interval: TimeInterval = 2.5) -> Bool {
         guard let finishedAt else { return false }
         return Date().timeIntervalSince(finishedAt) >= interval
+    }
+
+    /// 「长时间没有新事件」判定：手动停止宿主 session 后不会再有 hook 事件，
+    /// 靠这条兜底把残留进度自动收掉，避免卡片永远挂在岛上。
+    ///
+    /// 只有非空列表才判定（空列表本来就 `hasTodo == false`，无需兜底）。
+    func shouldDismissIdle(after interval: TimeInterval) -> Bool {
+        guard hasTodo else { return false }
+        return Date().timeIntervalSince(lastUpdateAt) >= interval
     }
 }

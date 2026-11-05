@@ -92,6 +92,25 @@ struct DebugTarget: Identifiable, Hashable {
         DebugTarget(provider: .kimi, title: "Kimi（Terminal）",
                     bundle: "com.apple.Terminal", hostName: "Terminal"),
     ]
+
+    /// 支持 todowrite 转发的宿主（用于「各 IDE 快速验证」按钮）。
+    ///
+    /// Cursor / Trae / Codex 的 hook 收不到 todo 事件（见 todo-tool-adaptation
+    /// 调研），即使这里伪造 provider 也测不出真实链路，故不列入快速按钮。
+    /// 保留 Qoder、OpenCode、Claude Code、Kimi、WorkBuddy 五个真正能收到
+    /// 事件的宿主——每个对应 `all` 里的一条，点按钮即以其身份注入标准进度。
+    static let todoCapable: [DebugTarget] = [
+        DebugTarget(provider: .qoder, title: "Qoder", bundle: "com.qoder.app",
+                    hostName: "Qoder"),
+        DebugTarget(provider: .opencode, title: "OpenCode", bundle: "ai.opencode.desktop",
+                    hostName: "OpenCode"),
+        DebugTarget(provider: .claude_code, title: "Claude Code", bundle: "com.apple.Terminal",
+                    hostName: "Terminal"),
+        DebugTarget(provider: .kimi, title: "Kimi", bundle: "com.apple.Terminal",
+                    hostName: "Terminal"),
+        DebugTarget(provider: .workbuddy, title: "WorkBuddy",
+                    bundle: "com.tencent.workbuddy.mac", hostName: "WorkBuddy"),
+    ]
 }
 
 // MARK: - 载荷模板
@@ -481,7 +500,41 @@ enum DebugInjector {
 
     // MARK: 消息组装
 
-    /// 组装一条与 hook 同构的 socket 消息：`provider` 用组键、`product` 用产品值，
+    /// 各 IDE 快速验证：以指定宿主身份注入一条标准的「进行中」任务进度，
+    /// 无需先到顶部选目标 IDE。返回展示在面板上的结果文案。
+    ///
+    /// 进度内容固定为 6 项（3 完成 / 1 进行中 / 2 待开始），与「任务进度」分组的
+    /// `todo.running` 场景一致——快速按钮与逐项触发得到的是同一张卡片，方便对比
+    /// 「换宿主身份后徽章 / 主题色 / 跳转目标是否随之变化」。
+    @discardableResult
+    static func fireTodoQuick(target: DebugTarget, project: String) -> String {
+        let service = NotchService.shared
+        let session = "debug-todoquick-\(Int(Date().timeIntervalSince1970 * 1000))"
+        service.flushDebugChannels()
+
+        let sample: [(String, String)] = [
+            ("读一遍各宿主的 hook 文档", "completed"),
+            ("定下任务条的信息层级", "completed"),
+            ("实现分段进度条与呼吸态", "completed"),
+            ("补充 hooks 模板的 todo matcher", "in_progress"),
+            ("验证事件回传与断线重连", "pending"),
+            ("补齐收起态下沿进度线", "pending"),
+        ]
+        let todos: [AnyCodableValue] = sample.enumerated().map { index, item in
+            .dictionary([
+                "id": .string("t\(index + 1)"),
+                "content": .string(item.0),
+                "status": .string(item.1),
+            ])
+        }
+        service.injectDebugMessage(message(
+            event: .todoUpdated, payload: ["todos": .array(todos)],
+            target: target, sessionID: session, project: project))
+
+        Log.info("调试注入（快速）：todo → \(target.title)（\(session)）", topic: "debug")
+        return "已以「\(target.title)」身份注入任务进度"
+    }
+
     /// 与真实 hook 的 `_identify_product()` 输出保持一致。
     private static func message(event: SocketEvent, payload: [String: AnyCodableValue],
                                 target: DebugTarget, sessionID: String,

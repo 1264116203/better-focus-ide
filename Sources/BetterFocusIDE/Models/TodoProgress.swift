@@ -127,7 +127,11 @@ enum TodoCardLayout {
     /// 「下一步」行高度。
     static let nextRowHeight: CGFloat = 16
     /// 进度条最多显示多少段。
-    static let maxSegments: Int = 8
+    ///
+    /// 8 段上限会让「10 项任务」被压成 8 段，段数与总数对不上、易被误解成丢数据。
+    /// 提高到 16：刘海卡片宽约 449pt，16 段时每段约 22pt，胶囊依然清晰；
+    /// 绝大多数 todo ≤ 16 项，段数 == 总数，一眼对得上。超过才分桶压缩。
+    static let maxSegments: Int = 16
 
     /// 内容高度（不含刘海安全区）。
     static func contentHeight(showsNext: Bool) -> CGFloat {
@@ -188,9 +192,9 @@ struct TodoProgress {
 
     /// 分段条的每段填充比例。
     ///
-    /// - 任务数 ≤ 8：一段一个任务，填充 0 或 1。
-    /// - 任务数 > 8：均分成 8 桶，每桶按「桶内已完成比例」部分填充——
-    ///   这样段数恒定、进度仍然连续，比「只显示前 8 项」诚实得多。
+    /// - 任务数 ≤ 16：一段一个任务，填充 0 或 1。
+    /// - 任务数 > 16：均分成 16 桶，每桶按「桶内已完成比例」部分填充——
+    ///   这样段数恒定、进度仍然连续，比「只显示前 16 项」诚实得多。
     var segmentFills: [Double] {
         guard !items.isEmpty else { return [] }
         let limit = TodoCardLayout.maxSegments

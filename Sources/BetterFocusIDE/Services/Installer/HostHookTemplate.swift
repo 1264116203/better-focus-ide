@@ -187,14 +187,41 @@ enum HostHookTemplate {
 
 
         def _collect_tool_blocks(node, uses, results):
+            # 转录的写法跨版本不一。实测 WorkBuddy 是：
+            #   type="function_call", name="AskUserQuestion",
+            #   arguments=JSON 字符串（解析后 {"questions": [...]}），
+            #   callId 关联结果块 type="function_call_result"。
+            # 旧宿主（Claude/Cursor/Trae）是 type=tool_use/tool_call，
+            #   name/toolName + input/tool_input(dict)。按形状都认。
             if isinstance(node, dict):
-                kind = node.get("type")
-                if kind == "tool_use" and isinstance(node.get("input"), dict):
-                    uses.append(node)
-                elif kind == "tool_result":
-                    tid = node.get("tool_use_id") or node.get("toolUseId")
-                    if isinstance(tid, str) and tid:
-                        results.add(tid)
+                name = str(node.get("name") or node.get("tool_name")
+                           or node.get("toolName") or "")
+                # 结果块：function_call_result 用 callId 关联，其他用 tool_use_id
+                tid = node.get("callId") or node.get("tool_use_id") \
+                    or node.get("toolUseId") or node.get("call_id")
+                ntype = str(node.get("type") or "")
+                if isinstance(tid, str) and tid and (
+                        "result" in ntype.lower() or not node.get("arguments")
+                        and not node.get("input") and not node.get("tool_input")):
+                    results.add(tid)
+                # 题面：优先 WorkBuddy 的 arguments 字符串，其次 input/tool_input dict
+                body = None
+                args = node.get("arguments")
+                if isinstance(args, str) and args:
+                    try:
+                        parsed = json.loads(args)
+                        if isinstance(parsed, dict) and parsed.get("questions"):
+                            body = parsed
+                    except Exception:
+                        pass
+                if body is None:
+                    body = node.get("input") if isinstance(node.get("input"), dict) else None
+                if body is None and isinstance(node.get("tool_input"), dict):
+                    body = node.get("tool_input")
+                if "question" in name.lower() and body and body.get("questions"):
+                    uses.append((node.get("callId") or node.get("id")
+                                 or node.get("tool_use_id")
+                                 or node.get("call_id") or "", body))
                 for value in node.values():
                     _collect_tool_blocks(value, uses, results)
             elif isinstance(node, list):
@@ -202,44 +229,70 @@ enum HostHookTemplate {
                     _collect_tool_blocks(value, uses, results)
 
 
-        def pending_question(payload):
-            # 宿主的提问面板一出现就发一条 Notification（permission_prompt），
-            # 但那条载荷里**没有题面**——只有一句
-            # "needs your permission to use AskUserQuestion"。题面在转录里：
-            # 模型发出的 tool_use 早就落盘了（比通知还早）。读尾部、找最后一
-            # 条还没有 tool_result 的提问调用，岛就能在宿主面板刚出现时把同一
-            # 道题画出来——这是唯一一条早于“用户作答”的通道。
-            path = payload.get("transcript_path") or payload.get("transcriptPath") or ""
-            if not isinstance(path, str) or not path:
-                return None
+        def _prefetch_note(text):
+            # 预取只在“太晚”和“没捞到”上出问题，而这两种情况在真机上只能靠
+            # 事后翻日志判断；留一行薄的诊断，不写就别查了。
+            try:
+                path = os.path.join(os.path.dirname(ANSWER_DIR), "prefetch.log")
+                if os.path.exists(path) and os.path.getsize(path) > 64 * 1024:
+                    os.remove(path)
+                with open(path, "a") as fh:
+                    fh.write(time.strftime("%H:%M:%S", time.localtime())
+                             + " " + text + chr(10))
+            except Exception:
+                pass
+
+
+        def _scan_transcript(path):
+            # 返回 (tool_use_id, 题面) 或 None，并把扫描规模写进诊断。
             try:
                 size = os.path.getsize(path)
                 with open(path, "rb") as fh:
-                    if size > 512 * 1024:
-                        fh.seek(size - 512 * 1024)
-                        fh.readline()          # 丢掉被截断的首行
+                    if size > 1024 * 1024:
+                        fh.seek(size - 1024 * 1024)
+                        fh.readline()
                     raw = fh.read().decode("utf-8", "ignore")
-            except Exception:
-                return None
-            uses, results = [], set()
-            for line in raw.splitlines():
+            except Exception as exc:
+                return (None, "read-failed:%s" % exc)
+            uses, results, bad = [], set(), 0
+            lines = raw.splitlines()
+            for line in lines:
                 line = line.strip()
                 if not line:
                     continue
                 try:
                     _collect_tool_blocks(json.loads(line), uses, results)
                 except Exception:
+                    bad += 1
+            note = "size=%d lines=%d uses=%d results=%d bad=%d" % (
+                size, len(lines), len(uses), len(results), bad)
+            for ident, body in reversed(uses):
+                if ident and ident in results:
                     continue
-            for use in reversed(uses):
-                name = str(use.get("name") or "").lower()
-                if "question" not in name:
-                    continue
-                ident = use.get("id") or use.get("tool_use_id") or ""
-                if isinstance(ident, str) and ident and ident in results:
-                    continue
-                questions = normalise(use.get("input") or {})
+                questions = normalise(body)
                 if questions:
-                    return (ident, questions)
+                    return ((ident, questions), note)
+            return (None, note)
+
+
+        def pending_question(payload):
+            # 宿主的提问面板一出现就发一条 Notification（permission_prompt），
+            # 但那条载荷里**没有题面**——只有一句
+            # "needs your permission to use AskUserQuestion"。题面在转录里：
+            # 模型发出的 tool_use 通常已经落盘。读尾部、找最后一条还没有结果的
+            # 提问调用，岛就能在面板刚出现时把同一道题画出来——这是唯一一条
+            # 早于“用户作答”的通道。落盘可能比通知晚几十毫秒，所以短轮询几次。
+            path = payload.get("transcript_path") or payload.get("transcriptPath") or ""
+            if not isinstance(path, str) or not path:
+                return None
+            note = ""
+            for attempt in range(8):
+                found, note = _scan_transcript(path)
+                if found:
+                    _prefetch_note("hit try=%d %s" % (attempt, note))
+                    return found
+                time.sleep(0.15)
+            _prefetch_note("miss path=%s %s" % (path, note))
             return None
 
 
@@ -420,8 +473,11 @@ enum HostHookTemplate {
         def emit_turn_finished(session_id, payload):
             msg = base_event("turn_finished", session_id, payload)
             body = {"transcript_path": transcript_path_of(payload)}
-            title = first_text(payload, TITLE_KEYS)
-            prompt = first_text(payload, PROMPT_KEYS)
+            # Stop 事件的载荷里只有 transcript_path，没有标题/prompt；真正的用户
+            # 输入由 UserPromptSubmit 事件缓存进会话 state，这里读回来直报给岛侧。
+            cached = _load_todo_state(session_id)
+            title = first_text(payload, TITLE_KEYS) or cached.get("title") or ""
+            prompt = first_text(payload, PROMPT_KEYS) or cached.get("latest_prompt") or ""
             if title:
                 body["title"] = title
             if prompt:
@@ -430,10 +486,214 @@ enum HostHookTemplate {
             send(msg)
 
 
+        def cache_user_prompt(session_id, payload):
+            \"\"\"UserPromptSubmit：把用户最新输入缓存进会话 state。
+
+            hook 脚本每次都是独立进程，UserPromptSubmit 与后续 Stop 之间没有
+            共享内存，只能写盘。title 只记第一次（会话标题=首条提问），
+            latest_prompt 每次都覆盖成最新一条。
+            \"\"\"
+            prompt = first_text(payload, ("prompt", "user_prompt", "message"))
+            if not prompt:
+                return
+            state = _load_todo_state(session_id)
+            if not state.get("title"):
+                state["title"] = prompt
+            state["latest_prompt"] = prompt
+            _save_todo_state(session_id, state)
+
+
         def emit_session_ended(session_id, payload):
             msg = base_event("session_ended", session_id, payload)
             msg["payload"] = {}
             send(msg)
+
+
+        # ── 待办进度 ────────────────────────────────────────────────────
+        # Claude 系宿主（Claude Code / Kimi / WorkBuddy）的 todo 工具名不一：
+        #   整表覆盖：TodoWrite / todo_write / todowrite / SetTodoList
+        #   单条写入：TaskCreate / TaskUpdate（V2 家族，一条任务一次调用）
+        # 整表直接发 todo_updated；单条发 todo_item_updated，由岛侧 UPSERT 合并。
+        TODO_OVERWRITE_TOOLS = ("TodoWrite", "todo_write", "todowrite", "SetTodoList")
+        TODO_UPSERT_TOOLS = ("TaskCreate", "TaskUpdate")
+
+
+        def normalise_todos(raw):
+            \"\"\"把各家 todo 数组压成 {id, content, status}。
+
+            宿主字段差异：Claude 系用 content，Kimi 用 title，V2 任务用 subject；
+            状态值 Kimi 写 done，其余写 completed。认不出的正文直接丢弃——
+            发一张空表会把卡片错误地推进「全部完成」。
+            \"\"\"
+            todos = []
+            for index, item in enumerate(raw):
+                if isinstance(item, str):
+                    text = item.strip()
+                    if text:
+                        todos.append({"id": "t%d" % index, "content": text,
+                                      "status": "pending"})
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                content = (item.get("content") or item.get("title")
+                           or item.get("subject") or "")
+                content = content.strip() if isinstance(content, str) else ""
+                if not content:
+                    continue
+                status = item.get("status") or item.get("state")
+                if not status:
+                    status = "completed" if item.get("completed") else "pending"
+                todos.append({"id": str(item.get("id") or item.get("task_id")
+                                        or item.get("taskId")
+                                        or ("t%d" % index)),
+                              "content": content,
+                              "status": str(status)})
+            return todos
+
+
+        # 「taskId → 正文」映射的持久化目录。hook 脚本每次调用都是独立进程、
+        # 无内存状态，必须写盘才能在 TaskCreate 与 TaskUpdate 之间共享映射。
+        _TODO_STATE_DIR = os.path.join(os.path.expanduser("~"),
+                                       "Library", "Application Support",
+                                       "BetterFocusIDE", "todo-state")
+
+
+        def _todo_state_path(session_id):
+            return os.path.join(_TODO_STATE_DIR, safe_id(session_id) + ".json")
+
+
+        def _load_todo_state(session_id):
+            try:
+                with open(_todo_state_path(session_id)) as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+
+
+        def _save_todo_state(session_id, state):
+            try:
+                os.makedirs(_TODO_STATE_DIR, exist_ok=True)
+                with open(_todo_state_path(session_id), "w") as f:
+                    json.dump(state, f)
+            except Exception:
+                pass
+
+
+        def todo_input(payload):
+            \"\"\"todo 工具的入参：优先 tool_input，其次 input（部分宿主键名不同）。\"\"\"
+            value = payload.get("tool_input") or payload.get("input")
+            return value if isinstance(value, dict) else {}
+
+
+        def emit_todo_overwrite(session_id, payload):
+            \"\"\"整表覆盖（TodoWrite / todowrite / SetTodoList）。
+
+            Claude Code V2 血统的 TodoWrite 带 `merge` 参数：merge=True 时只传
+            变化的那几条。岛侧按整表覆盖处理、没有合并能力，所以 merge=True
+            必须在这里拆成单条 `todo_item_updated` 交给岛侧 UPSERT，否则会把
+            没出现的那几条全抹掉。
+            \"\"\"
+            args = todo_input(payload)
+            raw = args.get("todos") or args.get("tasks")
+            if not isinstance(raw, list):
+                # 少数宿主把结果放在 tool_response 里（写入后的回读）。
+                response = payload.get("tool_response")
+                if isinstance(response, dict):
+                    raw = response.get("todos") or response.get("tasks")
+            if not isinstance(raw, list):
+                return
+            todos = normalise_todos(raw)
+            if not todos:
+                return
+            if args.get("merge") is True:
+                for item in todos:
+                    msg = base_event("todo_item_updated", session_id, payload)
+                    msg["payload"] = {"todo": item}
+                    send(msg)
+                return
+            msg = base_event("todo_updated", session_id, payload)
+            msg["payload"] = {"todos": todos}
+            send(msg)
+
+
+        def emit_todo_upsert(session_id, payload):
+            \"\"\"单条写入（TaskCreate / TaskUpdate）。V2 家族一条任务一次调用。
+
+            实测两种载荷：
+            - TaskCreate 入参 `{subject, description, activeForm}`（无 id）。
+            - TaskUpdate 入参 `{taskId, status}`（无正文），只能靠 taskId 定位。
+
+            难点：WorkBuddy / Claude Code V2 的 TaskCreate 返回里**没有结构化的
+            任务 id**（只有文本 "Task #1 created successfully: <正文>"），而
+            TaskUpdate 用的 taskId（如 "21"）与那个显示编号（"#1"）并不对应，
+            无法从响应里直接建立 taskId→正文 映射。
+
+            稳妥做法：TaskCreate 把 subject 依次压入 FIFO 队列；TaskUpdate 首次
+            见到某个 taskId 时，从队列里弹出一条正文绑定它。因为 Agent 总是按
+            列表顺序推进任务，TaskUpdate 的首次出现顺序 == TaskCreate 顺序，
+            于是 21→第1条、22→第2条…… 一一对上。同时兼容 Qoder 那种响应里
+            带 `task = {id, subject}` 的结构化宿主（有 resp_id 优先用它）。
+            \"\"\"
+            tool_input = todo_input(payload)
+            if not isinstance(tool_input, dict):
+                return
+            response = payload.get("tool_response")
+            if not isinstance(response, dict):
+                response = {}
+            task = response.get("task")
+            if isinstance(task, dict):
+                resp_id = str(task.get("id") or task.get("taskId") or "")
+                resp_subject = task.get("subject") or task.get("content") or ""
+            else:
+                resp_id = ""
+                resp_subject = ""
+            todo_id = str(tool_input.get("taskId") or tool_input.get("task_id")
+                          or tool_input.get("id") or resp_id or "").strip()
+            content = (tool_input.get("subject") or tool_input.get("content")
+                       or tool_input.get("title") or resp_subject or "")
+            content = content.strip() if isinstance(content, str) else ""
+
+            state = _load_todo_state(session_id)
+            mapping = state.get("tasks") or {}
+            queue = list(state.get("queue") or [])
+
+            if content and not todo_id:
+                # TaskCreate 无 id：正文压入 FIFO，等 TaskUpdate 来认领。
+                if content not in queue:
+                    queue.append(content)
+            elif content and todo_id:
+                # 有正文也有 id（Qoder 结构化响应）：直接登记。
+                mapping[todo_id] = content
+            elif not content and todo_id:
+                # TaskUpdate 无正文：先从映射查，查不到再从队列认领。
+                content = mapping.get(todo_id) or ""
+                content = content.strip() if isinstance(content, str) else ""
+                if not content and queue:
+                    content = queue.pop(0)
+                    mapping[todo_id] = content
+
+            state["tasks"] = mapping
+            state["queue"] = queue
+            _save_todo_state(session_id, state)
+
+            if not content:
+                return
+
+            status = tool_input.get("status") or tool_input.get("state")
+            if not status:
+                status = "completed" if tool_input.get("completed") else "pending"
+            msg = base_event("todo_item_updated", session_id, payload)
+            msg["payload"] = {"todo": {"id": todo_id, "content": content,
+                                       "status": str(status)}}
+            send(msg)
+
+
+        def handle_todo_event(session_id, payload, tool_name):
+            \"\"\"PostToolUse 上的 todo 转发入口：按工具名分流到覆盖 / 单条。\"\"\"
+            if tool_name in TODO_OVERWRITE_TOOLS:
+                emit_todo_overwrite(session_id, payload)
+            elif tool_name in TODO_UPSERT_TOOLS:
+                emit_todo_upsert(session_id, payload)
 
 
         def host_decides(hook_event):
@@ -547,6 +807,73 @@ enum HostHookTemplate {
             send(msg)
 
 
+        # ------------------------------------------------------------------
+        # 诊断探针：仅当 /tmp/bf-probe 标记存在时启用，把收到的事件原始
+        # 结构 dump 到 /tmp 下可读文件，用来在真机上定位 WorkBuddy 转录里
+        # 提问块的真实形状（字段名 / 嵌套层级）。探针是旁路观测，不影响
+        # 正常分发决策；验证完删掉标记文件即可静默。
+        # ------------------------------------------------------------------
+        PROBE = os.path.exists("/tmp/bf-probe")
+        PROBE_EVENTS = "/tmp/bf-probe-events.log"
+        PROBE_TRANS = "/tmp/bf-probe-transcript.log"
+
+        def _probe(text):
+            if not PROBE:
+                return
+            try:
+                with open(PROBE_EVENTS, "a") as fh:
+                    fh.write(time.strftime("%H:%M:%S", time.localtime()) + " " + text + chr(10))
+            except Exception:
+                pass
+
+        def _probe_payload(payload, event):
+            # 只挑「提问/权限」相关的字段 dump，避免把整个 transcript 或大
+            # 文本打进日志；键值超过 400 字符就截断。
+            if not PROBE:
+                return
+            keys = ("hook_event_name", "hookEventName", "tool_name", "toolName",
+                    "notification_type", "message", "transcript_path",
+                    "transcriptPath", "permission_mode", "permissionMode",
+                    "tool_use_id", "toolUseId", "request_id", "session_id")
+            seen = {}
+            for key in keys:
+                if key in payload:
+                    value = payload[key]
+                    if isinstance(value, str):
+                        value = value[:400]
+                    seen[key] = value
+            _probe("event=%s payload=%s" % (event, json.dumps(seen, ensure_ascii=False)))
+            # 有 tool_input / input 的话，看它里面有没有 questions（题面在哪一层）
+            for k in ("tool_input", "input"):
+                v = payload.get(k)
+                if isinstance(v, dict):
+                    _probe("  %s.keys=%s" % (k, list(v.keys())))
+                    if v.get("questions"):
+                        _probe("  %s.questions=%s" % (k, json.dumps(v["questions"], ensure_ascii=False)[:800]))
+            # 转录尾部：把含 "question" 的原始行原样 dump，供定位真实形状
+            tp = payload.get("transcript_path") or payload.get("transcriptPath") or ""
+            if isinstance(tp, str) and tp and os.path.exists(tp):
+                _probe("  transcript_path=%s exists" % tp)
+                try:
+                    size = os.path.getsize(tp)
+                    with open(tp, "rb") as fh:
+                        if size > 1024 * 1024:
+                            fh.seek(size - 1024 * 1024)
+                            fh.readline()
+                        raw = fh.read().decode("utf-8", "ignore")
+                    hits = 0
+                    with open(PROBE_TRANS, "a") as out:
+                        for line in raw.splitlines():
+                            if "question" in line.lower():
+                                out.write(line + chr(10))
+                                hits += 1
+                                if hits >= 40:
+                                    break
+                    _probe("  transcript question-lines=%d" % hits)
+                except Exception as exc:
+                    _probe("  transcript-read-failed:%s" % exc)
+
+
         def read_payload():
             # Codex 的 notify 程序从 argv 拿 JSON，stdin 上没有东西——真去读
             # stdin 会一直等 EOF 把终端卡住，所以按方言分流，绝不盲读。
@@ -568,6 +895,7 @@ enum HostHookTemplate {
             event = payload.get("hook_event_name") or payload.get("hookEventName") or ""
             session_id = session_id_of(payload)
             mode = str(payload.get("permission_mode") or payload.get("permissionMode") or "")
+            _probe_payload(payload, event)
 
             if EVENT_STYLE == "codex":
                 # Codex 只发 agent-turn-complete，也没有权限/提问回调：
@@ -597,6 +925,22 @@ enum HostHookTemplate {
                 return
             if event == "SessionEnd":
                 emit_session_ended(session_id, payload)
+                return
+
+            # 用户输入缓存：Stop 事件的载荷里没有 prompt，完成通知的标题/正文
+            # 靠 UserPromptSubmit 在这里把最新输入写盘，Stop 时读回直报。
+            # 发后即忘，不打印任何东西、不等答。
+            if event == "UserPromptSubmit":
+                cache_user_prompt(session_id, payload)
+                return
+
+            # 待办进度：只在 PostToolUse 上、且工具是 todo 家族时才转发。
+            # 发后即忘，脚本进到 todo 分支后立刻返回，不打印任何东西、不等答。
+            if event == "PostToolUse":
+                tool = str(payload.get("tool_name") or payload.get("toolName") or "")
+                if tool in TODO_OVERWRITE_TOOLS or tool in TODO_UPSERT_TOOLS:
+                    if os.path.exists(SOCKET_PATH):
+                        handle_todo_event(session_id, payload, tool)
                 return
 
             # 提问先于一切权限判定分发。

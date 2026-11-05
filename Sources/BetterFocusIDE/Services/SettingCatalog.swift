@@ -360,6 +360,10 @@ enum SettingCatalog {
             min: 10, max: 300, step: 5, unit: "秒", digits: 0,
             note: "挂了「Hook 时限 + 本宽限」仍没人等的卡片会被收掉", advanced: true,
             defaultValue: .int(45), get: getI(\.sweepGrace), set: setI(\.sweepGrace)),
+        SettingDefinition(key: "todoIdleTimeout", label: "待办无新事件自动收起", kind: .slider, group: "超时与排队",
+            min: 10, max: 600, step: 5, unit: "秒", digits: 0,
+            note: "手动中断 session 后不会再有 hook 事件，超时自动清掉岛上的任务进度", advanced: true,
+            defaultValue: .int(60), get: getI(\.todoIdleTimeout), set: setI(\.todoIdleTimeout)),
     ]
 
     /// 按 key 查找设置项定义。

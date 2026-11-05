@@ -65,9 +65,11 @@ enum QoderHookInstaller {
         let specs: [(String, String, Int)] = [
             ("PreToolUse", "*", InstallerPaths.hookTimeoutSeconds),
             ("PermissionRequest", "*", InstallerPaths.hookTimeoutSeconds),
-            // 待办进度：只挂 TodoWrite（Qoder 原生名 todo_write，两者都要匹配）。
+            // 待办进度：匹配 todo 家族（整表 TodoWrite/todo_write/todowrite/
+            // SetTodoList + V2 单条 TaskCreate/TaskUpdate）。Qoder 跟随 Claude
+            // 血统演进，新版任务推进走 TaskUpdate，漏掉它进度就停在第一次。
             // PostToolUse 是发后即忘事件，脚本进到 todo 分支后立刻返回，不等待。
-            ("PostToolUse", "TodoWrite|todo_write", 5),
+            ("PostToolUse", InstallerPaths.todoToolMatcher, 5),
             ("SessionEnd", "*", 5),
             ("Stop", "*", 5),
         ]

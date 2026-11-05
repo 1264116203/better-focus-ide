@@ -202,6 +202,14 @@ enum InstallerPaths {
 
     // MARK: 超时参数
 
+    /// 各宿主 todo 工具名的统一 matcher 正则（Claude Code 系 hook 的 matcher
+    /// 是 JavaScript 正则，`|` 表示逻辑或）：
+    ///   - 整表覆盖：TodoWrite / todo_write / todowrite / SetTodoList
+    ///   - 单条写入：TaskCreate / TaskUpdate（V2 家族）
+    /// 脚本按工具名分流到 todo_updated / todo_item_updated，这里只负责把它们
+    /// 全接进来。
+    static let todoToolMatcher = "TodoWrite|todo_write|todowrite|SetTodoList|TaskCreate|TaskUpdate"
+
     /// 卡片侧等待上限；Hook / Plugin 的轮询超时跟随它，确保卡片总是先于平台过期。
     /// Qoder 额外给脚本 +60s 缓冲，之后才杀死 hook。修改 `agentWaitLimit`
     /// （needs=reinstall）会重新运行安装器，用这些值重新生成 hook。

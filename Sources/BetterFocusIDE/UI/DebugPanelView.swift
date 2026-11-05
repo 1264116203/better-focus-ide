@@ -35,6 +35,7 @@ struct DebugPanelView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Metric.rowGap) {
                 header
+                todoQuickSection
                 ForEach(DebugCatalog.groups, id: \.self) { group in
                     Text(group)
                         .font(.system(size: 10.5, weight: .semibold))
@@ -105,6 +106,59 @@ struct DebugPanelView: View {
     }
 
     // MARK: - 场景行
+
+    /// 「各 IDE 快速验证」区块：一个宿主一个按钮，点击即以该宿主身份注入一条
+    /// 标准的「进行中」任务进度，省去先选目标 IDE 再点触发的两步。列出的宿主
+    /// 都是 hook 侧真正能收到 todo 事件的（Qoder / OpenCode / Claude Code / Kimi /
+    /// WorkBuddy），Cursor / Trae / Codex 收不到故不列。
+    private var todoQuickSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("任务进度 · 各 IDE 快速验证")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 4)
+            Text("点击即以该宿主身份注入一条 6 项任务进度，验证徽章、主题色与跳转目标。")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            // 用自适应网格排按钮：窗口窄时自动换行，宽时排成一行。
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 92), spacing: 6)],
+                alignment: .leading, spacing: 6
+            ) {
+                ForEach(DebugTarget.todoCapable) { item in
+                    quickButton(item)
+                }
+            }
+        }
+    }
+
+    /// 单个宿主的快速验证按钮：左侧宿主色点 + 名字，点完短暂变「已注入 ✓」。
+    private func quickButton(_ item: DebugTarget) -> some View {
+        let fired = flashID == "todo-quick-\(item.id)"
+        return Button {
+            status = DebugInjector.fireTodoQuick(target: item, project: project)
+            flashID = "todo-quick-\(item.id)"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                if flashID == "todo-quick-\(item.id)" { flashID = nil }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(item.provider.tint)
+                    .frame(width: 7, height: 7)
+                Text(fired ? "已注入" : item.title)
+                    .font(.system(size: 10.5))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+            )
+        }
+        .buttonStyle(.plain)
+    }
 
     /// 一行一个场景：标题 + 说明 + 触发按钮。
     private func row(_ scene: DebugScene) -> some View {
