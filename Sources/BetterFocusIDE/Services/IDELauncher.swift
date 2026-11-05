@@ -187,6 +187,11 @@ enum IDELauncher {
         // 浏览器会话（`opencode serve` + Web UI）：没有窗口可激活，也不该把
         // 产品桌面端叫到前台——用户在浏览器里等着，落地就该是那个页面。
         if let raw = host?.url, !raw.isEmpty, let target = URL(string: raw) {
+            // 先找已经打开的那个 tab：用户正在里面等结果，再开一个只会多一份噪音。
+            if BrowserTabFocus.focusExistingTab(url: raw) {
+                Log.info("已定位到浏览器里已打开的 \(raw)", topic: "launcher")
+                return true
+            }
             if NSWorkspace.shared.open(target) {
                 Log.info("已在浏览器打开 \(raw)", topic: "launcher")
                 return true
