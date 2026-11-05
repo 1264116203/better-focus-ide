@@ -73,6 +73,83 @@ final class HostAdapterTests: XCTestCase {
         XCTAssertNil(cleaned["SessionEnd"], "我们独占的事件应整键移除")
     }
 
+    /// 无 marker、但有 `hooks` 数组且 command 指向我们的脚本 —— 这种历史分组
+    /// （早期版本写的，或 Qoder CN 装进了英文版配置）必须被认出来并清掉。
+    ///
+    /// 认不出来的后果不是「多一个分组」：每个 Stop 会调用两个 hook，各发一条
+    /// turn_finished，人在一次任务结束时收到两条「回复完成」。
+    func testQoderMergeDedupesMarkerlessLegacyGroup() {
+        let legacy: [String: Any] = [
+            "matcher": "*",
+            "hooks": [[
+                "type": "command",
+                "command": "/Users/someone/.qoder-cn/hooks/betterfocus-notify.sh",
+                "timeout": 5,
+            ]],
+        ]
+        let foreign: [String: Any] = [
+            "matcher": "*",
+            "hooks": [["type": "command", "command": "echo someone-else"]],
+        ]
+        let hooks: [String: Any] = ["Stop": [legacy, foreign]]
+
+        let merged = QoderHookInstaller.mergedHooks(hooks)
+        let groups = merged["Stop"] as? [[String: Any]] ?? []
+
+        let ours = groups.filter { group in
+            guard let entries = group["hooks"] as? [[String: Any]] else { return false }
+            return entries.contains {
+                ($0["command"] as? String)?.contains("betterfocus-notify.sh") == true
+            }
+        }
+        XCTAssertEqual(ours.count, 1, "遗留的无 marker 分组没被清掉，Stop 会触发两次通知")
+        XCTAssertTrue(ours.first?["_betterfocus_marker"] as? String == QoderHookInstaller.marker,
+                      "存活的那份应带 marker，即本次写入的新分组")
+        XCTAssertTrue(groups.contains { group in
+            (group["hooks"] as? [[String: Any]])?.contains {
+                ($0["command"] as? String) == "echo someone-else"
+            } == true
+        }, "别人的 hook 被误删")
+    }
+
+    /// 重复安装后每个事件下我们的分组恒为一个（幂等 + 去重）。
+    func testQoderMergeIsIdempotent() {
+        var hooks: [String: Any] = [:]
+        for _ in 0..<3 {
+            hooks = QoderHookInstaller.mergedHooks(hooks)
+        }
+        for event in ["PreToolUse", "PermissionRequest", "SessionEnd", "Stop"] {
+            let groups = hooks[event] as? [[String: Any]] ?? []
+            let ours = groups.filter { group in
+                guard let entries = group["hooks"] as? [[String: Any]] else { return false }
+                return entries.contains {
+                    ($0["command"] as? String)?.contains("betterfocus-notify.sh") == true
+                }
+            }
+            XCTAssertEqual(ours.count, 1, "\(event) 出现了 \(ours.count) 个我们的分组")
+        }
+    }
+
+    /// `~/.qoder-cn` 链到 `~/.qoder` 时算同一个安装，不该被当成「装了 CN 版」。
+    ///
+    /// 判错的后果：CN 安装器把英文版的注册改写成带 `BETTERFOCUS_VARIANT=cn`
+    /// 的脚本，此后英文版的每条通知都被记成「Qoder CN」。
+    func testSymlinkedHostDirectoryIsNotADistinctInstall() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bf-symlink-\(UUID().uuidString)")
+        let real = root.appendingPathComponent("qoder")
+        let link = root.appendingPathComponent("qoder-cn")
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: link.path,
+                                                   withDestinationPath: real.path)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        XCTAssertTrue(InstallerPaths.hostDirectoryIsDistinct(real.path, from: "/somewhere/else"),
+                      "普通目录应算独立安装")
+        XCTAssertFalse(InstallerPaths.hostDirectoryIsDistinct(link.path, from: real.path),
+                       "软链指向同一目录时不该被当成独立安装")
+    }
+
     /// Trae 的 `Notification` matcher 匹配的是 notification_type，不是工具名。
     /// 写成工具名会让权限提醒永远不触发。
     func testTraeNotificationMatcherTargetsNotificationType() {
