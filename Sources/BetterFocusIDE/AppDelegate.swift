@@ -46,6 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 初次显示灵动岛。
         notchService.show()
 
+        // 已装集成自愈：内容与本构建不一致（被手工改坏、或残留半截语句）
+        // 就重写回去，避免宿主整份拒绝加载后「已安装但一条通知都没有」。
+        notchService.repairInstalledIntegrations()
+
         // 键盘应答 + 设置快捷键接线。
         notchService.onOpenSettings = { [weak self] in self?.openSettings() }
         notchService.startKeyboard()
