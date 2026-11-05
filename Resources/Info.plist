@@ -37,7 +37,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>BetterFocusIDE uses Automation to activate IDE windows when you click on notifications.</string>
+	<string>BetterFocusIDE uses Automation to activate IDE windows and to bring the browser tab you were working in back to the front when you click a notification.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 BetterFocusIDE. Licensed under GPL-3.0.</string>
 	<key>NSPrincipalClass</key>
