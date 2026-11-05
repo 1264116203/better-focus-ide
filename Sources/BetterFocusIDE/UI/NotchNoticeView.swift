@@ -123,11 +123,7 @@ struct NotchNoticeView: View {
                         Image(systemName: pinned ? "pin.fill" : "pin")
                             .font(.system(size: 12, weight: .semibold))
                             .rotationEffect(.degrees(pinned ? 0 : 45))
-                            .foregroundStyle(pinned
-                                ? Color(red: settings.accentRGB.r,
-                                        green: settings.accentRGB.g,
-                                        blue: settings.accentRGB.b)
-                                : Color.white.opacity(0.4))
+                            .foregroundStyle(PinColors.tint(pinned: pinned))
                     }
                     .buttonStyle(.plain)
                     .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")

@@ -39,7 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 搭建带菜单的状态栏图标。
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "capsule", accessibilityDescription: "BetterFocusIDE")
+            button.image = StatusBarIcon.make()
+            button.toolTip = "BetterFocusIDE"
         }
         statusItem.menu = buildMenu()
 
