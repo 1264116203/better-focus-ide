@@ -58,6 +58,7 @@ enum IDEIconProvider {
         // 终端
         "warp": "warp",
         "iterm": "iterm",
+        "terminal": "terminal",
         // 其他应用
         "workbuddy": "workbuddy",
         "kimi": "kimi",
@@ -93,6 +94,10 @@ enum IDEIconProvider {
         "ai.workbuddy": "workbuddy",
         "ai.moonshot.kimi": "kimi",
         "com.moonshot.kimichat": "kimi",
+        // 终端
+        "com.apple.Terminal": "terminal",
+        "com.googlecode.iterm2": "iterm",
+        "dev.warp.Warp-Stable": "warp",
     ]
 
     /// IDE 名称到品牌色的映射（用于文字徽章背景）
