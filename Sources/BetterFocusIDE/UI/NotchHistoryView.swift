@@ -75,41 +75,23 @@ struct NotchHistoryView: View {
     // MARK: - 主视图
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            VStack(alignment: .leading, spacing: rowGap) {
-                header
-                if controller.entries.isEmpty {
-                    emptyRow
-                } else {
-                    ForEach(controller.entries) { entry in
-                        row(entry)
-                    }
+        VStack(alignment: .leading, spacing: rowGap) {
+            header
+            if controller.entries.isEmpty {
+                emptyRow
+            } else {
+                ForEach(controller.entries) { entry in
+                    row(entry)
                 }
             }
-            .padding(.horizontal, horizontalInset)
-            .padding(.vertical, verticalInset)
-
-            // 钉住开关：ZStack 覆盖层，与通知卡片保持一致的样式
-            Button(action: onTogglePin) {
-                Image(systemName: pinned ? "pin.fill" : "pin")
-                    .font(.system(size: 12, weight: .semibold))
-                    .rotationEffect(.degrees(pinned ? 0 : 45))
-                    .foregroundStyle(pinned
-                        ? Color(red: settings.accentRGB.r,
-                                green: settings.accentRGB.g,
-                                blue: settings.accentRGB.b)
-                        : Color.white.opacity(0.4))
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 12)  // 与标题栏垂直对齐
-            .padding(.trailing, horizontalInset)
-            .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
         }
+        .padding(.horizontal, horizontalInset)
+        .padding(.vertical, verticalInset)
     }
 
     // MARK: - 标题栏
 
-    /// 标题栏：左侧"最近通知 + 计数"，右侧留空给图钉覆盖层
+    /// 标题栏：左侧"最近通知 + 计数"，右侧放钉住开关。
     private var header: some View {
         HStack(spacing: 6) {
             Text("最近通知")
@@ -119,6 +101,8 @@ struct NotchHistoryView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.4))
             Spacer()
+            // 钉住开关：作为行内元素排在标题栏末尾。
+            PinButton(pinned: pinned, action: onTogglePin)
         }
         .frame(height: headerHeight)
     }
