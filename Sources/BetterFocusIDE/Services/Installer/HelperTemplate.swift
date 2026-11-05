@@ -125,6 +125,9 @@ enum HelperTemplate {
                 index = data.get("answer_index", -1)
                 if not isinstance(index, int):
                     index = -1
+                # 岛侧判定「宿主正在前台、它自己会画提问面板」→ 放弃接管。
+                if data.get("defer") is True or index == -4:
+                    return (True, "", -4)
                 return (True, data.get("answer_label") or "", index)
             return (False, "", -1)
 
@@ -357,6 +360,10 @@ enum HelperTemplate {
                 lines, answered, timed_out = [], 0, False
                 for q in questions:
                     found, label, index = read_answer(session_id, request_id, q["id"], since)
+                    if found and index == -4:
+                        # 让位：宿主自带提问面板且正在前台。静默退出，把问题交回
+                        # IDE 自己的对话框，避免同一道题让用户答两遍。
+                        return
                     if found and index == -1:
                         timed_out = True
                     elif found:

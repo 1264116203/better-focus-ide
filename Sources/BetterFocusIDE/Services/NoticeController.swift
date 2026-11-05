@@ -113,6 +113,12 @@ final class NoticeController: ObservableObject {
         // Notification 类权限提醒只带文案、没有 tool_name；从「permission to use Bash」
         // 里抠出工具名，标题才不会一律退化成「操作」。
         let resolvedToolName = toolName.isEmpty ? PermissionRequest.toolNameHint(from: detail) : toolName
+        // 提问工具从权限通道冒出来时不弹横幅：它不是权限申请，问题卡片或宿主
+        // 自带的问卷面板已经在问了（见 QuestionTakeover）。
+        if PermissionRequest.isQuestionTool(resolvedToolName) {
+            Log.info("handlePermissionNotice: 跳过提问工具的权限横幅 tool=\(resolvedToolName)", topic: "permission")
+            return
+        }
         let action = PermissionRequest.actionFromToolName(resolvedToolName)
         let title = "Agent 请求执行「\(PermissionRequest.actionLabel(action))」"
         let hostLabel = AgentProvider.label(provider: providerEnum,

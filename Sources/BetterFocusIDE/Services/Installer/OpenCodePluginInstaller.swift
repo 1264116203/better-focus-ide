@@ -139,6 +139,8 @@ enum PluginTemplate {
             if (parsed.request_id && requestID && parsed.request_id !== requestID) continue;
             try { fs.unlinkSync(file); } catch {}
             const index = typeof parsed.answer_index === 'number' ? parsed.answer_index : -1;
+            // 岛侧让位（宿主自带提问面板且正在前台）：交回原生 question 工具。
+            if (parsed.defer === true || index === -4) return { deferred: true };
             if (index === -1) return { timedOut: true };
             const label = typeof parsed.answer_label === 'string' ? parsed.answer_label : '';
             const labels = (index === -3)
@@ -160,6 +162,7 @@ enum PluginTemplate {
               if (answers[i].length) continue;
               const got = readAnswer(sessionID, requestID, questions[i].id, sinceMs);
               if (got === null) { pending++; continue; }
+              if (got.deferred) return { answers, resolved: false, deferred: true };
               if (got.timedOut) return { answers, resolved: false };
               if (got.labels.length) answers[i] = got.labels;
             }
@@ -190,8 +193,11 @@ enum PluginTemplate {
                     payload: { questions, request_id: requestID }
                   });
                   if (!sent) return original(input, context);
-                  const { answers, resolved } = await awaitAnswers(
+                  const { answers, resolved, deferred } = await awaitAnswers(
                     questions, sessionID, requestID, Date.now());
+                  // 让位：宿主自带提问面板且用户就在它前面 → 交回原生工具，
+                  // 只问一次。不发 question_timeout，否则岛上会留一张废卡。
+                  if (deferred) return original(input, context);
                   if (!resolved) {
                     await sendToIsland({
                       provider: 'opencode', event: 'question_timeout',
