@@ -15,10 +15,10 @@ import SwiftUI
 /// │ 最近通知                              3 条   │  ← header (20pt)
 /// ├─────────────────────────────────────────────┤
 /// │ [Q] 标题文字              状态               │  ← row (40pt)
-/// │     答：回答文字          来源 · 时间         │
+/// │     问：副文字            来源 · 时间         │
 /// │                                             │
 /// │ [Q] 标题文字              状态               │  ← gap (4pt)
-/// │     答：回答文字          来源 · 时间         │
+/// │     你说：副文字          来源 · 时间         │
 /// └─────────────────────────────────────────────┘
 /// ```
 ///
@@ -26,8 +26,10 @@ import SwiftUI
 ///
 /// - **固定宽度元数据列**：右侧状态+来源时间列固定 104pt，标题占据剩余空间
 /// - **无行背景**：原型图无行背景色块，依赖间距区分行
-/// - **文字层级**：标题(13pt 半粗) > 状态(10pt) > 回答(10pt 淡灰) > 来源时间(10pt 更淡)
-/// - **回答前缀**：body 文本以"答："前缀显示，区分标题和回答内容
+/// - **文字层级**：标题(13pt 半粗) > 状态(10pt) > 副文字(10pt 淡灰) > 来源时间(10pt 更淡)
+/// - **副文字前缀**：三类来源语义不同（提问的正文 / 权限的操作详情 /
+///   轮次完成里用户这一轮的输入），前缀由 `HistoryKind` 分别给出，
+///   不再统一冠以「答：」
 struct NotchHistoryView: View {
     /// 历史控制器，提供通知条目数据
     @ObservedObject var controller: HistoryController
@@ -166,9 +168,10 @@ struct NotchHistoryView: View {
                             .foregroundStyle(Color(red: 1, green: 1, blue: 1, opacity: 0.92))
                             .lineLimit(1)
 
-                        // 回答文本：10pt，淡灰色，带"答："前缀
-                        if !entry.body.isEmpty {
-                            Text("答：\(entry.body)")
+                        // 副文字：10pt，淡灰色。前缀按来源类型区分（问 / 详情 / 你说），
+                        // 正文为空或与标题重复时整行不渲染。
+                        if !entry.bodyLine.isEmpty {
+                            Text(entry.bodyLine)
                                 .font(.system(size: 10))
                                 .foregroundStyle(Color(red: 0.70, green: 0.72, blue: 0.78, opacity: 0.9))
                                 .lineLimit(1)

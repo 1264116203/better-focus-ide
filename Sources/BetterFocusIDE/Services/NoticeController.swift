@@ -129,6 +129,8 @@ final class NoticeController: ObservableObject {
             sessionID: sessionID,
             title: title,
             body: body,
+            bodyIsFallback: false,
+            kind: .permission,
             project: project,
             host: host.isEmpty ? nil : host,
             arrivedAt: Date(),

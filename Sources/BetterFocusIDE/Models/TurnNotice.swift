@@ -17,6 +17,11 @@ struct TurnNotice: Equatable, Identifiable {
     let title: String
     /// 横幅正文（优先取最新一条助手消息，否则回退到跳转提示）。
     let body: String
+    /// 正文是否为「点击跳转回 X」兜底文案（读不到会话记录时）。
+    /// 历史面板据此隐藏该行——没有实质内容，冠任何前缀都别扭。
+    let bodyIsFallback: Bool
+    /// 条目来源类型：轮次完成走 `.turn`，权限兜底通知走 `.permission`。
+    let kind: HistoryKind
     /// 项目叶子名（工作目录末级）。
     let project: String
     /// 宿主应用信息，用于精确跳转。
@@ -29,6 +34,10 @@ struct TurnNotice: Equatable, Identifiable {
     let fromCLI: Bool
 
     static func == (lhs: TurnNotice, rhs: TurnNotice) -> Bool { lhs.id == rhs.id }
+
+    /// 读不到会话记录时的兜底正文前缀（如「点击跳转回 OpenCode」）。
+    /// 这类文案不含实质内容，历史行据此隐藏副文字。
+    static let jumpHintPrefix = "点击跳转回"
 
     /// 将 `turn_finished` socket 消息解析为一条通知。
     ///
@@ -56,7 +65,10 @@ struct TurnNotice: Equatable, Identifiable {
             providerName: name,
             sessionID: sessionID,
             title: summary.title.isEmpty ? "\(name) 回复完成" : summary.title,
-            body: summary.latest.isEmpty ? "点击跳转回 \(name)" : summary.latest,
+            body: summary.latest.isEmpty
+                ? "\(Self.jumpHintPrefix) \(name)" : summary.latest,
+            bodyIsFallback: summary.latest.isEmpty,
+            kind: .turn,
             project: project,
             host: host.isEmpty ? nil : host,
             arrivedAt: Date(),
