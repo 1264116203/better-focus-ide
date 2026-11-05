@@ -185,6 +185,19 @@ struct PermissionRequest: Equatable, Identifiable {
         return name.isEmpty ? "" : String(name)
     }
 
+    /// 是否是「向人提问」类工具。
+    ///
+    /// 提问工具会从权限通道也冒一遍（WorkBuddy 的 Notification 只带一句
+    /// `…permission to use AskUserQuestion`），但它根本不是权限申请：
+    /// 问题卡片或宿主自带的问卷面板已经在问了，再弹一条「请求执行操作」
+    /// 只会让人以为要审批两次。
+    static func isQuestionTool(_ name: String) -> Bool {
+        let lowered = name.lowercased().replacingOccurrences(of: "_", with: "")
+        return lowered == "askuserquestion"
+            || lowered == "question"
+            || lowered == "askfollowupquestion"
+    }
+
     /// 从 tool_input 的键存在性反推动作（有 command→shell、有 url→webfetch 等）。
     private static func actionFromToolInput(_ input: [String: AnyCodableValue]?) -> String? {
         guard let input else { return nil }

@@ -49,6 +49,24 @@ final class QuestionController: ObservableObject {
             let provider = message.resolvedProvider
             let host = HostInfo(from: message.host,
                                 cwd: message.cwd)
+            // 宿主自己会画提问面板、而且此刻就在前台 → 让位。
+            //
+            // 这类 IDE（WorkBuddy 等）在模型发起工具的瞬间就把面板渲染出来了，
+            // 不等 PreToolUse 返回；岛上再弹一张卡就是同一道题问两遍，
+            // 而且 IDE 里那次选择会被 hook 的 deny 覆盖掉。
+            if !QuestionTakeover.shouldTakeOver(
+                host: host.isEmpty ? nil : host,
+                frontmostBundle: QuestionTakeover.frontmostBundle()) {
+                AnswerDispatcher.dispatchDefer(
+                    sessionID: message.sessionID,
+                    questionIDs: questions.map(\.id),
+                    requestID: requestID)
+                Log.info("question: 让位给宿主自带的提问面板"
+                         + "（\(host.name.isEmpty ? host.bundle : host.name) 正在前台，"
+                         + "session=\(message.sessionID)）", topic: "question")
+                return
+            }
+
             let newPrompt = AgentQuestionPrompt(
                 provider: provider, sessionID: message.sessionID,
                 questions: questions, arrivedAt: Date(), requestID: requestID,

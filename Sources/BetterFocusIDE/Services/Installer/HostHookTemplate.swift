@@ -137,6 +137,11 @@ enum HostHookTemplate {
                 index = data.get("answer_index", -1)
                 if not isinstance(index, int):
                     index = -1
+                # DEFER_INDEX：岛侧判定「宿主就在前台、它自己会画提问面板」，
+                # 于是放弃接管。此时什么都不用回——stdout 静默就是「无决策」，
+                # 宿主按原生流程把问题问出来，用户只答一次。
+                if data.get("defer") is True or index == -4:
+                    return (True, "", -4)
                 return (True, data.get("answer_label") or "", index)
             return (False, "", -1)
 
@@ -350,6 +355,10 @@ enum HostHookTemplate {
                 lines, answered, timed_out = [], 0, False
                 for q in questions:
                     found, label, index = read_answer(session_id, request_id, q["id"], since)
+                    if found and index == -4:
+                        # 让位：宿主自带提问面板且正在前台。静默退出（不打印任何
+                        # 决策）是本方言的「无决策」——宿主自己的对话框接手。
+                        return
                     if found and index == -1:
                         timed_out = True
                     elif found:

@@ -40,6 +40,30 @@ enum AnswerDispatcher {
                     extra: requestID.isEmpty ? nil : ["request_id": requestID])
     }
 
+    /// 「让位」标记：宿主自己会画提问面板，让 hook 停止接管。
+    ///
+    /// 值取 -4，避开已有的 -1（超时）、-2（自定义文本）、-3（多选）。
+    /// 同时写 `defer: true`，hook / 插件优先认这个键，下标只是兜底。
+    static let deferIndex = -4
+
+    /// 下发一次「让位」：告诉 hook 别接管这道题，把决定权交回宿主自己的对话框。
+    ///
+    /// 这是**必须被对端理解**的信号——只要有一个通道没实现（老版本 hook、旧插件），
+    /// 用户就会看到「卡片不出现、工具却一直卡着」直到超时。因此新增通道时，
+    /// 三个模板（HostHookTemplate / HelperTemplate / OpenCode 插件）要一起改，
+    /// 并各自留一条契约测试。
+    static func dispatchDefer(sessionID: String, questionIDs: [String],
+                              requestID: String = "") {
+        for questionID in questionIDs {
+            let file = questionPath(sessionID: sessionID, questionID: questionID,
+                                    requestID: requestID)
+            var extra: [String: Any] = ["defer": true]
+            if !requestID.isEmpty { extra["request_id"] = requestID }
+            writeAnswer(to: file, optionIndex: deferIndex, optionLabel: "",
+                        extra: extra)
+        }
+    }
+
     /// 下发一次问题超时（answer_index = -1）。
     static func dispatchTimeout(sessionID: String, questionID: String,
                                 requestID: String = "") {
