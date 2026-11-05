@@ -211,19 +211,45 @@ enum PluginTemplate {
             // ctx.event.on does not exist (silently undefined), so the old
             // code registered nothing and no notice ever fired — with the
             // plugin still "loading" cleanly. Subscribe and iterate instead.
-            // 2.x reports turn state as session.status with
-            // data = {sessionID, status: {type}} where only 'idle' means the
-            // agent stopped (busy/retry are mid-turn); older builds emit
-            // session.idle with data = {sessionID} directly. Sub-sessions
-            // idle too, so debounce per session to keep one turn = one card.
+            //
+            // 2.2.x emits fine-grained progress events and reports the end
+            // of a turn as session.execution.succeeded — there is no
+            // session.idle and no session.status any more (verified against
+            // 2.2.5). Older builds used session.idle / session.status with
+            // status.type === 'idle', so keep those as fallbacks. Sub-agents
+            // finish too, hence the debounce.
+            const TURN_EVENTS = new Set([
+              'session.execution.succeeded', // 2.2.x
+              'session.idle',                // 1.x / early 2.x
+              'session.status',              // mid 2.x
+            ]);
             const TURN_DEBOUNCE_MS = 2000;
             const lastTurnAt = new Map();
+            // 会话标题与最近一次用户输入：随 turn_finished 上报，否则通知
+            // 只能显示「OpenCode 回复完成 / 点击跳转回 OpenCode」这类空话。
+            const sessionTitles = new Map();
+            const lastPrompt = new Map();
+            // 会话目录（事件顶层 location.directory）：应用侧据此定位项目与终端。
+            const sessionDirs = new Map();
             const eventController = new AbortController();
             void (async () => {
               try {
                 for await (const event of ctx.event.subscribe({ signal: eventController.signal })) {
-                  if (event.type !== 'session.idle' && event.type !== 'session.status') continue;
                   const d = event.data || {};
+                  const sid = d.sessionID || d.session_id || '';
+                  if (sid && event.location && event.location.directory) {
+                    sessionDirs.set(sid, event.location.directory);
+                  }
+                  if (sid) {
+                    if ((event.type === 'session.renamed' || event.type === 'session.created')
+                        && typeof d.title === 'string' && d.title) {
+                      sessionTitles.set(sid, d.title);
+                    } else if (event.type === 'session.inbox.enqueued') {
+                      const text = d.item && d.item.payload && d.item.payload.text;
+                      if (typeof text === 'string' && text) lastPrompt.set(sid, text);
+                    }
+                  }
+                  if (!TURN_EVENTS.has(event.type)) continue;
                   if (event.type === 'session.status' && (!d.status || d.status.type !== 'idle')) continue;
                   if (!alertsEnabled('turn')) continue;
                   const sessionID = d.sessionID || d.session_id
@@ -235,7 +261,11 @@ enum PluginTemplate {
                   await sendToIsland({
                     provider: 'opencode', event: 'turn_finished',
                     session_id: sessionID, timestamp: new Date().toISOString(),
-                    payload: {}
+                    payload: {
+                      title: sessionTitles.get(sessionID) || '',
+                      prompt: lastPrompt.get(sessionID) || '',
+                      directory: sessionDirs.get(sessionID) || ''
+                    }
                   });
                 }
               } catch { /* stream closed with the plugin */ }
