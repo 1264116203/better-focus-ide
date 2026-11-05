@@ -605,7 +605,6 @@ final class NotchService: ObservableObject {
         // 先记日志再形变：首帧布局可能耗时数百毫秒到数秒，日志放在 animateTo
         // 之后会让「卡片已弹出」的记录晚于真实时刻，干扰问题定位。
         Log.info("showCard: \(card) 主动弹出, pinned=\(pinned)", topic: "card")
-        FeedbackService.onArrive()
 
         // 新请求到达即清掉上一次手动收起的让位期，避免悬停状态机把它压住。
         manualCollapseUntil = nil
@@ -619,6 +618,10 @@ final class NotchService: ObservableObject {
         animateTo(size: targetSizeForCurrentCard())
         syncKeyFocus()
         updatePendingTotal()
+        // 提示音 / 触感必须排在形变之后：`NSSound(named:)` 第一次会拉起整个
+        // 音频栈，实测把「卡片上屏」整体拖后 60~600ms。宿主的提问面板早在
+        // 模型吐出 tool_use 时就画好了，这几百毫秒正好决定谁先被看见。
+        FeedbackService.onArrive()
     }
 
     /// 待办进度卡片上屏。

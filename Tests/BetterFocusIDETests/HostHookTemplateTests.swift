@@ -75,6 +75,27 @@ final class HostHookTemplateTests: XCTestCase {
         }
     }
 
+    // MARK: - 出卡延迟
+
+    /// 「岛先出现」不是靠猜，是靠这条链上的毫秒数：宿主自己的提问面板在模型
+    /// 吐出 `tool_use` 的瞬间就画好了，岛要抢在用户动手之前被看见，只能把
+    /// hook 启动那段压到极限。三个不变量：
+    ///
+    /// - 启动器带 `-S`：跳过 site 初始化（实测 273ms → 33ms）；
+    /// - 正文顶部不 import subprocess：它会拖进 threading/enum/functools（~100ms），
+    ///   只有真要爬进程祖先链时才付这个钱；
+    /// - 烘焙了宿主身份的 GUI 宿主直接用它，不爬链（爬链 ~55ms/次，含多次 `ps`）。
+    func testCardPathKeepsHookStartupCheap() {
+        XCTAssertTrue(HookInstallerSupport.scriptContent().contains(#"exec "$PYTHON" -S"#))
+        XCTAssertTrue(QoderHookInstaller.scriptContent.contains(#"exec "$PYTHON" -S"#))
+        XCTAssertTrue(QoderCnHookInstaller.scriptContent.contains(#"exec "$PYTHON" -S"#))
+
+        let body = HostHookTemplate.body
+        XCTAssertFalse(body.contains("import subprocess\n"), "subprocess 又回到顶部导入了")
+        XCTAssertTrue(body.contains("import subprocess  #"), "host_app 里没有现用现导入")
+        XCTAssertTrue(body.contains("if HOST_BUNDLE or HOST_NAME:"), "GUI 宿主又开始爬进程祖先链了")
+    }
+
     // MARK: - 注册表
 
     /// Cursor 只注册观测型事件：权限类事件会强制 allow/deny，绝不碰。

@@ -73,7 +73,8 @@ enum QoderCnHookInstaller {
           exit 0
         fi
 
-        exec "$PYTHON" "$SELF_DIR/betterfocus-hook.py" "$@"
+        # `-S` 见 HostHookTemplate.scriptContent 的说明。
+        exec "$PYTHON" -S "$SELF_DIR/betterfocus-hook.py" "$@"
         """
     }
 }

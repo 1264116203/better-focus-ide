@@ -30,9 +30,12 @@ enum HostHookTemplate {
         import json
         import os
         import socket
-        import subprocess
         import sys
         import time
+        # 故意不在这里 import subprocess：它会把 threading / enum / functools
+        # 全拖进来，实测多花 ~100ms，而这条进程就在「岛什么时候出卡」的关键
+        # 路径上。只有需要走进程祖先链的宿主（烘焙身份为空的 CLI）才在
+        # host_app() 里现用现导入。
 
         PROVIDER = os.environ.get("BETTERFOCUS_PROVIDER") or "__PROVIDER__"
         EVENT_STYLE = os.environ.get("BETTERFOCUS_EVENT_STYLE") or "__EVENT_STYLE__"
@@ -220,6 +223,7 @@ enum HostHookTemplate {
         def host_app():
             # Walk up to the outermost .app so clicking a notice jumps back to
             # the right window (an IDE-embedded CLI must report the IDE, not sh).
+            import subprocess  # 见文件头的说明：只为这一步付启动成本。
             pid = os.getpid()
             for _hop in range(16):
                 try:
@@ -255,13 +259,22 @@ enum HostHookTemplate {
 
 
         def current_host():
+            # 装的时候烘焙了宿主身份（GUI 宿主：WorkBuddy / Qoder / Trae / Cursor）
+            # 就直接用，不爬进程祖先链——爬链每一步都要拉一个 `ps`，实测 ~55ms，
+            # 而它正好挡在 `send()` 前面，也就是挡在岛上出卡前面。这些宿主本来就是
+            # 由它自己的 .app 拉起来的，祖先链最终找到的也是同一个身份。
+            # 烘焙身份为空的是 CLI 宿主（Claude Code / Codex / Kimi），那些才真的
+            # 需要爬链找出「外面是哪个终端」。
             global _HOST_CACHE
             if _HOST_CACHE is None:
-                found = host_app()
-                if found["bundle"] or found["name"] or found["path"]:
-                    _HOST_CACHE = found
-                else:
+                if HOST_BUNDLE or HOST_NAME:
                     _HOST_CACHE = {"bundle": HOST_BUNDLE, "name": HOST_NAME, "path": HOST_PATH}
+                else:
+                    found = host_app()
+                    if found["bundle"] or found["name"] or found["path"]:
+                        _HOST_CACHE = found
+                    else:
+                        _HOST_CACHE = {"bundle": HOST_BUNDLE, "name": HOST_NAME, "path": HOST_PATH}
             return _HOST_CACHE
 
 
@@ -339,28 +352,6 @@ enum HostHookTemplate {
             send(msg)
 
 
-        def emit_native_answer(questions, labels, tool_input, hook_event):
-            # WorkBuddy 专用：用 `allow` + `updatedInput.answers` 把岛上的选择
-            # 直接塞给工具，宿主就不会再去弹它自己的问卷（那份面板是宿主在
-            # 工具执行时通过 ACP question 请求画出来的，deny 关不掉它）。
-            # 宿主不认这个字段时等价于「放行」——会在 IDE 里再问一遍，
-            # 所以这条路径要盯着日志确认。
-            answers = {}
-            for q in questions:
-                label = labels.get(q.get("id"), "")
-                if label:
-                    answers[q.get("question") or q.get("id")] = label
-            merged = dict(tool_input) if isinstance(tool_input, dict) else {}
-            merged["answers"] = answers
-            json.dump({"hookSpecificOutput": {
-                "hookEventName": hook_event,
-                "permissionDecision": "allow",
-                "updatedInput": merged,
-            }}, sys.stdout)
-            sys.stdout.write(chr(10))
-            sys.stdout.flush()
-
-
         def run_question(session_id, payload, questions, hook_event):
             if not claim(session_id, payload, "question"):
                 return
@@ -374,7 +365,7 @@ enum HostHookTemplate {
             since = time.time()
             deadline = since + QUESTION_TIMEOUT
             while time.time() < deadline:
-                lines, labels, answered, timed_out = [], {}, 0, False
+                lines, answered, timed_out = [], 0, False
                 for q in questions:
                     found, label, index = read_answer(session_id, request_id, q["id"], since)
                     if found and index == -4:
@@ -385,15 +376,10 @@ enum HostHookTemplate {
                         timed_out = True
                     elif found:
                         answered += 1
-                        labels[q["id"]] = label
                     lines.append("  - %s: %s" % (q["header"], label))
                 if timed_out:
                     break
                 if answered == len(questions) and questions:
-                    if PROVIDER == "workbuddy":
-                        emit_native_answer(questions, labels,
-                                           payload.get("tool_input"), hook_event)
-                        return
                     reason = ("The person answered on the BetterFocusIDE island. "
                               "Use these answers and continue." + chr(10) + chr(10).join(lines))
                     # deny 会拦掉宿主自己的提问对话框，reason 把答案回灌给 Agent。
@@ -618,7 +604,11 @@ enum HookInstallerSupport {
           exit 0
         fi
 
-        exec "$PYTHON" "$SELF_DIR/betterfocus-hook.py" "$@"
+        # `-S` 跳过 site 初始化：这脚本只用标准库，而 site 会把机器上所有
+        # site-packages 的 .pth 走一遍。实测同一台机器 `python3 -c pass`
+        # 273ms、`python3 -S -c pass` 33ms——省下的 240ms 全都在「岛上出卡」
+        # 的关键路径上，宿主自己的面板早在模型吐出 tool_use 时就画好了。
+        exec "$PYTHON" -S "$SELF_DIR/betterfocus-hook.py" "$@"
         """
     }
 
