@@ -53,6 +53,8 @@ enum PluginTemplate {
         // 2. Permissions: `permission.evaluate` runs after rules and before the
         //    prompt; forwards to the island and rewrites effect to allow/deny.
         // 3. Turn finished: on session idle, pops the "reply done" notice.
+        // 4. Todo progress: wraps the todo tool and forwards the whole list on
+        //    every write, so the island can draw the segmented progress card.
         //
         // Answer files:
         //   __ANSWER_DIR__/<session>_<id>.json            (questions)
@@ -119,8 +121,34 @@ enum PluginTemplate {
           }));
         }
 
-        function answerPath(sessionID, requestID, questionID) {
-          return requestID
+        // 待办整表：OpenCode 的工具名是 todowrite（v2 已移除，wrap 不到就自然跳过）。
+        // 字段是 content + status，但这里仍按各家的别名兜一遍，避免版本差异导致丢项。
+        function normaliseTodos(input) {
+          const args = input && typeof input === 'object' ? input : {};
+          const raw = Array.isArray(args.todos) ? args.todos
+            : (Array.isArray(args.tasks) ? args.tasks : []);
+          const todos = [];
+          raw.forEach((item, i) => {
+            if (typeof item === 'string') {
+              const text = item.trim();
+              if (text) todos.push({ id: 't' + i, content: text, status: 'pending' });
+              return;
+            }
+            if (!item || typeof item !== 'object') return;
+            const content = String(item.content || item.title || item.subject || '').trim();
+            if (!content) return;
+            let status = item.status || item.state;
+            if (!status) status = item.completed ? 'completed' : 'pending';
+            todos.push({
+              id: String(item.id || item.task_id || ('t' + i)),
+              content,
+              status: String(status)
+            });
+          });
+          return todos;
+        }
+
+        function answerPath(sessionID, requestID, questionID) {          return requestID
             ? ANSWER_DIR + '/' + sessionID + '_' + requestID + '_' + questionID + '.json'
             : ANSWER_DIR + '/' + sessionID + '_' + questionID + '.json';
         }
@@ -209,6 +237,34 @@ enum PluginTemplate {
                   return { output: { answers } };
                 };
               });
+            });
+
+            // Todo progress: wrap the todo tool so every write forwards the full
+            // list. todowrite is overwrite-semantics (the whole table each time),
+            // which is exactly what the island's todo_updated expects.
+            await ctx.tool.transform((tools) => {
+              for (const name of ['todowrite', 'todo_write', 'TodoWrite', 'SetTodoList']) {
+                const tool = tools.get(name);
+                if (!tool) continue;
+                const originalTodo = tool.execute;
+                tools.update(name, (t) => {
+                  t.execute = async (input, context) => {
+                    const result = await originalTodo(input, context);
+                    try {
+                      const todos = normaliseTodos(input);
+                      if (todos.length) {
+                        await sendToIsland({
+                          provider: 'opencode', event: 'todo_updated',
+                          session_id: (context && context.sessionID) || 'unknown',
+                          timestamp: new Date().toISOString(),
+                          payload: { todos }
+                        });
+                      }
+                    } catch { /* 待办只是过程可视化，绝不影响工具本身 */ }
+                    return result;
+                  };
+                });
+              }
             });
 
             // Turn finished: pop the notice when a session goes idle.

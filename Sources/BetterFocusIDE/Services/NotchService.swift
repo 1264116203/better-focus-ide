@@ -25,6 +25,8 @@ final class NotchService: ObservableObject {
     let noticeController = NoticeController()
     // MARK: - 阶段 4：历史
     let historyController = HistoryController()
+    // MARK: - 阶段 5：任务进度（各宿主 todowrite）
+    let todoController = TodoController()
     /// 当前活动卡片（提问优先）。
     @Published private(set) var activeCard: ActiveCard = .none
     /// 所有控制器的待处理总数（驱动收起态圆点）。
@@ -45,7 +47,7 @@ final class NotchService: ObservableObject {
     @Published private(set) var closingCard: ActiveCard?
 
     enum ActiveCard {
-        case none, question, permission, notice, history
+        case none, question, permission, notice, history, todo
     }
     
     // MARK: - 私有依赖
@@ -218,8 +220,12 @@ final class NotchService: ObservableObject {
         manualCollapseNeedsMouseExit = hovering
         cancelAutoCollapse()
         collapseAt = nil
-        // 历史与通知是瞬态的：收起即消失。提问与权限持续（卡片仍等用户）。
+        // 历史、通知、任务进度是瞬态的：收起即消失。提问与权限持续（卡片仍等用户）。
         if activeCard == .history {
+            activeCard = .none
+        } else if activeCard == .todo {
+            // 收起即视为「看过了」：不清空控制器会挡住下一次自动上屏。
+            todoController.reset()
             activeCard = .none
         } else if activeCard == .notice {
             // 手动收起通知前，先保存通知数据供气泡点击恢复
@@ -615,6 +621,39 @@ final class NotchService: ObservableObject {
         updatePendingTotal()
     }
 
+    /// 待办进度卡片上屏。
+    ///
+    /// 与 `showCard` 的差别有三处，都是刻意的：
+    /// - **不受功能开关门控**：它不拦截任何请求，用户没有需要回应的东西。
+    /// - **不进入 `pendingTotal`**：待处理圆点表示「等你处理」，任务进度不是。
+    /// - **让位交互式卡片**：提问/权限在屏时不抢占，等它们撤下后由
+    ///   `handleCardDismissal` 把进度接回来。
+    private func presentTodoCard() {
+        guard todoController.hasTodo else { return }
+        if activeCard == .question || activeCard == .permission { return }
+        activeCard = .todo
+        refreshPinned()
+        manualCollapseUntil = nil
+        manualCollapseNeedsMouseExit = false
+        collapseAt = nil
+        if !expanded {
+            expanded = true
+            expandedAt = Date()
+            isClosing = false
+        }
+        // 每个 todo 事件都会走到这里；高度没变时不必再推进画布，
+        // 否则同一尺寸反复 animateTo 会让岛面出现细微抖动。
+        let size = targetSizeForCurrentCard()
+        if size != surfaceSize { animateTo(size: size) }
+        syncKeyFocus()
+        // 全部完成：留 2.5s 给人看清「全部完成」，再自动收起（钉住时不收）。
+        if todoController.progress.isFinished {
+            scheduleAutoCollapse(after: 2.5)
+        } else {
+            cancelAutoCollapse()
+        }
+    }
+
     private func handleCardDismissal() {
         // Check if any controller still has an active card
         if questionController.hasActiveCard {
@@ -625,6 +664,11 @@ final class NotchService: ObservableObject {
             animateTo(size: targetSizeForCurrentCard())
         } else if noticeController.hasActiveNotice {
             activeCard = .notice
+        } else if todoController.hasTodo {
+            // 交互式卡片撤下后，把仍在进行中的任务进度接回来（不必等下一次 todo 事件）。
+            activeCard = .todo
+            animateTo(size: targetSizeForCurrentCard())
+            if todoController.progress.isFinished { scheduleAutoCollapse(after: 2.5) }
         } else if noticeController.count > 0 {
             // 通知队列有待展示项（之前因交互卡片在屏而被排队）：弹出下一条。
             hasUnprocessedNotice = false
@@ -701,6 +745,13 @@ final class NotchService: ObservableObject {
                 + Double(rows) * 40.0 + Double(max(0, rows - 1)) * 4.0
             let height = geometry.safeContentTop + content
             return CGSize(width: NotchLayout.historyWidth, height: height)
+        case .todo:
+            // 高度随「有没有下一步」在 96 / 120 之间切换；全部完成时回到无下一步形态。
+            let progress = todoController.progress
+            let showsNext = progress.next != nil && !progress.isFinished
+            return CGSize(width: NotchLayout.questionCardWidth,
+                          height: geometry.safeContentTop
+                            + TodoCardLayout.contentHeight(showsNext: showsNext))
         case .none:
             // 空闲状态：不应展开，返回最小尺寸
             return CGSize(width: NotchLayout.expandedWidth,
@@ -1037,6 +1088,12 @@ final class NotchService: ObservableObject {
     @objc private func contextMenuSettings() { onOpenSettings?() }
     @objc private func contextMenuQuit() { NSApplication.shared.terminate(nil) }
 
+    /// 从 cwd 取项目名（末级目录）：卡片副标题用，缺省为空串。
+    private static func projectName(from cwd: String?) -> String {
+        guard let cwd, !cwd.isEmpty else { return "" }
+        return (cwd as NSString).lastPathComponent
+    }
+
     /// 把一条 socket 消息路由到对应控制器。
     ///
     /// 提问/权限请求受各自开关门控：关掉即忽略，请求回落到 IDE 自己的弹窗。
@@ -1063,8 +1120,26 @@ final class NotchService: ObservableObject {
         case .sessionEnded:
             questionController.handleEvent(.sessionEnded, message: message)
             permissionController.handleEvent(.sessionEnded, message: message)
+            // 待办归属会话：会话结束后残留的进度会一直挂在岛上，必须一并清掉。
+            todoController.handleSessionEnded(message.sessionID)
+            if activeCard == .todo, !todoController.hasTodo { handleCardDismissal() }
         case .turnFinished:
             noticeController.handleTurnFinished(message: message)
+        case .todoUpdated, .todoItemUpdated:
+            // 待办不拦截任何请求，也不参与待处理计数：它只是过程可视化。
+            let provider = message.resolvedProvider
+            let name = AgentProvider.label(provider: provider,
+                                           hostName: message.host?["name"]?.stringValue,
+                                           bundleID: message.host?["bundle"]?.stringValue)
+            todoController.ingest(payload: message.payload,
+                                  sessionID: message.sessionID,
+                                  provider: provider,
+                                  providerName: name,
+                                  project: Self.projectName(from: message.cwd))
+            presentTodoCard()
+        case .todoCleared:
+            todoController.reset()
+            if activeCard == .todo { handleCardDismissal() }
         case .activity:
             showHistory()  // 临时：供脚本触发打开历史，便于调试
         }
@@ -1097,6 +1172,7 @@ final class NotchService: ObservableObject {
         questionController.flushAll(notify: false)
         permissionController.flushAll(notify: false)
         noticeController.flushAll()
+        todoController.reset()
     }
 
     /// 清空卡片并把灵动岛收回去（带正常收起动画）。

@@ -22,6 +22,10 @@ enum HelperTemplate {
         #   - PreToolUse: fired for every tool call; the platform does NOT wait
         #     for its answer. Only AskUserQuestion is handled here (older builds
         #     enter the question flow through it); anything else exits silently.
+        #   - PostToolUse: fired after a tool finished. Only the todo tools are
+        #     handled here — the island draws the segmented progress card from
+        #     the tool's own argument list (TodoWrite sends the whole table
+        #     every time, so a plain overwrite is the correct semantics).
         #   - Stop: the main agent finished a turn. Pops the "reply done" notice
         #     and must exit 0 printing nothing.
         #   - SessionEnd: the session ended / was interrupted; the island takes
@@ -446,6 +450,69 @@ enum HelperTemplate {
                   "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "payload": {}})
 
 
+        # ── 待办进度 ────────────────────────────────────────────────────
+        # Qoder 原生名是 todo_write，Claude 血统（CLI / 插件旧版）是 TodoWrite；
+        # 匹配器与这里都要两个都认，否则换个宿主形态卡片就永远不出现。
+        TODO_TOOLS = ("TodoWrite", "todo_write", "todowrite", "SetTodoList")
+
+
+        def normalise_todos(raw):
+            \"\"\"把各家 todo 数组压成 {id, content, status}。
+
+            宿主字段差异：Claude 系用 content，Kimi 用 title，V2 任务用 subject；
+            状态值 Kimi 写 done，其余写 completed。认不出的正文直接丢弃——
+            发一张空表会把卡片错误地推进「全部完成」。
+            \"\"\"
+            todos = []
+            for index, item in enumerate(raw):
+                if isinstance(item, str):
+                    text = item.strip()
+                    if text:
+                        todos.append({"id": "t%d" % index, "content": text,
+                                      "status": "pending"})
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                content = (item.get("content") or item.get("title")
+                           or item.get("subject") or "")
+                content = content.strip() if isinstance(content, str) else ""
+                if not content:
+                    continue
+                status = item.get("status") or item.get("state")
+                if not status:
+                    status = "completed" if item.get("completed") else "pending"
+                todos.append({"id": str(item.get("id") or item.get("task_id")
+                                        or ("t%d" % index)),
+                              "content": content,
+                              "status": str(status)})
+            return todos
+
+
+        def emit_todo(session_id, payload):
+            \"\"\"转发待办整表。tool_input 是首选来源：它就是要写进去的那张表。
+
+            TodoWrite 每次重发完整列表，所以这里不需要做合并——岛侧按整表覆盖处理。
+            \"\"\"
+            tool_input = payload.get("tool_input")
+            raw = tool_input.get("todos") if isinstance(tool_input, dict) else None
+            if not isinstance(raw, list):
+                # 少数宿主把结果放在 tool_response 里（写入后的回读）。
+                response = payload.get("tool_response")
+                if isinstance(response, dict):
+                    raw = response.get("todos")
+            if not isinstance(raw, list):
+                return
+            todos = normalise_todos(raw)
+            if not todos:
+                return
+            send({"provider": "qoder", "product": _get_product(session_id),
+                  "event": "todo_updated", "session_id": session_id,
+                  "host": host_app(),
+                  "cwd": payload.get("cwd") or os.getcwd(),
+                  "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                  "payload": {"todos": todos}})
+
+
         def main():
             try:
                 payload = json.load(sys.stdin)
@@ -499,6 +566,13 @@ enum HelperTemplate {
                     emit("ask", "BetterFocusIDE is not running; decide in Qoder's own dialog.")
                     return
                 run_permission(payload, session_id)
+                return
+
+            if event == "PostToolUse":
+                # 发后即忘：todo 之外的工具一律静默退出，不打印任何东西。
+                tool_name = payload.get("tool_name") or payload.get("toolName") or ""
+                if tool_name in TODO_TOOLS and os.path.exists(SOCKET_PATH):
+                    emit_todo(session_id, payload)
                 return
 
             if event == "PreToolUse":

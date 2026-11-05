@@ -339,6 +339,28 @@ enum HostHookTemplate {
             send(msg)
 
 
+        def emit_native_answer(questions, labels, tool_input, hook_event):
+            # WorkBuddy 专用：用 `allow` + `updatedInput.answers` 把岛上的选择
+            # 直接塞给工具，宿主就不会再去弹它自己的问卷（那份面板是宿主在
+            # 工具执行时通过 ACP question 请求画出来的，deny 关不掉它）。
+            # 宿主不认这个字段时等价于「放行」——会在 IDE 里再问一遍，
+            # 所以这条路径要盯着日志确认。
+            answers = {}
+            for q in questions:
+                label = labels.get(q.get("id"), "")
+                if label:
+                    answers[q.get("question") or q.get("id")] = label
+            merged = dict(tool_input) if isinstance(tool_input, dict) else {}
+            merged["answers"] = answers
+            json.dump({"hookSpecificOutput": {
+                "hookEventName": hook_event,
+                "permissionDecision": "allow",
+                "updatedInput": merged,
+            }}, sys.stdout)
+            sys.stdout.write(chr(10))
+            sys.stdout.flush()
+
+
         def run_question(session_id, payload, questions, hook_event):
             if not claim(session_id, payload, "question"):
                 return
@@ -352,7 +374,7 @@ enum HostHookTemplate {
             since = time.time()
             deadline = since + QUESTION_TIMEOUT
             while time.time() < deadline:
-                lines, answered, timed_out = [], 0, False
+                lines, labels, answered, timed_out = [], {}, 0, False
                 for q in questions:
                     found, label, index = read_answer(session_id, request_id, q["id"], since)
                     if found and index == -4:
@@ -363,10 +385,15 @@ enum HostHookTemplate {
                         timed_out = True
                     elif found:
                         answered += 1
+                        labels[q["id"]] = label
                     lines.append("  - %s: %s" % (q["header"], label))
                 if timed_out:
                     break
                 if answered == len(questions) and questions:
+                    if PROVIDER == "workbuddy":
+                        emit_native_answer(questions, labels,
+                                           payload.get("tool_input"), hook_event)
+                        return
                     reason = ("The person answered on the BetterFocusIDE island. "
                               "Use these answers and continue." + chr(10) + chr(10).join(lines))
                     # deny 会拦掉宿主自己的提问对话框，reason 把答案回灌给 Agent。
