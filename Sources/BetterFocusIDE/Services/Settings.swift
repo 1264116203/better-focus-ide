@@ -56,7 +56,7 @@ final class Settings: ObservableObject {
     @Published var notifyHeight: Double = 106
     /// 刘海屏下卡片内容到摄像头区域的额外间距（pt），可为负值使内容更贴近刘海
     @Published var notchTopPadding: Double = -3
-    /// 气泡水平偏移（pt）：正值向右，负值向左，0 表示居中。用于将气泡移到屏幕右上角
+    /// 气泡水平偏移（pt）：正值向右，负值向左。0 与物理刘海居中重叠。
     @Published var bubbleHorizontalOffset: Double = 0
     /// 卡片水平偏移（pt）：正值向右，负值向左，0 表示居中。展开态卡片通常保持居中
     @Published var cardHorizontalOffset: Double = 0
