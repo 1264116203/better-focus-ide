@@ -372,6 +372,7 @@ enum SettingCatalog {
     }
 
     /// 取某分组下的全部设置项（保持目录顺序）。
+    /// 分组「恢复默认」只遍历这里的结果，因此范围就是 `group` 相等的定义。
     static func settings(in group: String) -> [SettingDefinition] {
         all.filter { $0.group == group }
     }

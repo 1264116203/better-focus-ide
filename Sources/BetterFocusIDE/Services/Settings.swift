@@ -168,8 +168,15 @@ final class Settings: ObservableObject {
         String(format: "%.4g,%.4g,%.4g", r, g, b)
     }
 
+    /// 批量写回时压住 `changes`。`PassthroughSubject` 配 `receive(on: main)`
+    /// 会把每一次 `send` 都排进主队列，分组恢复若逐项广播会把岛重排许多次。
+    private var suppressChangeBroadcast = false
+
     /// 通知订阅者某设置已变更（灵动岛据此重新布局）。
-    func markChanged() { changes.send() }
+    func markChanged() {
+        guard !suppressChangeBroadcast else { return }
+        changes.send()
+    }
 
     private init() {
         load()
@@ -347,7 +354,29 @@ final class Settings: ObservableObject {
 
     // MARK: - 恢复出厂默认
 
+    /// 只恢复 `group` 这一组：`SettingDefinition.group` 与之相等的项。
+    /// 其它分组、以及未进目录的字段都保持原值。
+    ///
+    /// 默认值用目录里的 `defaultValue`（面板单位），再交给该项自己的 `set`。
+    /// 呼吸灯幅度、畸变幅度的滑块是 0…100，存储是 0…1，换算写在 `set` 里；
+    /// 把目录数字直接赋给存储字段会把 65% 写成 65。
+    /// 组内没有定义时返回 false，调用方不要当成已经恢复。
+    @discardableResult
+    func reset(group: String) -> Bool {
+        let defs = SettingCatalog.settings(in: group)
+        guard !defs.isEmpty else { return false }
+        suppressChangeBroadcast = true
+        for def in defs {
+            def.set(def.defaultValue)
+        }
+        suppressChangeBroadcast = false
+        markChanged()
+        save()
+        return true
+    }
+
     /// 把所有字段重置为默认值，随后广播变更并落盘。
+    /// 这是整页恢复；分组按钮走 `reset(group:)`，不要从那里调到这里。
     func resetAll() {
         permissionEnabled = true; questionEnabled = true; turnNotifyEnabled = true
         turnNotifyJump = true; permissionNoticeJump = true
