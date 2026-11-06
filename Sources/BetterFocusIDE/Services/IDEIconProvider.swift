@@ -287,20 +287,35 @@ enum IDEIconProvider {
     private static func rawImage(named: String) -> NSImage? {
         #if canImport(AppKit)
         let bundleName = "BetterFocusIDE_BetterFocusIDE.bundle"
-        var searchPaths: [URL] = []
-        
-        // SwiftPM build / .app 打包后的路径
+        var bundleURLs: [URL] = []
+
+        // .app 的 Resources，以及 swift run 时挨着可执行文件的那一份。
+        // 不用 Bundle.module：包没拷进 .app 时那个访问器会 fatalError，整张卡片一起崩溃。
         if let path = Bundle.main.resourceURL?.appendingPathComponent(bundleName) {
-            searchPaths.append(path)
+            bundleURLs.append(path)
         }
-        searchPaths.append(Bundle.main.bundleURL.appendingPathComponent("Contents/Resources").appendingPathComponent(bundleName))
-        // Bundle.module（SwiftPM 资源包）
-        searchPaths.append(Bundle.module.bundleURL)
-        
-        for basePath in searchPaths {
-            let iconPath = basePath.appendingPathComponent("IDE-Icons").appendingPathComponent(named).appendingPathExtension("png")
-            if FileManager.default.fileExists(atPath: iconPath.path),
-               let nsImage = NSImage(contentsOf: iconPath) {
+        bundleURLs.append(Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Resources")
+            .appendingPathComponent(bundleName))
+        if let exec = Bundle.main.executableURL?
+            .deletingLastPathComponent()
+            .appendingPathComponent(bundleName) {
+            bundleURLs.append(exec)
+        }
+
+        for url in bundleURLs where FileManager.default.fileExists(atPath: url.path) {
+            // 正式 bundle 的图标在 Contents/Resources/IDE-Icons。
+            if let bundle = Bundle(url: url),
+               let icon = bundle.url(forResource: named, withExtension: "png", subdirectory: "IDE-Icons"),
+               let nsImage = NSImage(contentsOf: icon) {
+                return nsImage
+            }
+            // 旧的扁平资源包：图标直接躺在包根目录下。
+            let flat = url.appendingPathComponent("IDE-Icons")
+                .appendingPathComponent(named)
+                .appendingPathExtension("png")
+            if FileManager.default.fileExists(atPath: flat.path),
+               let nsImage = NSImage(contentsOf: flat) {
                 return nsImage
             }
         }

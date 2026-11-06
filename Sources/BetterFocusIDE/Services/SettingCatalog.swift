@@ -109,13 +109,15 @@ private let hapticOn: () -> Bool = { Settings.shared.hapticOnArrive || Settings.
 
 /// 完整设置目录，顺序与 Python 参考实现严格一致，使面板的分组 / 小节 / 行一一对应。
 enum SettingCatalog {
-    static let groups = ["提醒", "尺寸", "外观", "动画", "声音与触感", "行为", "超时与排队"]
+    static let groups = ["提醒", "尺寸", "外观", "液态玻璃", "投影", "动画", "声音与触感", "行为", "超时与排队"]
 
     /// 每个分组的一句话说明（面板顶部展示）。
     static let groupHints: [String: String] = [
         "提醒": "总开关：关掉即把请求交回 IDE 自己的弹窗与提问框",
         "尺寸": "卡片的宽、高与内容区内边距",
         "外观": "颜色、圆角与淡入层次",
+        "液态玻璃": "岛面和控件的液态玻璃。只在 macOS 26 及以上生效，拖动后卡片立即更新",
+        "投影": "展开卡片外圈的淡影。收起的气泡不投影",
         "动画": "展开 / 收起的节奏与悬停手感",
         "声音与触感": "提示音与触控板震动",
         "行为": "卡片上屏后的固定、防误触与让位",
@@ -125,7 +127,8 @@ enum SettingCatalog {
     /// 每个分组的 SF Symbol 图标名。
     /// 末尾的「调试」不是设置分组（见 `SettingsView.debugPage`），仅在此登记图标。
     static let groupSymbols: [String: String] = [
-        "提醒": "bell", "尺寸": "ruler", "外观": "paintpalette", "动画": "sparkles",
+        "提醒": "bell", "尺寸": "ruler", "外观": "paintpalette", "液态玻璃": "drop.fill",
+        "投影": "square.2.layers.3d", "动画": "sparkles",
         "声音与触感": "speaker.wave.2", "行为": "hand.tap", "超时与排队": "clock",
         "调试": "ladybug",
     ]
@@ -243,6 +246,76 @@ enum SettingCatalog {
             set: { if case .double(let v) = $0 {
                 Settings.shared.glowBreathAmplitude = min(1, max(0, v / 100)); Settings.shared.markChanged()
             } }),
+
+        // ---------------- 液态玻璃 ----------------
+        SettingDefinition(key: "glassDistort", label: "畸变幅度", kind: .slider, group: "液态玻璃",
+            min: 0, max: 100, step: 1, unit: "%", digits: 0,
+            note: "把左右直线收成圆弧。0 保持刘海边；拉高后左右也弯光。系统没有单独的折光强度，幅度就是这条边有多圆",
+            keywords: ["畸变", "折射", "折光", "透镜", "幅度"],
+            defaultValue: .double(0),
+            get: { .double(Settings.shared.glassDistort * 100) },
+            set: { if case .double(let v) = $0 {
+                Settings.shared.glassDistort = min(1, max(0, v / 100)); Settings.shared.markChanged()
+            } }),
+        SettingDefinition(key: "glassStyle", label: "岛面样式", kind: .choice, group: "液态玻璃",
+            choices: Settings.glassStyleChoices,
+            note: "清晰会折进背后的画面；标准更磨砂，边缘弯折更弱",
+            keywords: ["玻璃", "liquid", "clear", "regular"],
+            defaultValue: .string("clear"), get: getS(\.glassStyle), set: setS(\.glassStyle)),
+        SettingDefinition(key: "glassCorner", label: "玻璃圆角", kind: .slider, group: "液态玻璃",
+            min: 0, max: 64, step: 1, unit: "pt", digits: 0,
+            note: "玻璃透镜的曲率。0 时棱边几乎不弯光",
+            keywords: ["圆角", "corner", "透镜"],
+            defaultValue: .double(28), get: getD(\.glassCorner), set: setD(\.glassCorner)),
+        SettingDefinition(key: "glassTint", label: "染色", kind: .color, group: "液态玻璃",
+            note: "配合下面的浓度。浓度为 0 时这颜色不参与",
+            defaultValue: .rgb(1, 1, 1), get: getRGB(\.glassTint), set: setRGB(\.glassTint)),
+        SettingDefinition(key: "glassTintAmount", label: "染色浓度", kind: .slider, group: "液态玻璃",
+            min: 0, max: 1, step: 0.01, digits: 2,
+            defaultValue: .double(0), get: getD(\.glassTintAmount), set: setD(\.glassTintAmount)),
+        SettingDefinition(key: "glassInteractive", label: "按压反馈", kind: .toggle, group: "液态玻璃",
+            note: "指针压在岛面上时玻璃略微回应。需要 macOS 27",
+            defaultValue: .bool(true), get: getB(\.glassInteractive), set: setB(\.glassInteractive)),
+        SettingDefinition(key: "glassWash", label: "中心暗度", kind: .slider, group: "液态玻璃",
+            min: 0, max: 1, step: 0.01, digits: 2,
+            note: "文字区有多黑。0 完全透出背后，1 接近实心",
+            keywords: ["洗色", "暗", "对比"],
+            defaultValue: .double(0.50), get: getD(\.glassWash), set: setD(\.glassWash)),
+        SettingDefinition(key: "glassWashFalloff", label: "暗部羽化", kind: .slider, group: "液态玻璃",
+            min: 4, max: 80, step: 1, unit: "pt", digits: 0,
+            note: "中心暗色淡到玻璃边缘的宽度，越大越没有分界",
+            defaultValue: .double(36), get: getD(\.glassWashFalloff), set: setD(\.glassWashFalloff)),
+        SettingDefinition(key: "glassRim", label: "外缘扩展", kind: .slider, group: "液态玻璃",
+            min: 0, max: 32, step: 1, unit: "pt", digits: 0,
+            note: "向左右和下方撑开的宽度。遮罩跟着变大，不会大于 0 就变成同一块矩形",
+            keywords: ["外缘", "rim", "折射"],
+            defaultValue: .double(0), get: getD(\.glassRim), set: setD(\.glassRim)),
+        SettingDefinition(key: "glassControlStyle", label: "控件样式", kind: .choice, group: "液态玻璃",
+            choices: Settings.glassStyleChoices,
+            note: "选项行、按钮、图钉各自的玻璃",
+            defaultValue: .string("clear"), get: getS(\.glassControlStyle), set: setS(\.glassControlStyle)),
+
+        // ---------------- 投影 ----------------
+        SettingDefinition(key: "cardShadowColor", label: "投影颜色", kind: .color, group: "投影",
+            note: "只作用于展开的卡片。收起的气泡不投影",
+            keywords: ["阴影", "shadow"],
+            defaultValue: .rgb(0, 0, 0), get: getRGB(\.cardShadowColor), set: setRGB(\.cardShadowColor)),
+        SettingDefinition(key: "cardShadowOpacity", label: "投影不透明度", kind: .slider, group: "投影",
+            min: 0, max: 1, step: 0.01, digits: 2,
+            note: "0 关掉那圈淡黑边",
+            defaultValue: .double(0.5), get: getD(\.cardShadowOpacity), set: setD(\.cardShadowOpacity)),
+        SettingDefinition(key: "cardShadowRadius", label: "投影模糊", kind: .slider, group: "投影",
+            min: 0, max: 64, step: 1, unit: "pt", digits: 0,
+            note: "越大越散，贴边的那圈越淡",
+            defaultValue: .double(16), get: getD(\.cardShadowRadius), set: setD(\.cardShadowRadius)),
+        SettingDefinition(key: "cardShadowOffsetX", label: "投影水平偏移", kind: .slider, group: "投影",
+            min: -48, max: 48, step: 1, unit: "pt", digits: 0,
+            note: "正值向右",
+            defaultValue: .double(0), get: getD(\.cardShadowOffsetX), set: setD(\.cardShadowOffsetX)),
+        SettingDefinition(key: "cardShadowOffsetY", label: "投影垂直偏移", kind: .slider, group: "投影",
+            min: -48, max: 48, step: 1, unit: "pt", digits: 0,
+            note: "正值向下。现在的 -14 是略微向上",
+            defaultValue: .double(-14), get: getD(\.cardShadowOffsetY), set: setD(\.cardShadowOffsetY)),
 
         // ---------------- 动画 ----------------
         SettingDefinition(key: "motionGrowBounce", label: "弹簧回弹（展开）", kind: .slider, group: "动画",

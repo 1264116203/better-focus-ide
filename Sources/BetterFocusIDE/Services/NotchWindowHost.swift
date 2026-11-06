@@ -65,26 +65,28 @@ private final class PassthroughView: NSView {
     }
 }
 
-/// 窗口的内容视图。一层被裁成灵动岛轮廓的黑色底、一层在卡片展开时淡入的磨砂玻璃
-/// `NSVisualEffectView`、以及叠在最上的 SwiftUI 内容——全部裁切到随帧形变的轮廓内。
+/// 窗口的内容视图。一层被裁成灵动岛轮廓的岛底、一层在卡片展开时出现的玻璃
+/// （macOS 26+ 为 `NSGlassEffectView`，更早系统为 `NSVisualEffectView`）、
+/// 以及叠在最上的 SwiftUI 内容——全部裁切到随帧形变的轮廓内。
 ///
-/// 缩放期间窗口保持在*包络*尺寸（弹簧摆到的最宽处 + 阴影留白），而遮罩路径逐帧形变，
-/// 于是两侧摆开时刘海的圆角与肩部始终保真。岛四周的留白是透明的，窗口的投影正是在
-/// 这里绘制。
+/// 缩放期间窗口保持在*包络*尺寸（弹簧摆到的最宽处 + 阴影留白）。玻璃框、圆角、
+/// 洗色和轮廓遮罩吃同一组弹簧采样：透镜的边就是每一帧看见的边。不能先把玻璃铺到
+/// 最终卡片尺寸、再用一块小遮罩去揭——洗色在玻璃外缘是透明的，揭开会先露出一圈
+/// 发白的清玻璃，落定帧再一次性补上暗洗色和畸变遮罩，看起来就是白闪一下然后卡住。
 final class NotchCanvas: NSView {
     let host: NotchHostingView
     private let silhouette = CAShapeLayer()
     private let edge = CAShapeLayer()
-    /// 展开卡片时的磨砂玻璃层。
+    /// 展开卡片时的玻璃层。
     ///
-    /// 只模糊窗口后面的内容，故只在展开卡片时显现，收起的细条保持纯黑融入物理刘海。
-    ///
-    /// 预留门控：未来升级 Xcode 26 / macOS SDK 26 后，可在此层替换为系统原生
-    /// Liquid Glass（`NSGlassEffectView`），见 `makeGlass()` 内注释。
-    private let glass: NSVisualEffectView
-    /// 覆在磨砂玻璃上的一层暗色洗色。`.hudWindow` 会模糊窗口后面的内容，而屏幕顶部
-    /// 往往是（偏亮的）菜单栏，会把整张卡片冲成浅灰。这层恒定暗化把磨砂拉回深邃、
-    /// 含蓄的暗色。收起时玻璃透明，暗层直接落在黑色底上、保持纯黑。
+    /// macOS 26+ 是系统液态玻璃（`NSGlassEffectView`）；更早系统仍是 `.hudWindow`
+    /// 磨砂。只在展开卡片时显现，收起的细条保持纯色融入物理刘海。
+    /// 圆角由 `lensRadius` 按当前玻璃框实时计算：直线边几乎不折光，畸变要把
+    /// 左右收到胶囊才看得见。遮罩跟着这只圆角走，避免把侧棱切掉。
+    private let glass: NSView
+    /// 覆在旧式磨砂上的一层暗色洗色。`.hudWindow` 会模糊窗口后面的内容，而屏幕顶部
+    /// 往往是（偏亮的）菜单栏，会把整张卡片冲成浅灰。液态玻璃自己有对比度，这层关掉，
+    /// 否则会把折射盖成一块灰膜。
     private let dim = NSView()
     /// 承载被轮廓遮罩裁剪的岛面内容（黑底 / 磨砂 / 暗层 / SwiftUI / 发丝描边）。
     ///
@@ -108,9 +110,37 @@ final class NotchCanvas: NSView {
     private var glowBreathing = false
     /// 当前已装入图层的呼吸参数（幅度, 周期）。设置改动后与它比对，不一致才重装动画。
     private var appliedBreath: (amplitude: Double, period: Double)?
-    /// 岛正在趋向 / 静止于的尺寸（内容尺寸）。
+    /// 岛正在趋向 / 静止于的尺寸（内容尺寸，不含外缘扩展）。
     private var contentSize: CGSize
+    /// 弹簧形变进行中。这段时间 `layout` 不再改玻璃框和遮罩，
+    /// 否则包络尺寸会先闪成整张卡片，动画再从胶囊长回去。
+    private var morphing = false
+    /// 形变中屏幕上的内容尺寸（不含外缘、不含透镜留白）。打断动画时从这里续，
+    /// 而不是从遮罩的包围盒——包围盒含 pad，会把下一次弹簧的起点撑大。
+    private var liveSample: CGSize?
+    /// 0 = 收起气泡，1 = 展开卡片。形变按它插值外缘、洗色和畸变，落定后与静止态对齐。
+    private var displayedOpenness: CGFloat = 0
+    /// 本次弹簧起点的张开程度。中途被新动画打断时接着这个值，避免跳回 0 或 1。
+    private var morphFromOpen: CGFloat = 0
+    private var morphToOpen: CGFloat = 0
+    /// 投影跟随的轮廓。畸变开启时比遮罩更贴玻璃框，避免把透镜留白也投进去。
+    private var shadowOutline: CGPath?
+    /// 畸变开启时遮罩比玻璃框再松出的宽度，盖住侧棱折光，又不切到玻璃自己的边上。
+    private static let distortLensPad: CGFloat = 14
     private var trackingArea: NSTrackingArea?
+    /// 羽化洗色的位图缓存。形变期间 `layout` 每帧都会进来，尺寸和圆角没变就直接复用。
+    private var featherWashCache: (key: FeatherWashKey, image: CGImage)?
+
+    /// 洗色位图的缓存键：像素尺寸 + 圆角（像素）。羽化宽度是常量，不必写入。
+    private struct FeatherWashKey: Equatable {
+        var pixelWidth: Int
+        var pixelHeight: Int
+        var radiusPx: Int
+        var peak: Int
+        var falloffPx: Int
+    }
+    /// 洗色视图的标识，避免以后 contentView 里多了别的子视图时铺错层。
+    private static let washIdentifier = NSUserInterfaceItemIdentifier("betterfocus.feather-wash")
 
     // MARK: - 鼠标回调（由 NotchWindowHost → NotchService 接线）
     var onMouseEnter: (() -> Void)?
@@ -122,20 +152,39 @@ final class NotchCanvas: NSView {
     override var isOpaque: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// 构建磨砂玻璃层。
-    ///
-    /// 保留 `.hudWindow` 作为基础模糊——灵动岛贴屏幕顶边，背景是偏亮的菜单栏 /
-    /// 桌面，需要重磨砂压住，否则整张卡被冲成浅灰。
-    ///
-    /// 预留门控：未来升级 Xcode 26 / macOS SDK 26 后，可在此切换原生 Liquid Glass：
-    /// ```swift
-    /// if #available(macOS 26, *) {
-    ///     let liquid = NSGlassEffectView()
-    ///     liquid.state = .active
-    ///     return liquid
-    /// }
-    /// ```
-    private static func makeGlass() -> NSVisualEffectView {
+    /// 当前系统能否用原生液态玻璃。卡片控件侧的判断在 `LiquidGlassPlate`。
+    private var usesLiquidGlass: Bool {
+        if #available(macOS 26, *) { return true }
+        return false
+    }
+
+    /// 构建展开卡片的玻璃层。macOS 26+ 用系统液态玻璃，否则退回 `.hudWindow` 磨砂。
+    private static func makeGlass() -> NSView {
+        if #available(macOS 26, *) {
+            let liquid = NSGlassEffectView()
+            // clear 才能看见背后画面在棱边上的扭曲。regular 在这块透明高窗里
+            // 会退成一块不透的深灰，边缘没有可折的光。
+            liquid.style = .clear
+            liquid.cornerRadius = 28
+            liquid.appearance = NSAppearance(named: .darkAqua)
+            // 没有 contentView 时系统不画完整的透镜棱边。
+            // 洗色铺满整块玻璃：中心约 0.5 黑，沿同一圆角向外缘羽化到全透明。
+            // 不再内缩一块实心圆角矩形，否则会在折射棱边上切出一道缝。
+            let filler = NSView()
+            filler.autoresizingMask = [.width, .height]
+            let wash = NSView()
+            wash.identifier = Self.washIdentifier
+            wash.wantsLayer = true
+            // 位图由我们写入 layer.contents。视图自己重绘会把这张图清掉。
+            wash.layerContentsRedrawPolicy = .never
+            wash.autoresizingMask = [.width, .height]
+            filler.addSubview(wash)
+            liquid.contentView = filler
+            if #available(macOS 27, *) {
+                liquid.effectIsInteractive = true
+            }
+            return liquid
+        }
         let glass = NSVisualEffectView()
         glass.material = .hudWindow
         glass.blendingMode = .behindWindow
@@ -173,9 +222,9 @@ final class NotchCanvas: NSView {
         body.addSubview(glass, positioned: .below, relativeTo: host)
         body.addSubview(host)
 
-        // 暗色洗色层：在玻璃之上、内容之下（恒定 alpha）。
+        // 暗色洗色层：在玻璃之上、内容之下。液态玻璃自己提供对比度，洗色会把折射盖住。
         dim.wantsLayer = true
-        dim.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        dim.layer?.backgroundColor = NSColor.black.withAlphaComponent(usesLiquidGlass ? 0 : 0.55).cgColor
         body.addSubview(dim, positioned: .below, relativeTo: host)
 
         edge.fillColor = nil
@@ -191,7 +240,6 @@ final class NotchCanvas: NSView {
         layer?.insertSublayer(glowLayer, at: 0)
 
         setContentSize(size)
-        applyBaseColor()
         updateContrast()
     }
 
@@ -214,13 +262,10 @@ final class NotchCanvas: NSView {
         return shape.path(in: islandRect(for: size)).cgPath
     }
 
-    /// 当前绘制出的岛尺寸（读取 presentation 路径，使被打断的动画从屏幕上的实际
-    /// 形态续接，而非从目标值重新开始）。
+    /// 屏幕上的内容尺寸。形变中取弹簧采样（不含外缘和透镜留白），静止时取 contentSize。
+    /// 被打断的动画从这里续接，而不是从目标值重新开始。
     var visibleSize: CGSize? {
-        guard let path = (silhouette.presentation()?.path ?? silhouette.path) else { return nil }
-        let box = path.boundingBoxOfPath
-        guard !box.isNull else { return nil }
-        return CGSize(width: box.width, height: max(0, box.maxY))
+        liveSample ?? contentSize
     }
 
     // MARK: 静止布局
@@ -237,25 +282,28 @@ final class NotchCanvas: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         body.frame = bounds
-        let rect = islandRect(for: contentSize)
-        host.frame = rect
-        glass.frame = rect
-        dim.frame = rect
-        let path = morphPath(for: contentSize)
-        if silhouette.path != path { silhouette.path = path }
-        edge.path = path
-        // 位图辉光按屏幕缩放渲染，Retina 下才不会有像素感。
-        glowLayer.contentsScale = window?.backingScaleFactor ?? 2
-        setGlowPaths(path)
-        applyBaseColor()
+        // 形变期间玻璃框、圆角、洗色和遮罩由垂直同步时钟驱动。这里若按 contentSize
+        // （包络或目标）重铺，会把正在长大的透镜一帧打回整张卡片。
+        if morphing {
+            CATransaction.commit()
+            return
+        }
         updateContrast()
+        glowLayer.contentsScale = window?.backingScaleFactor ?? 2
+        setGlowPaths(morphPath(for: contentSize))
         CATransaction.commit()
     }
 
     /// 从 Settings 取岛底色（background_color × background_alpha），取代固定刘海黑，
-    /// 使外观改动实时生效。每次 layout 都重读，而设置变更会触发重新 present。
-    /// 底色设在 body 层上（受轮廓遮罩裁剪），根层保持透明。
-    private func applyBaseColor() {
+    /// 使外观改动实时生效。底色设在 body 层上（受轮廓遮罩裁剪），根层保持透明。
+    ///
+    /// 液态玻璃只要看得见，岛底就必须是透明的，否则透镜只模糊这块纯色。
+    /// 收起的细条（玻璃已藏起）保持用户设置的实色，用来融入物理刘海。
+    private func applyBaseColor(glassVisible: Bool) {
+        if usesLiquidGlass && glassVisible {
+            body.layer?.backgroundColor = NSColor.clear.cgColor
+            return
+        }
         let c = Settings.shared.backgroundRGB
         let alpha = CGFloat(min(1, max(0, Settings.shared.backgroundAlpha)))
         body.layer?.backgroundColor = NSColor(
@@ -263,40 +311,452 @@ final class NotchCanvas: NSView {
         ).cgColor
     }
 
-    /// 磨砂只在展开卡片时出现；细条静止态关闭它，让岛读作实心刘海黑。发丝描边也只在
-    /// 展开时出现（Python `_draw_hairline`）。
+    /// 静止态对比度：展开卡片玻璃全开，收起细条回到实心刘海。
+    /// 形变不走这里——`layout` 在 `morphing` 时直接返回，避免把包络重铺成整张卡片。
     private func updateContrast() {
-        let expanded = contentSize.height > 60
-        // 边缘高光：仅展开卡片有细微白描边。
-        let targetWidth: CGFloat = expanded ? 0.75 : 0
+        let open: CGFloat = contentSize.height > 60 ? 1 : 0
+        displayedOpenness = open
+        applySurface(content: contentSize, openness: open, hostOpacity: 1,
+                     moving: false, placeHost: true)
+        applyGlow()
+    }
+
+    /// 玻璃圆角随畸变幅度收到胶囊。直线边几乎不折光，左右要弯起来才看得见。
+    private func lensRadius(in size: CGSize) -> CGFloat {
+        let base = CGFloat(max(0, Settings.shared.glassCorner))
+        let cap = max(0, min(size.width, size.height) / 2)
+        let amount = CGFloat(min(1, max(0, Settings.shared.glassDistort)))
+        return min(cap, base + (cap - base) * amount)
+    }
+
+    /// 透镜曲率、样式、染色和中心洗色都读设置，拖动滑块后下一次 layout 就生效。
+    /// `moving` 为真时洗色用半分辨率、按约 24pt 量化，避免弹簧每帧重跑整张位图。
+    private func updateLiquidCorner(moving: Bool) {
+        guard #available(macOS 26, *), let liquid = glass as? NSGlassEffectView else { return }
+        let radius = lensRadius(in: liquid.bounds.size)
+        if liquid.cornerRadius != radius {
+            liquid.cornerRadius = radius
+        }
+        let style: NSGlassEffectView.Style = Settings.shared.glassStyle == "regular" ? .regular : .clear
+        if liquid.style != style {
+            liquid.style = style
+        }
+        let amount = Settings.shared.glassTintAmount
+        if amount > 0.01 {
+            let c = Settings.parseRGB(Settings.shared.glassTint, fallback: (1, 1, 1))
+            liquid.tintColor = NSColor(srgbRed: CGFloat(c.r), green: CGFloat(c.g),
+                                       blue: CGFloat(c.b), alpha: CGFloat(min(1, amount)))
+        } else if liquid.tintColor != nil {
+            liquid.tintColor = nil
+        }
+        if #available(macOS 27, *) {
+            liquid.effectIsInteractive = Settings.shared.glassInteractive
+        }
+        let b = liquid.bounds
+        liquid.contentView?.frame = b
+        guard let wash = liquid.contentView?.subviews.first(where: {
+            $0.identifier == Self.washIdentifier
+        }) else { return }
+        // 铺满玻璃边界。羽化做在位图 alpha 里，不再内缩出第二块矩形。
+        wash.frame = CGRect(origin: .zero, size: b.size)
+        applyFeatheredWash(to: wash, radius: radius, moving: moving)
+    }
+
+    /// 把羽化洗色写进洗色视图的 `layer.contents`。
+    ///
+    /// 运动中不按视网膜全分辨率重绘：尺寸量化到约 24pt、缩放降到一半，
+    /// 位图靠 `contentsGravity = .resize` 铺满当前玻璃框。尺寸和圆角没跨过
+    /// 量化档就直接复用缓存。落定帧 `moving = false`，补一张全清晰的。
+    private func applyFeatheredWash(to wash: NSView, radius: CGFloat, moving: Bool) {
+        guard let layer = wash.layer else { return }
+        let backing = max(1, window?.backingScaleFactor ?? 2)
+        let scale = moving ? max(1, backing * 0.5) : backing
+        let quantum: CGFloat = moving ? max(8, scale * 24) : 1
+        let rawWidth = wash.bounds.width * scale
+        let rawHeight = wash.bounds.height * scale
+        var pixelWidth = Int((rawWidth / quantum).rounded() * quantum)
+        var pixelHeight = Int((rawHeight / quantum).rounded() * quantum)
+        if pixelWidth < 2 { pixelWidth = max(2, Int(rawWidth.rounded())) }
+        if pixelHeight < 2 { pixelHeight = max(2, Int(rawHeight.rounded())) }
+        guard wash.bounds.width > 1, wash.bounds.height > 1 else {
+            layer.contents = nil
+            featherWashCache = nil
+            return
+        }
+        // 位图比视图粗，圆角和羽化按同一比例缩进像素，拉伸回去后曲率不变。
+        let radiusPx = Int((min(radius, min(wash.bounds.width, wash.bounds.height) / 2)
+                            * CGFloat(pixelWidth) / wash.bounds.width).rounded())
+        let peak = Int((min(1, max(0, Settings.shared.glassWash)) * 100).rounded())
+        // 羽化按量化后的高度取值，同一档尺寸不会因为张开程度的小数变化而重绘。
+        // 小玻璃把羽化收进短边的 35%，中心才到得了设定黑度；长到超过用户羽化后
+        // 就和落定帧用的宽度相同。落定帧始终用用户设定的全宽。
+        let fullFalloff = CGFloat(max(1, Settings.shared.glassWashFalloff))
+        let pointHeight = CGFloat(pixelHeight) / scale
+        let falloffPoints = moving ? min(fullFalloff, max(8, pointHeight * 0.35)) : fullFalloff
+        let falloffPx = max(1, Int((falloffPoints * scale).rounded()))
+        let key = FeatherWashKey(pixelWidth: pixelWidth, pixelHeight: pixelHeight,
+                                 radiusPx: radiusPx, peak: peak, falloffPx: falloffPx)
+        if featherWashCache?.key != key {
+            guard let image = Self.renderFeatheredWash(
+                pixelWidth: pixelWidth,
+                pixelHeight: pixelHeight,
+                radiusPx: CGFloat(radiusPx),
+                falloffPx: CGFloat(falloffPx),
+                peakAlpha: CGFloat(peak) / 100
+            ) else { return }
+            featherWashCache = (key, image)
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.backgroundColor = nil
+        layer.cornerRadius = 0
+        layer.masksToBounds = false
+        layer.isOpaque = false
+        layer.contentsScale = scale
+        layer.contentsGravity = .resize
+        layer.magnificationFilter = .linear
+        layer.minificationFilter = .linear
+        layer.contents = featherWashCache?.image
+        CATransaction.commit()
+    }
+
+    /// 圆角矩形的距离场：中心黑度 `washPeakAlpha`，沿外缘 `falloffPx` 内 smoothstep 到 0。
+    ///
+    /// 等值线是玻璃同一圆角的偏移曲线，外缘 alpha 为 0，所以不会出现内缩矩形的硬边。
+    /// 黑是预乘的（RGB = 0），避免半透明边缘被抬成灰雾。
+    private static func renderFeatheredWash(pixelWidth: Int, pixelHeight: Int,
+                                            radiusPx: CGFloat, falloffPx: CGFloat,
+                                            peakAlpha: CGFloat) -> CGImage? {
+        guard pixelWidth > 1, pixelHeight > 1,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let ctx = CGContext(
+                data: nil,
+                width: pixelWidth,
+                height: pixelHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ),
+              let raw = ctx.data else { return nil }
+
+        let rowBytes = ctx.bytesPerRow
+        let pixels = raw.bindMemory(to: UInt8.self, capacity: rowBytes * pixelHeight)
+        let hw = Float(pixelWidth) * 0.5
+        let hh = Float(pixelHeight) * 0.5
+        let rad = Float(max(0, radiusPx))
+        let falloff = Float(max(1, falloffPx))
+        let peak = Float(min(1, max(0, peakAlpha))) * 255
+
+        for y in 0..<pixelHeight {
+            let qy = abs((Float(y) + 0.5) - hh) - hh + rad
+            let row = pixels.advanced(by: y * rowBytes)
+            for x in 0..<pixelWidth {
+                let qx = abs((Float(x) + 0.5) - hw) - hw + rad
+                let ox = max(qx, 0)
+                let oy = max(qy, 0)
+                let outside = sqrt(ox * ox + oy * oy)
+                let inside = min(max(qx, qy), 0)
+                let dist = rad - (outside + inside)
+                var byte: UInt8 = 0
+                if dist > 0 {
+                    let t = min(1, dist / falloff)
+                    let s = t * t * (3 - 2 * t)
+                    byte = UInt8(min(255, max(0, Int((peak * s).rounded()))))
+                }
+                let i = x * 4
+                row[i] = 0
+                row[i + 1] = 0
+                row[i + 2] = 0
+                row[i + 3] = byte
+            }
+        }
+        return ctx.makeImage()
+    }
+
+    /// 外缘扩展只加在左右和下方，顶边仍贴住屏幕。
+    private func rimAmount(expanded: Bool) -> CGFloat {
+        guard usesLiquidGlass, expanded else { return 0 }
+        return CGFloat(max(0, Settings.shared.glassRim))
+    }
+
+    /// 玻璃框在岛矩形之外再撑开 `rim`。内容框不动，文字位置不跟着漂。
+    private func expandedGlassRect(_ island: CGRect, rim: CGFloat) -> CGRect {
+        guard rim > 0 else { return island }
+        return CGRect(x: island.minX - rim, y: island.minY,
+                      width: island.width + rim * 2, height: island.height + rim)
+    }
+
+    /// 把玻璃、遮罩、洗色和投影摆到「张开程度 `openness`」对应的样子。
+    ///
+    /// `openness` 0 是收起气泡（无外缘、无透镜留白、玻璃藏起），1 是展开卡片
+    /// （外缘、畸变圆角和 14pt 留白都到位）。形变的每一帧和落定帧都走这里，
+    /// 所以最后一帧和 `settleMorph` 是同一套数，不会再跳一下。
+    ///
+    /// `placeHost == false` 时内容框保持目标尺寸，SwiftUI 不跟着弹簧重排，
+    /// 只被遮罩裁切，再用 `hostOpacity` 跟着张开淡入。
+    private func applySurface(content: CGSize, openness: CGFloat, hostOpacity: CGFloat,
+                              moving: Bool, placeHost: Bool) {
+        let open = min(1, max(0, openness))
+        let expanded = open > 0.999
+        let distortOn = usesLiquidGlass && Settings.shared.glassDistort > 0.001
+        // 轮廓从刘海肩部收到透镜的过程比整段弹簧短：刚离开气泡就成为透镜，
+        // 之后全程都是「当前尺寸」的玻璃在长大，而不是收起轮廓一路撑到落定再换形。
+        let lensBlend: CGFloat = distortOn ? min(1, open / 0.18) : 0
+        // 外缘和透镜留白跟着张开程度从 0 长到落定值。收起气泡上两者都是 0，
+        // 不会留下一圈固定外缘把气泡撑大。
+        let rim = rimAmount(expanded: true) * open
+        let pad = distortOn ? Self.distortLensPad * open : 0
+        let island = islandRect(for: content)
+        let glassRect = expandedGlassRect(island, rim: rim)
+
+        if placeHost {
+            host.frame = island
+        }
+        dim.frame = glassRect
+        glass.frame = glassRect
+
+        let alpha = glassOpacity(openness: open)
+        glass.layer?.removeAnimation(forKey: "fade")
+        glass.alphaValue = alpha
+        glass.layer?.opacity = Float(alpha)
+        // 玻璃还藏着时不重绘洗色。看得见的那一帧再铺，和透明度同一次提交。
+        updateLiquidCorner(moving: moving && alpha > 0.02)
+
+        if body.layer?.mask !== silhouette {
+            body.layer?.mask = silhouette
+        }
+        let path = maskPath(glassRect: glassRect, lensBlend: lensBlend, pad: pad)
+        silhouette.path = path
+        edge.path = path
+        if lensBlend > 0.999 {
+            let tightR = min(lensRadius(in: glassRect.size), min(glassRect.width, glassRect.height) / 2)
+            shadowOutline = CGPath(roundedRect: glassRect, cornerWidth: tightR,
+                                   cornerHeight: tightR, transform: nil)
+            host.layer?.masksToBounds = false
+        } else {
+            shadowOutline = path
+            host.layer?.masksToBounds = true
+        }
+
+        // 边缘高光：旧式磨砂才需要自绘发丝描边。液态玻璃自带折射棱边，再描一条会成双轮廓。
+        let showEdge = expanded && !usesLiquidGlass
+        let targetWidth: CGFloat = showEdge ? 0.75 : 0
         if edge.lineWidth != targetWidth {
             edge.lineWidth = targetWidth
-            edge.strokeColor = expanded
+            edge.strokeColor = showEdge
                 ? NSColor.white.withAlphaComponent(0.06).cgColor
                 : nil
         }
-        if glass.layer?.animation(forKey: "fade") == nil {
-            glass.alphaValue = expanded ? 1 : 0
+
+        host.layer?.removeAnimation(forKey: "fade")
+        host.layer?.opacity = Float(hostOpacity)
+        // 玻璃还没盖住时岛底保持实色。清得太早，半透明透镜会把菜单栏当成一块白闪。
+        applyBaseColor(glassVisible: alpha > 0.72)
+        let shadowStrength: CGFloat = morphing ? open : (content.height > 60 ? 1 : 0)
+        updateBodyShadow(strength: shadowStrength)
+    }
+
+    /// 液态玻璃在离开气泡后很快就完全显现，之后是同一块材料在长大。
+    /// 两端钉死：0 与收起气泡重合，1 与展开卡片重合。
+    private func glassOpacity(openness: CGFloat) -> CGFloat {
+        let span = min(1, max(0, openness))
+        if !usesLiquidGlass { return span }
+        if span <= 0 { return 0 }
+        if span >= 1 { return 1 }
+        let t = min(1, span / 0.10)
+        return t * t * (3 - 2 * t)
+    }
+
+    /// 内容不透明度。展开时先送走气泡上的圆点，再把卡片文字淡进来；
+    /// 收起是反向，并且在回到刘海前把不透明度送回 1，落定不必再从 0 弹回去。
+    private func contentOpacity(openness: CGFloat, opening: Bool) -> CGFloat {
+        let span = min(1, max(0, openness))
+        if opening {
+            if span < 0.10 {
+                let t = span / 0.10
+                let s = t * t * (3 - 2 * t)
+                return 1 - s
+            }
+            let t = min(1, max(0, (span - 0.16) / 0.44))
+            return t * t * (3 - 2 * t)
         }
-        updateBodyShadow(expanded: expanded)
-        // 呼吸辉光只在收起态气泡上出现（展开卡片时隐藏）。
-        applyGlow()
+        if span >= 0.42 {
+            let t = min(1, max(0, (span - 0.42) / 0.38))
+            return t * t * (3 - 2 * t)
+        }
+        let t = min(1, max(0, (0.28 - span) / 0.28))
+        return t * t * (3 - 2 * t)
+    }
+
+    /// 遮罩。`lensBlend == 0` 是刘海轮廓；`== 1` 是玻璃圆角矩形再向外松 `pad`，
+    /// 和落定态 `applySurface` 用的是同一条路径。中间帧用同一族三次曲线，
+    /// 肩部收到 0、圆角收到透镜半径，避免两套路径在切换时跳。
+    private func maskPath(glassRect: CGRect, lensBlend: CGFloat, pad: CGFloat) -> CGPath {
+        let u = min(1, max(0, lensBlend))
+        if u <= 0.0001 {
+            return notchPath(in: glassRect)
+        }
+        if u >= 0.999 {
+            return lensMaskPath(glassRect: glassRect, pad: pad)
+        }
+        return blendedContour(glassRect: glassRect, blend: u, pad: pad)
+    }
+
+    private func notchPath(in rect: CGRect) -> CGPath {
+        NotchShape(attached: true,
+                   radius: NotchLayout.surfaceRadius(height: rect.height),
+                   floatingGap: nil).path(in: rect).cgPath
+    }
+
+    /// 畸变落定形态：玻璃框向左右和下方松出 `pad`，圆角比玻璃自己的再大 `pad`，
+    /// 侧棱折光留在遮罩内，又不会切到玻璃边上。顶边不外扩，仍贴住屏幕。
+    private func lensMaskPath(glassRect: CGRect, pad: CGFloat) -> CGPath {
+        var loose = glassRect
+        loose.origin.x -= pad
+        loose.size.width += pad * 2
+        loose.size.height += pad
+        let glassR = lensRadius(in: glassRect.size)
+        let looseR = min(glassR + pad, min(loose.width, loose.height) / 2)
+        return CGPath(roundedRect: loose, cornerWidth: looseR, cornerHeight: looseR, transform: nil)
+    }
+
+    /// 刘海轮廓收到透镜圆角矩形的中间态。`blend` 为 0 时几何上回到 NotchShape，
+    /// 为 1 时肩部为 0、上下半径等于玻璃圆角加 `pad`。
+    private func blendedContour(glassRect: CGRect, blend: CGFloat, pad: CGFloat) -> CGPath {
+        let u = min(1, max(0, blend))
+        var loose = glassRect
+        loose.origin.x -= pad
+        loose.size.width += pad * 2
+        loose.size.height += pad
+        let glassR = lensRadius(in: glassRect.size)
+        let notchBottom = NotchLayout.surfaceRadius(height: glassRect.height)
+        let notchSide = NotchLayout.shoulder(height: glassRect.height)
+        let topR = (glassR + pad) * u
+        let botR = notchBottom * (1 - u) + (glassR + pad) * u
+        let side = notchSide * (1 - u)
+        return contourPath(in: loose, topRadius: topR, bottomRadius: botR, shoulder: side)
+    }
+
+    /// 顶边贴屏的轮廓。`shoulder == 0` 且上下半径相等时是圆角矩形；
+    /// `topRadius == 0` 时控制点与 NotchShape 的肩部、底角一致。
+    private func contourPath(in rect: CGRect, topRadius: CGFloat, bottomRadius: CGFloat,
+                             shoulder: CGFloat) -> CGPath {
+        let width = max(0, rect.width)
+        let height = max(0, rect.height)
+        guard width > 1, height > 1 else {
+            return CGPath(rect: rect, transform: nil)
+        }
+        let tangent: CGFloat = 0.55228475
+        var side = min(max(0, shoulder), width / 2)
+        var topR = max(0, topRadius)
+        var botR = max(0, bottomRadius)
+        topR = min(topR, max(0, width / 2 - side), height / 2)
+        botR = min(botR, max(0, width / 2 - side), height / 2)
+        if side + topR + botR > height, side + topR + botR > 0 {
+            let scale = height / (side + topR + botR)
+            side *= scale
+            topR *= scale
+            botR *= scale
+        }
+
+        let left = rect.minX
+        let right = rect.maxX
+        let top = rect.minY
+        let bottom = rect.maxY
+        let path = CGMutablePath()
+
+        path.move(to: CGPoint(x: left + topR, y: top))
+        path.addLine(to: CGPoint(x: right - topR, y: top))
+
+        let trFrom = CGPoint(x: right - topR, y: top)
+        let trTo = CGPoint(x: right - side, y: top + side + topR)
+        addCorner(path, from: trFrom, to: trTo, tangent: tangent, verticalFirst: false)
+
+        path.addLine(to: CGPoint(x: right - side, y: bottom - botR))
+
+        let brFrom = CGPoint(x: right - side, y: bottom - botR)
+        let brTo = CGPoint(x: right - side - botR, y: bottom)
+        addCorner(path, from: brFrom, to: brTo, tangent: tangent, verticalFirst: true)
+
+        path.addLine(to: CGPoint(x: left + side + botR, y: bottom))
+
+        let blFrom = CGPoint(x: left + side + botR, y: bottom)
+        let blTo = CGPoint(x: left + side, y: bottom - botR)
+        addCorner(path, from: blFrom, to: blTo, tangent: tangent, verticalFirst: false)
+
+        path.addLine(to: CGPoint(x: left + side, y: top + side + topR))
+
+        let tlFrom = CGPoint(x: left + side, y: top + side + topR)
+        let tlTo = CGPoint(x: left + topR, y: top)
+        addCorner(path, from: tlFrom, to: tlTo, tangent: tangent, verticalFirst: true)
+
+        path.closeSubpath()
+        return path
+    }
+
+    /// 圆角的三次近似。`verticalFirst` 表示离开起点时沿垂直方向（底角、左上角），
+    /// 否则沿水平方向（右上角）。到达时换到另一条轴。κ = 0.55228475。
+    private func addCorner(_ path: CGMutablePath, from: CGPoint, to: CGPoint,
+                           tangent: CGFloat, verticalFirst: Bool) {
+        let dx = to.x - from.x
+        let dy = to.y - from.y
+        let c1: CGPoint
+        let c2: CGPoint
+        if verticalFirst {
+            c1 = CGPoint(x: from.x, y: from.y + dy * tangent)
+            c2 = CGPoint(x: to.x - dx * tangent, y: to.y)
+        } else {
+            c1 = CGPoint(x: from.x + dx * tangent, y: from.y)
+            c2 = CGPoint(x: to.x, y: to.y - dy * tangent)
+        }
+        path.addCurve(to: to, control1: c1, control2: c2)
+    }
+
+    /// 弹簧采样在起点和终点之间的进度，按有位移的轴平均。超调钳在 0...1，
+    /// 尺寸本身仍用没钳过的采样，所以回弹只撑大玻璃框，不把畸变推过落定值。
+    private static func clampedProgress(_ sample: CGSize, from: CGSize, to: CGSize) -> CGFloat {
+        var acc: CGFloat = 0
+        var n: CGFloat = 0
+        func take(_ value: CGFloat, _ start: CGFloat, _ end: CGFloat) {
+            let delta = end - start
+            guard abs(delta) >= 0.5 else { return }
+            acc += (value - start) / delta
+            n += 1
+        }
+        take(sample.width, from.width, to.width)
+        take(sample.height, from.height, to.height)
+        guard n > 0 else { return 1 }
+        return min(1, max(0, acc / n))
+    }
+
+    /// 弹簧开始前调用，让接下来的 layout 不要提前揭掉轮廓遮罩。
+    func setMorphing(_ active: Bool) {
+        morphing = active
     }
 
     /// 岛自身的投影。
     ///
     /// 窗口级投影已在 init 里关掉（系统按**整窗 alpha** 生成，会把半透明辉光一起压暗，
     /// 并在衰减末端多出一条对比边）。改由 body 层投影：body 被 silhouette 裁成岛形，
-    /// 投影只跟随岛轮廓。收起态的亮边气泡**不投影**，免得在辉光最浓处叠一层暗晕；
-    /// 展开的卡片才需要一点悬浮感。
-    private func updateBodyShadow(expanded: Bool) {
+    /// 投影只跟随岛轮廓。`strength` 为 0 时收起气泡不投影；展开后才乘上用户设置的浓度。
+    private func updateBodyShadow(strength: CGFloat) {
         guard let layer = body.layer else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        layer.shadowColor = NSColor.black.cgColor
-        layer.shadowOpacity = expanded ? 0.5 : 0
-        layer.shadowRadius = 16
-        layer.shadowOffset = CGSize(width: 0, height: -14)
+        let settings = Settings.shared
+        let color = Settings.parseRGB(settings.cardShadowColor, fallback: (0, 0, 0))
+        let amount = min(1, max(0, strength))
+        layer.shadowColor = NSColor(srgbRed: CGFloat(color.r), green: CGFloat(color.g),
+                                     blue: CGFloat(color.b), alpha: 1).cgColor
+        layer.shadowOpacity = Float(min(1, max(0, settings.cardShadowOpacity)) * amount)
+        layer.shadowRadius = CGFloat(max(0, settings.cardShadowRadius))
+        layer.shadowOffset = CGSize(width: settings.cardShadowOffsetX,
+                                    height: settings.cardShadowOffsetY)
+        // 液态玻璃展开时岛底是透明的，投影不再能从层内容里长出来，改跟轮廓路径走。
+        if usesLiquidGlass {
+            layer.shadowPath = amount > 0.001 ? (shadowOutline ?? silhouette.path) : nil
+        }
         CATransaction.commit()
     }
 
@@ -316,6 +776,17 @@ final class NotchCanvas: NSView {
     /// 每次可见都会重渲染位图并重读呼吸灯的三项设置（范围 / 幅度 / 频率），
     /// 因此拖动任一滑块都立即生效（设置变更会触发重新 present → layout → applyGlow）。
     private func applyGlow() {
+        // 形变期间先把辉光摘掉。收起目标若提前按「高度 ≤ 60」点亮，
+        // 卡片还没缩回去辉光就已经铺在刘海上了。
+        if morphing {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            glowLayer.removeAnimation(forKey: "breathe")
+            appliedBreath = nil
+            glowLayer.opacity = 0
+            CATransaction.commit()
+            return
+        }
         let visible = glowColor != nil && contentSize.height <= 60
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -495,100 +966,65 @@ final class NotchCanvas: NSView {
 
     // MARK: 形变
 
-    /// 开始一次弹簧驱动的形变到 `size`。调用方已把窗口置于包络 frame，故 `bounds`
-    /// 是带留白的包络。
-    func startMorph(_ animation: CAKeyframeAnimation, to size: CGSize, expanding: Bool) {
-        contentSize = size
-        let final = morphPath(for: size)
-
+    /// 窗口已经停在包络上。记下张开程度的起点，把内容框放到目标尺寸（不再每帧重排），
+    /// 辉光先关掉。玻璃框要等 `renderMorph` 按采样来放，不能在这里铺成最终卡片。
+    func beginLiveMorph(from: CGSize, to: CGSize) {
+        morphing = true
+        morphFromOpen = displayedOpenness
+        morphToOpen = to.height > 60 ? 1 : 0
+        contentSize = to
+        liveSample = from
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        host.frame = islandRect(for: size)
-        glass.frame = host.frame
-        dim.frame = host.frame
-        silhouette.path = final
-        edge.path = final
-        setGlowPaths(final)
-        silhouette.add(animation, forKey: "morph")
-        if let edgeAnim = animation.copy() as? CAKeyframeAnimation {
-            edgeAnim.delegate = nil
-            edge.add(edgeAnim, forKey: "morph")
-        }
+        host.layer?.removeAnimation(forKey: "fade")
+        glass.layer?.removeAnimation(forKey: "fade")
+        silhouette.removeAnimation(forKey: "morph")
+        edge.removeAnimation(forKey: "morph")
+        host.frame = islandRect(for: to)
         CATransaction.commit()
-        // 按新尺寸决定辉光显隐（展开卡片时隐藏辉光）。
         applyGlow()
+    }
 
-        // 内容与玻璃随生长形状揭幕（展开），或先于收缩形状离场（收起），使飞行途中
-        // 没有任何东西被挤压。淡入淡出窗口对齐 Python：展开 p=0.15→0.65，收起 p=0.40→0.06。
-        let totalDuration = animation.duration
-        let fadeStart: CFTimeInterval
-        let fadeDuration: CFTimeInterval
-        if expanding {
-            // 内容在动画 15%→65% 期间浮现。
-            fadeStart = totalDuration * 0.15
-            fadeDuration = totalDuration * 0.50
+    /// 用一帧弹簧采样同时改玻璃框、圆角、洗色和遮罩。`settled` 时钉在终点，
+    /// 和随后的 `settleMorph` 同一套外观，只是窗口还停在包络里。
+    func renderMorph(sample: CGSize, from: CGSize, to: CGSize, settled: Bool) {
+        let progress = settled ? CGFloat(1) : Self.clampedProgress(sample, from: from, to: to)
+        let open = morphFromOpen + (morphToOpen - morphFromOpen) * progress
+        displayedOpenness = settled ? morphToOpen : open
+        liveSample = settled ? nil : sample
+        let crossing = abs(morphToOpen - morphFromOpen) > 0.05
+        let opacity: CGFloat
+        if settled || !crossing {
+            opacity = 1
         } else {
-            // 内容在动画 0%→40% 期间消失（立即开始）。
-            fadeStart = 0
-            fadeDuration = totalDuration * 0.40
+            opacity = contentOpacity(openness: open, opening: morphToOpen > morphFromOpen)
         }
-        fadeLayer(host.layer, from: expanding ? 0 : 1, to: expanding ? 1 : 0,
-                  duration: fadeDuration, delay: fadeStart, easeIn: !expanding)
-        fadeGlass(to: expanding ? 1 : 0, duration: fadeDuration, delay: fadeStart)
-    }
-
-    /// 对某层做 opacity 淡入淡出（可选 easeIn，带延迟）。
-    private func fadeLayer(_ layer: CALayer?, from: Float, to: Float,
-                           duration: CFTimeInterval, delay: CFTimeInterval = 0,
-                           easeIn: Bool) {
-        guard let layer else { return }
-        layer.removeAnimation(forKey: "fade")
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = from
-        fade.toValue = to
-        fade.duration = duration
-        fade.beginTime = CACurrentMediaTime() + delay
-        fade.fillMode = .backwards
-        fade.timingFunction = CAMediaTimingFunction(name: easeIn ? .easeIn : .easeOut)
-        layer.opacity = to
-        layer.add(fade, forKey: "fade")
-    }
-
-    /// 对磨砂玻璃层做 opacity 淡入淡出（从当前 presentation 值起）。
-    private func fadeGlass(to: CGFloat, duration: CFTimeInterval, delay: CFTimeInterval = 0) {
-        guard let layer = glass.layer else { return }
-        layer.removeAnimation(forKey: "fade")
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = layer.presentation()?.opacity ?? layer.opacity
-        fade.toValue = Float(to)
-        fade.duration = duration
-        fade.beginTime = CACurrentMediaTime() + delay
-        fade.fillMode = .backwards
-        glass.alphaValue = to
-        layer.opacity = Float(to)
-        layer.add(fade, forKey: "fade")
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        applySurface(content: settled ? to : sample,
+                     openness: settled ? morphToOpen : open,
+                     hostOpacity: opacity,
+                     moving: !settled,
+                     placeHost: false)
+        CATransaction.commit()
     }
 
     /// 弹簧落定后提交形变：撤掉动画、按静止（== 内容）尺寸布局。调用时 `bounds`
     /// 已是带留白的目标。
     func settleMorph(to size: CGSize) {
+        morphing = false
+        liveSample = nil
         contentSize = size
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        body.frame = bounds
         silhouette.removeAnimation(forKey: "morph")
         edge.removeAnimation(forKey: "morph")
         host.layer?.removeAnimation(forKey: "fade")
-        host.layer?.opacity = 1
         glass.layer?.removeAnimation(forKey: "fade")
-        let rect = islandRect(for: size)
-        host.frame = rect
-        glass.frame = rect
-        dim.frame = rect
-        let path = morphPath(for: size)
-        silhouette.path = path
-        edge.path = path
-        setGlowPaths(path)
         updateContrast()
+        glowLayer.contentsScale = window?.backingScaleFactor ?? 2
+        setGlowPaths(morphPath(for: size))
         CATransaction.commit()
     }
 }
@@ -596,8 +1032,8 @@ final class NotchCanvas: NSView {
 // MARK: - NotchWindowHost
 
 /// 窗口宿主：持有 NotchPanel + NotchCanvas，负责把内容呈现到正确的窗口 frame，
-/// 并驱动弹簧形变动画（作为 CAAnimationDelegate 在落定后收尾）。
-final class NotchWindowHost: NSObject, CAAnimationDelegate {
+/// 并用与显示器垂直同步的 CADisplayLink 驱动弹簧形变。
+final class NotchWindowHost: NSObject {
     let panel: NotchPanel
     private let canvas: NotchCanvas
     private var currentGeometry: NotchGeometry
@@ -606,6 +1042,14 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     private var animationGeneration = 0
     private var isAnimating = false
     private var settleCompletion: (() -> Void)?
+    /// 与屏幕刷新对齐的形变时钟。比 Timer 稳，也避免和遮罩关键帧各走各的。
+    private var morphLink: CADisplayLink?
+    private var morphFrom = CGSize.zero
+    private var morphTo = CGSize.zero
+    private var morphBounce = 1.0
+    private var morphDuration: TimeInterval = 0
+    private var morphStartedAt: CFTimeInterval = 0
+    private var morphLastTick: CFTimeInterval = 0
     private(set) var targetSize: CGSize
     /// 岛是否正在展示内容卡片（相对于收起胶囊）。
     private var showsContent = false
@@ -693,13 +1137,15 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         if canSpring {
             animateTo(size: size, geometry: geometry, from: fromSize, gentle: gentle)
         } else {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            panel.setFrame(pixelAligned(panelFrame(for: size, showsContent: showsContent)), display: true)
-            appliedFrame = panelFrame(for: size, showsContent: showsContent)
-            canvas.setContentSize(size)
-            canvas.layoutSubtreeIfNeeded()
-            CATransaction.commit()
+        stopMorphClock()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        panel.setFrame(pixelAligned(panelFrame(for: size, showsContent: showsContent)), display: true)
+        appliedFrame = panelFrame(for: size, showsContent: showsContent)
+        canvas.setMorphing(false)
+        canvas.setContentSize(size)
+        canvas.layoutSubtreeIfNeeded()
+        CATransaction.commit()
         }
         panel.orderFrontRegardless()
     }
@@ -718,54 +1164,93 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     }
 
     /// 把窗口保持在包络（弹簧摆到的最宽/最高处，含阴影留白）以免超调被裁切，
-    /// 再让遮罩路径穿过弹簧插值出的各尺寸形变。
+    /// 再用与垂直同步对齐的时钟，按同一组弹簧采样去改玻璃框、圆角、洗色和遮罩。
     private func animateTo(size: CGSize, geometry: NotchGeometry, from fromSize: CGSize,
                            completion: (() -> Void)? = nil, gentle: Bool = false) {
         animationGeneration += 1
-        let generation = animationGeneration
+        stopMorphClock()
         isAnimating = true
         settleCompletion = completion
 
         // 悬停重展开用更弱回弹，避免收起后气泡明显"放大再缩小"。
         let bounceScale = gentle ? NotchMotion.hoverBounceScale : 1
-        let motion = NotchMotion.frames(from: fromSize, to: size, bounceScale: bounceScale)
         let envelope = NotchMotion.envelope(from: fromSize, to: size, bounceScale: bounceScale)
 
+        // 先挡住 layout，再改窗口。否则这一下会按包络把整张卡片闪出来。
+        canvas.setMorphing(true)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         panel.setFrame(pixelAligned(panelFrame(for: envelope, showsContent: showsContent)), display: true)
         appliedFrame = panelFrame(for: envelope, showsContent: showsContent)
-        canvas.setContentSize(envelope)
-        canvas.layoutSubtreeIfNeeded()
         CATransaction.commit()
+        // 包络已经是当前 bounds。先让 body 跟上，再按这个宽度把玻璃居中，
+        // 否则第一帧会按收起窗口的宽度算中心，下一帧再跳到包络中心。
+        canvas.layoutSubtreeIfNeeded()
 
-        // 路径在窗口已处于带留白包络后才计算，此时画布边界已正确居中岛。
-        let paths = motion.sizes.map { canvas.morphPath(for: $0) }
-        let animation = CAKeyframeAnimation(keyPath: "path")
-        animation.values = paths
-        animation.keyTimes = motion.keyTimes.map { NSNumber(value: $0) }
-        animation.calculationMode = .linear
-        animation.duration = motion.duration
-        animation.delegate = self
-        animation.setValue(generation, forKey: "notchGeneration")
-        let expanding = size.height >= fromSize.height
-        canvas.startMorph(animation, to: size, expanding: expanding)
+        canvas.beginLiveMorph(from: fromSize, to: size)
+        // 第 0 帧就是当前气泡，和静止态重合，避免时钟响起来之前空一帧。
+        canvas.renderMorph(sample: fromSize, from: fromSize, to: size, settled: false)
+        panel.orderFrontRegardless()
+        startMorphClock(from: fromSize, to: size, bounce: bounceScale)
     }
 
-    /// 动画落定回调：仅处理最新一代动画，把窗口从包络缩回静止带留白尺寸，
-    /// 并对新边界提交落定后的轮廓。
-    func animationDidStop(_ anim: CAAnimation, finished flag: Bool) {
-        guard flag,
-              anim.value(forKey: "notchGeneration") as? Int == animationGeneration else { return }
+    /// 显示器刷新回调。弹簧时间取宿主时钟，不另起 Timer。
+    @objc private func stepMorph(_ link: CADisplayLink) {
+        let generation = animationGeneration
+        guard link === morphLink else {
+            link.invalidate()
+            return
+        }
+        let stamp = link.targetTimestamp > 0 ? link.targetTimestamp : CACurrentMediaTime()
+        let elapsed = max(0, stamp - morphStartedAt)
+        let done = elapsed >= morphDuration - 0.0001
+        if !done, Settings.shared.animationFps > 0 {
+            let minInterval = 1.0 / Double(max(1, Settings.shared.animationFps))
+            if stamp - morphLastTick < minInterval { return }
+        }
+        morphLastTick = stamp
+        let sample = done
+            ? morphTo
+            : NotchMotion.size(at: elapsed, from: morphFrom, to: morphTo, bounceScale: morphBounce)
+        canvas.renderMorph(sample: sample, from: morphFrom, to: morphTo, settled: done)
+        if done {
+            finishMorph(generation: generation)
+        }
+    }
+
+    private func startMorphClock(from: CGSize, to: CGSize, bounce: Double) {
+        stopMorphClock()
+        morphFrom = from
+        morphTo = to
+        morphBounce = bounce
+        morphDuration = NotchMotion.settlingTime(from: from, to: to, bounceScale: bounce)
+        morphStartedAt = CACurrentMediaTime()
+        morphLastTick = morphStartedAt
+        guard morphDuration > 1.0 / 240 else {
+            finishMorph(generation: animationGeneration)
+            return
+        }
+        let link = panel.displayLink(target: self, selector: #selector(stepMorph(_:)))
+        link.add(to: .main, forMode: .common)
+        morphLink = link
+    }
+
+    private func stopMorphClock() {
+        morphLink?.invalidate()
+        morphLink = nil
+    }
+
+    /// 仅处理最新一代动画：停掉时钟，把窗口从包络缩回静止带留白尺寸，再提交落定轮廓。
+    private func finishMorph(generation: Int) {
+        guard generation == animationGeneration else { return }
+        stopMorphClock()
         isAnimating = false
         let completion = settleCompletion
         settleCompletion = nil
-        // 把窗口从包络缩回静止的带留白尺寸，再对新边界提交落定轮廓。
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         panel.setFrame(pixelAligned(panelFrame(for: targetSize, showsContent: showsContent)), display: true)
         appliedFrame = panelFrame(for: targetSize, showsContent: showsContent)
-        canvas.layoutSubtreeIfNeeded()
         canvas.settleMorph(to: targetSize)
         CATransaction.commit()
         completion?()

@@ -25,7 +25,7 @@ import SwiftUI
 /// ## 设计要点
 ///
 /// - **固定宽度元数据列**：右侧状态+来源时间列固定 104pt，标题占据剩余空间
-/// - **无行背景**：原型图无行背景色块，依赖间距区分行
+/// - **行是玻璃控件**：每一行一块可点的液态玻璃，靠间距分开，不再用纯色色块
 /// - **文字层级**：标题(13pt 半粗) > 状态(10pt) > 副文字(10pt 淡灰) > 来源时间(10pt 更淡)
 /// - **副文字前缀**：三类来源语义不同（提问的正文 / 权限的操作详情 /
 ///   轮次完成里用户这一轮的输入），前缀由 `HistoryKind` 分别给出，
@@ -203,7 +203,8 @@ struct NotchHistoryView: View {
             }
             .frame(height: rowHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())  // 整行可点击
+            .liquidGlass(.rounded(16), variant: .clear, interactive: true, fallback: .clear)
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
     }

@@ -43,8 +43,20 @@ cp "$ENTITLEMENTS" "$APP_DIR/Contents/Resources/"
 cp Resources/AppIcon-NotchCard.icns "$APP_DIR/Contents/Resources/AppIcon-NotchCard.icns"
 
 # Copy SwiftPM resource bundles (IDE icons, etc.)
-RESOURCE_BUNDLE=".build/arm64-apple-macosx/$BUILD_CONFIGURATION/BetterFocusIDE_BetterFocusIDE.bundle"
-if [ -d "$RESOURCE_BUNDLE" ]; then
+# Swift 6.4 / Xcode 27 的产物在 .build/<config>（指向 out/Products）。
+# 旧布局 .build/arm64-apple-macosx/<config> 仍作兜底。缺了这个包时
+# Bundle.module 会在第一次画徽章时直接把进程打崩。
+RESOURCE_BUNDLE=""
+for candidate in \
+    ".build/$BUILD_CONFIGURATION/BetterFocusIDE_BetterFocusIDE.bundle" \
+    ".build/arm64-apple-macosx/$BUILD_CONFIGURATION/BetterFocusIDE_BetterFocusIDE.bundle"
+do
+    if [ -d "$candidate" ]; then
+        RESOURCE_BUNDLE="$candidate"
+        break
+    fi
+done
+if [ -n "$RESOURCE_BUNDLE" ]; then
     echo "▸ Copying resource bundles..."
     cp -R "$RESOURCE_BUNDLE" "$APP_DIR/Contents/Resources/"
 fi

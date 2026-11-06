@@ -104,6 +104,8 @@ struct NotchAgentQuestionView: View {
                     Button { controller.navigate(to: prompt.index - 1) } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 12, weight: .bold))
+                            .frame(width: 22, height: 22)
+                            .liquidGlass(.circle, variant: .clear, interactive: prompt.index > 0, fallback: .clear)
                     }
                     .buttonStyle(.plain)
                     .disabled(prompt.index <= 0)
@@ -114,6 +116,10 @@ struct NotchAgentQuestionView: View {
                     Button { controller.navigate(to: prompt.index + 1) } label: {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 12, weight: .bold))
+                            .frame(width: 22, height: 22)
+                            .liquidGlass(.circle, variant: .clear,
+                                         interactive: prompt.index < prompt.questions.count - 1,
+                                         fallback: .clear)
                     }
                     .buttonStyle(.plain)
                     .disabled(prompt.index >= prompt.questions.count - 1)
@@ -164,9 +170,13 @@ struct NotchAgentQuestionView: View {
             .padding(.horizontal, 9)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(picked ? (prompt?.provider.tint ?? .blue).opacity(0.22) : .white.opacity(0.06),
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .liquidGlass(.rounded(16), variant: .clear,
+                         tint: picked ? (prompt?.provider.tint ?? .blue) : nil,
+                         interactive: controller.choice == nil,
+                         fallback: picked
+                            ? (prompt?.provider.tint ?? .blue).opacity(0.22)
+                            : Color.white.opacity(0.06))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(controller.choice != nil)
@@ -215,9 +225,13 @@ struct NotchAgentQuestionView: View {
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 30)
-        .background(picked ? (prompt?.provider.tint ?? .blue).opacity(0.22) : .white.opacity(0.06),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .liquidGlass(.rounded(16), variant: .clear,
+                     tint: picked ? (prompt?.provider.tint ?? .blue) : nil,
+                     interactive: controller.choice == nil,
+                     fallback: picked
+                        ? (prompt?.provider.tint ?? .blue).opacity(0.22)
+                        : Color.white.opacity(0.06))
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onTapGesture {
             // 点击整行即进入自定义作答，并请求焦点移入同行的输入框。
             guard !writing else { return }
@@ -237,10 +251,12 @@ struct NotchAgentQuestionView: View {
                 .foregroundStyle(controller.canSend ? .white : .white.opacity(0.4))
                 .frame(maxWidth: .infinity)
                 .frame(height: 26)
-                .background(controller.canSend
-                            ? AnyShapeStyle(prompt.provider.tint)
-                            : AnyShapeStyle(.white.opacity(0.08)),
-                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .liquidGlass(.rounded(14), variant: .clear,
+                             tint: controller.canSend ? prompt.provider.tint : nil,
+                             interactive: controller.canSend && controller.choice == nil,
+                             fallback: controller.canSend
+                                ? prompt.provider.tint
+                                : Color.white.opacity(0.08))
         }
         .buttonStyle(.plain)
         .disabled(!controller.canSend || controller.choice != nil)

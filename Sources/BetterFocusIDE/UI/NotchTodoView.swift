@@ -146,7 +146,8 @@ struct NotchTodoView: View {
             ? width
             : (clamped > 0 ? max(TodoCardLayout.barHeight, width * clamped) : 0)
         return ZStack(alignment: .leading) {
-            Capsule().fill(.white.opacity(0.12))
+            Color.clear
+                .liquidGlass(.capsule, fallback: Color.white.opacity(0.12))
             if filledWidth > 0 {
                 Capsule()
                     .fill(tint.opacity(clamped >= 1 ? 1 : 0.85))
