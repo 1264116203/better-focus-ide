@@ -30,7 +30,7 @@ struct NotchView: View {
             }
         }
         .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
-        .clipped()  // 防止 SwiftUI 内容在 AppKit 壳布局完成前溢出
+        .modifier(IslandGlassClip())
         .foregroundStyle(.white)
         // 表面点击：整层只用这一个手势，按落点区分。
         // - 收起态：整块气泡都可点，走常规 toggle（恢复通知 / 展开待处理卡片 / 历史）。
@@ -159,6 +159,21 @@ struct NotchView: View {
             }
         }
         .padding(.top, service.geometry.safeContentTop)
+        // 控件单独成组。间距 0：相邻行不融合，每条都保留自己的折光棱边。
+        .liquidGlassGroup()
+    }
+}
+
+/// 液态玻璃的棱边折光画在形状外侧。macOS 26+ 不能再 `.clipped()`，
+/// 否则卡片和控件的边缘光线会被齐根切掉，只剩一块平的磨砂。
+private struct IslandGlassClip: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content
+        } else {
+            content.clipped()
+        }
     }
 }
 

@@ -15,8 +15,9 @@ struct PinButton: View {
     var pinned: Bool
     var action: () -> Void
 
-    /// 命中区域边长：比 12pt 图标略大，避免刘海上的小图标难点中。
-    private let hitSize: CGFloat = 16
+    /// 命中区域边长：比 12pt 图标略大，同时够放下一枚圆形玻璃按钮。
+    /// 不超过头部徽章（30pt），避免把卡片高度公式撑破。
+    private let hitSize: CGFloat = 22
 
     var body: some View {
         Button(action: action) {
@@ -25,7 +26,8 @@ struct PinButton: View {
                 .rotationEffect(.degrees(pinned ? 0 : 45))
                 .foregroundStyle(PinColors.tint(pinned: pinned))
                 .frame(width: hitSize, height: hitSize)
-                .contentShape(Rectangle())
+                .liquidGlass(.circle, variant: .clear, interactive: true, fallback: .clear)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")

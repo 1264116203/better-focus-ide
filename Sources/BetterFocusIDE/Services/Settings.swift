@@ -71,6 +71,33 @@ final class Settings: ObservableObject {
     @Published var workbuddyTint = "0.85,0.55,0.20"
     @Published var radiusExpanded: Double = 22
     @Published var radiusBubble: Double = 13
+    /// 岛面液态玻璃。`clear` 折背后的光，`regular` 更磨砂。仅 macOS 26+ 生效。
+    @Published var glassStyle = "clear"
+    /// 玻璃自身圆角（点）。为 0 时棱边几乎不弯。
+    @Published var glassCorner: Double = 28
+    /// 玻璃染色，配合 `glassTintAmount`。浓度为 0 时不染色。
+    @Published var glassTint = "1,1,1"
+    @Published var glassTintAmount: Double = 0
+    /// 指针压在玻璃上时的交互反馈（macOS 27+）。
+    @Published var glassInteractive = true
+    /// 卡片中心洗色的黑度，0 为完全透，1 为实黑。
+    @Published var glassWash: Double = 0.50
+    /// 洗色从外缘淡到中心实色的宽度（点）。
+    @Published var glassWashFalloff: Double = 36
+    /// 展开落定后允许折射探出轮廓的宽度（点）。0 表示外缘与原来的岛一致。
+    @Published var glassRim: Double = 0
+    /// 畸变幅度 0…1。0 保持刘海直线边；升高时把左右收成圆弧，侧边才跟着折光。
+    /// 系统玻璃没有单独的折光强度，可见弯折来自这条边有多弯。
+    @Published var glassDistort: Double = 0
+    /// 卡片内部控件（选项、按钮、图钉）的玻璃样式。
+    @Published var glassControlStyle = "clear"
+    /// 展开卡片的投影。收起气泡始终不投影。
+    @Published var cardShadowColor = "0,0,0"
+    @Published var cardShadowOpacity: Double = 0.5
+    @Published var cardShadowRadius: Double = 16
+    @Published var cardShadowOffsetX: Double = 0
+    @Published var cardShadowOffsetY: Double = -14
+    static let glassStyleChoices: [(String, String)] = [("clear", "清晰"), ("regular", "标准")]
     /// 呼吸灯辉光范围（pt）：值越大辉光扩散越远
     @Published var glowRadius: Double = 10
     /// 呼吸灯幅度（0…1）：辉光不透明度在 `1-幅度 … 1` 之间往返；
@@ -227,6 +254,27 @@ final class Settings: ObservableObject {
         workbuddyTint = v["workbuddyTint"]?.stringValue ?? workbuddyTint
         radiusExpanded = v["radiusExpanded"]?.doubleValue ?? radiusExpanded
         radiusBubble = v["radiusBubble"]?.doubleValue ?? radiusBubble
+        glassStyle = v["glassStyle"]?.stringValue ?? glassStyle
+        glassCorner = v["glassCorner"]?.doubleValue ?? glassCorner
+        glassTint = v["glassTint"]?.stringValue ?? glassTint
+        glassTintAmount = v["glassTintAmount"]?.doubleValue ?? glassTintAmount
+        glassInteractive = v["glassInteractive"]?.boolValue ?? glassInteractive
+        glassWash = v["glassWash"]?.doubleValue ?? glassWash
+        glassWashFalloff = v["glassWashFalloff"]?.doubleValue ?? glassWashFalloff
+        glassRim = v["glassRim"]?.doubleValue ?? glassRim
+        if let stored = v["glassDistort"] {
+            if case .bool(let on) = stored {
+                glassDistort = on ? 1 : 0
+            } else if let amount = stored.doubleValue {
+                glassDistort = min(1, max(0, amount))
+            }
+        }
+        glassControlStyle = v["glassControlStyle"]?.stringValue ?? glassControlStyle
+        cardShadowColor = v["cardShadowColor"]?.stringValue ?? cardShadowColor
+        cardShadowOpacity = v["cardShadowOpacity"]?.doubleValue ?? cardShadowOpacity
+        cardShadowRadius = v["cardShadowRadius"]?.doubleValue ?? cardShadowRadius
+        cardShadowOffsetX = v["cardShadowOffsetX"]?.doubleValue ?? cardShadowOffsetX
+        cardShadowOffsetY = v["cardShadowOffsetY"]?.doubleValue ?? cardShadowOffsetY
         glowRadius = v["glowRadius"]?.doubleValue ?? glowRadius
         glowBreathAmplitude = v["glowBreathAmplitude"]?.doubleValue ?? glowBreathAmplitude
         glowBreathPeriod = v["glowBreathPeriod"]?.doubleValue ?? glowBreathPeriod
@@ -294,6 +342,21 @@ final class Settings: ObservableObject {
         values["workbuddyTint"] = .string(workbuddyTint)
         values["radiusExpanded"] = .double(radiusExpanded)
         values["radiusBubble"] = .double(radiusBubble)
+        values["glassStyle"] = .string(glassStyle)
+        values["glassCorner"] = .double(glassCorner)
+        values["glassTint"] = .string(glassTint)
+        values["glassTintAmount"] = .double(glassTintAmount)
+        values["glassInteractive"] = .bool(glassInteractive)
+        values["glassWash"] = .double(glassWash)
+        values["glassWashFalloff"] = .double(glassWashFalloff)
+        values["glassRim"] = .double(glassRim)
+        values["glassDistort"] = .double(glassDistort)
+        values["glassControlStyle"] = .string(glassControlStyle)
+        values["cardShadowColor"] = .string(cardShadowColor)
+        values["cardShadowOpacity"] = .double(cardShadowOpacity)
+        values["cardShadowRadius"] = .double(cardShadowRadius)
+        values["cardShadowOffsetX"] = .double(cardShadowOffsetX)
+        values["cardShadowOffsetY"] = .double(cardShadowOffsetY)
         values["glowRadius"] = .double(glowRadius)
         values["glowBreathAmplitude"] = .double(glowBreathAmplitude)
         values["glowBreathPeriod"] = .double(glowBreathPeriod)
@@ -389,7 +452,13 @@ final class Settings: ObservableObject {
         backgroundColor = "0.05,0.05,0.07"; backgroundAlpha = 0.96
         accentColor = "0.5679,0.03151,1"; qoderTint = "0.58,0.45,0.82"; opencodeTint = "0.06,0.73,0.51"
         cursorTint = "0.00,0.55,0.75"; workbuddyTint = "0.85,0.55,0.20"
-        radiusExpanded = 22; radiusBubble = 13; glowRadius = 10
+        radiusExpanded = 22; radiusBubble = 13
+        glassStyle = "clear"; glassCorner = 28; glassTint = "1,1,1"; glassTintAmount = 0
+        glassInteractive = true; glassWash = 0.50; glassWashFalloff = 36; glassRim = 0
+        glassDistort = 0; glassControlStyle = "clear"
+        cardShadowColor = "0,0,0"; cardShadowOpacity = 0.5; cardShadowRadius = 16
+        cardShadowOffsetX = 0; cardShadowOffsetY = -14
+        glowRadius = 10
         glowBreathAmplitude = 0.65; glowBreathPeriod = 2.4
         motionGrowBounce = 0.25; reduceMotion = "system"; animationSpeed = 1.0; animationFps = 0
         hoverExpandDelay = 0.18; hoverCollapseDelay = 0.35

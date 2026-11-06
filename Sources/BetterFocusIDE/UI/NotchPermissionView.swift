@@ -78,8 +78,7 @@ struct NotchPermissionView: View {
                     .foregroundStyle(.white.opacity(0.7))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background(.white.opacity(0.12),
-                                in: Capsule())
+                    .liquidGlass(.capsule, fallback: Color.white.opacity(0.12))
                     .layoutPriority(1)
             }
             // 钉住开关：作为行内元素排在头部末尾，避免与计数徽标抢右上角空间。
@@ -113,8 +112,7 @@ struct NotchPermissionView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.06),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .liquidGlass(.rounded(14), fallback: Color.white.opacity(0.06))
     }
 
     // MARK: - 按钮
@@ -143,8 +141,10 @@ struct NotchPermissionView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 28)
-                .background(chosen ? color : color.opacity(0.6),
-                            in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .liquidGlass(.rounded(14), variant: .clear,
+                             tint: color,
+                             interactive: controller.choice == nil,
+                             fallback: chosen ? color : color.opacity(0.6))
         }
         .buttonStyle(.plain)
         .disabled(controller.choice != nil)

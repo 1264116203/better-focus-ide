@@ -93,8 +93,7 @@ struct NotchNoticeView: View {
                                 .foregroundStyle(.white.opacity(0.7))
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 2)
-                                .background(.white.opacity(0.15),
-                                            in: Capsule())
+                                .liquidGlass(.capsule, fallback: Color.white.opacity(0.15))
                         }
                     }
                     .padding(.horizontal, inset)
@@ -111,9 +110,8 @@ struct NotchNoticeView: View {
                             .foregroundStyle(.white.opacity(0.6))
                             .padding(.horizontal, 11)
                             .padding(.vertical, 5)
-                            .background(.white.opacity(0.1),
-                                        in: RoundedRectangle(cornerRadius: 6,
-                                                             style: .continuous))
+                            .liquidGlass(.rounded(12), variant: .clear, interactive: true,
+                                         fallback: Color.white.opacity(0.1))
                     }
                     .buttonStyle(.plain)
                     .help("标记为已读（不跳转）")
@@ -123,6 +121,8 @@ struct NotchNoticeView: View {
                             .font(.system(size: 13, weight: .semibold))
                             .rotationEffect(.degrees(pinned ? 0 : 45))
                             .foregroundStyle(PinColors.tint(pinned: pinned))
+                            .frame(width: 22, height: 22)
+                            .liquidGlass(.circle, variant: .clear, interactive: true, fallback: .clear)
                     }
                     .buttonStyle(.plain)
                     .help(pinned ? "取消固定（自动收起）" : "固定（不自动收起）")
