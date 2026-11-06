@@ -7,7 +7,9 @@ import AppKit
 /// 灵动岛设置面板 —— 对 Python 参考实现 `settings_window.py` 的 SwiftUI 重建：
 /// 顶部搜索栏、七大分类侧边栏、分组详情页（头部 + 恢复默认按钮 + 提示 + 小节 + 行）、
 /// 每行等宽字体读数、声音 / 震动的试听按钮、`enabled_when` 未满足时置灰，
-/// 以及底部「恢复默认」按钮与实时状态行。点击恢复默认会弹出确认对话框。
+/// 以及底部「恢复默认」按钮与实时状态行。
+/// 分组页头部的「恢复默认设置」只恢复当前分组；底部「恢复默认」仍恢复全部。
+/// 两处都会弹出确认对话框。
 ///
 /// `Settings` 是唯一的实时配置源，因此每次编辑都即时生效（灵动岛在调用时读取）；
 /// 落盘写入做了 0.5 秒防抖，标注 `needs=reinstall` 的项会在 0.8 秒后重新安装
@@ -20,6 +22,9 @@ struct SettingsView: View {
     @State private var status = "所有改动即时生效"
     @State private var writebackWork: DispatchWorkItem?
     @State private var showResetConfirmation = false
+    /// 确认框对应的范围。分组按钮为 false，底部「恢复全部」为 true。
+    /// 不放进 alert 的 isPresented 绑定里清掉，避免按钮动作读到已被关掉的状态。
+    @State private var resetEverything = false
 
     /// 允许从指定分类开始展示（预览与调试页截图用；默认仍是第一个分类）。
     init(initialGroup: String = SettingCatalog.groups[0]) {
@@ -90,11 +95,17 @@ struct SettingsView: View {
         }
         .frame(minWidth: 620, idealWidth: 760, minHeight: 420, idealHeight: 620)
         .onDisappear { flushOnClose() }
-        .alert("恢复默认设置", isPresented: $showResetConfirmation) {
+        .alert(resetEverything ? "恢复全部默认设置" : "恢复当前分组",
+               isPresented: $showResetConfirmation) {
             Button("取消", role: .cancel) { }
-            Button("恢复", role: .destructive) { resetDefaults() }
+            Button("恢复", role: .destructive) {
+                if resetEverything { resetAllDefaults() }
+                else { resetGroupDefaults() }
+            }
         } message: {
-            Text("这将把所有设置恢复为默认值。此操作不可撤销。")
+            Text(resetEverything
+                 ? "这将把所有设置恢复为默认值。此操作不可撤销。"
+                 : "只恢复「\(selectedGroup)」里的设置，其它分组保持不变。此操作不可撤销。")
         }
     }
 
@@ -238,10 +249,14 @@ struct SettingsView: View {
                             Text(selectedGroup)
                                 .font(.system(size: 13, weight: .semibold))
                             Spacer()
-                            // 内容区域的恢复默认按钮（更显眼）
-                            Button("恢复默认设置") { showResetConfirmation = true }
-                                .controlSize(.small)
-                                .foregroundStyle(.red)
+                            // 只恢复当前分组，不走 resetAll()。
+                            Button("恢复默认设置") {
+                                resetEverything = false
+                                showResetConfirmation = true
+                            }
+                            .controlSize(.small)
+                            .foregroundStyle(.red)
+                            .help("只恢复「\(selectedGroup)」这一组")
                         }
                         if let hint = SettingCatalog.groupHints[selectedGroup], !hint.isEmpty {
                             Text(hint)
@@ -475,11 +490,15 @@ struct SettingsView: View {
 
     // MARK: - 底部栏
 
-    /// 底部操作栏：「恢复默认」按钮 + 实时状态行。
+    /// 底部操作栏：「恢复默认」按钮（全部设置）+ 实时状态行。
     private var bottomBar: some View {
         HStack(spacing: 12) {
-            Button("恢复默认") { showResetConfirmation = true }
-                .controlSize(.small)
+            Button("恢复默认") {
+                resetEverything = true
+                showResetConfirmation = true
+            }
+            .controlSize(.small)
+            .help("恢复全部设置")
             Text(status)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -546,8 +565,23 @@ struct SettingsView: View {
         }
     }
 
-    /// 恢复所有默认为出厂值，并触发一次写回。
-    private func resetDefaults() {
+    /// 只恢复当前分组。默认值经各项 `set` 写回（滑块按面板单位换算）。
+    /// 组内有 `needsReinstall` 的项（目前是提问等待上限）才重装 Hook。
+    private func resetGroupDefaults() {
+        let group = selectedGroup
+        guard settings.reset(group: group) else {
+            status = "当前分组没有可恢复的设置"
+            return
+        }
+        if SettingCatalog.settings(in: group).contains(where: { $0.needsReinstall }) {
+            scheduleWriteback()
+        } else {
+            status = "已恢复「\(group)」的默认"
+        }
+    }
+
+    /// 恢复全部设置为出厂值，并触发一次写回。底部按钮专用。
+    private func resetAllDefaults() {
         settings.resetAll()
         scheduleWriteback()
         status = "已恢复默认"
