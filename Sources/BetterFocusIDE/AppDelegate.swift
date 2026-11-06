@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchService = NotchService.shared
         switch notchService.startSocket() {
         case .started:
-            break
+            CrashLog.noteSessionStart()
         case .alreadyRunning:
             Log.info("另一实例已持有 socket；退出。", topic: "app")
             NSApp.terminate(nil)
@@ -75,12 +75,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "设置…",
                                 action: #selector(openSettings), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: "打开日志文件夹",
+                                action: #selector(revealLogs), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出 BetterFocusIDE",
                                 action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         let ourSelectors: [Selector] = [
             #selector(toggleNotch), #selector(openSettings), #selector(showHistory),
-            #selector(installAll), #selector(uninstallAll), #selector(openDoctor)]
+            #selector(installAll), #selector(uninstallAll), #selector(openDoctor),
+            #selector(revealLogs)]
         for item in menu.items {
             if let action = item.action, ourSelectors.contains(action) {
                 item.target = self
@@ -113,6 +116,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openDoctor() {
         presentWindow(title: "自检 (Doctor)", rootView: DoctorView(), size: CGSize(width: 460, height: 420))
+    }
+
+    /// 在访达中打开运行日志所在的目录。
+    @objc private func revealLogs() {
+        guard let url = Log.directoryURL else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// 打开设置面板（可调整大小，带最小尺寸约束）。
@@ -170,5 +179,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         notchService.stopSocket()
         Settings.shared.save()
+        CrashLog.markCleanExit()
     }
 }

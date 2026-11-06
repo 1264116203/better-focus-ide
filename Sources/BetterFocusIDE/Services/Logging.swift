@@ -154,6 +154,18 @@ final class Log {
     static func warning(_ message: String, topic: String = "app") { shared.write(.warning, topic: topic, message) }
     static func error(_ message: String, topic: String = "app") { shared.write(.error, topic: topic, message) }
 
+    /// 日志目录。尚未配置或目录建不出来时为 nil。
+    static var directoryURL: URL? {
+        if !shared.configured { shared.configure() }
+        return shared.queue.sync { shared.fileURL?.deletingLastPathComponent() }
+    }
+
+    /// 把队列里还没落盘的行写完。退出和崩溃前调用，避免最后几条停在内存里。
+    static func flush() {
+        if !shared.configured { shared.configure() }
+        shared.queue.sync { }
+    }
+
     /// 对一条 socket 消息做脱敏的单行摘要——只含事件类型、提供方、id 前缀，
     /// 绝不含 payload（用户内容）。
     static func describe(event: String?, provider: String?, session: String?, request: String?) -> String {

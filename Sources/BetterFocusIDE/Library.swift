@@ -11,6 +11,7 @@ import AppKit
 /// （`AppDelegate` 保持 internal 访问级别，不对外暴露）。
 public func run() {
     Log.setup()
+    CrashLog.install()
     let delegate = AppDelegate()
     NSApplication.shared.delegate = delegate
     NSApplication.shared.run()
