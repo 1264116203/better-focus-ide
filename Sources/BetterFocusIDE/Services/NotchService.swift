@@ -201,6 +201,7 @@ final class NotchService: ObservableObject {
         expanded = true
         expandedAt = Date()
         isClosing = false
+        closingCard = nil
         let newSize = targetSizeForCurrentCard()
         animateTo(size: newSize, gentle: gentle)
         syncKeyFocus()
@@ -212,6 +213,7 @@ final class NotchService: ObservableObject {
     /// 提问与权限持续存在（卡片仍在等用户）。
     func collapse() {
         guard expanded else { return }
+        if activeCard != .none { closingCard = activeCard }
         expanded = false
         isClosing = true
         // 手动收起后一律记录让位期。原先只有固定模式记录，导致按需模式下
@@ -237,7 +239,10 @@ final class NotchService: ObservableObject {
             noticeController.dismiss()
             // 如果队列中有下一条通知，promoteNext 已在 onDismiss→handleCardDismissal 中触发，
             // 此时 hasActiveNotice 为 true，不应收起——让 showNoticeBanner 接管。
-            if noticeController.hasActiveNotice { return }
+            if noticeController.hasActiveNotice {
+                closingCard = nil
+                return
+            }
             // 保存成功且队列空：标记未处理以驱动呼吸灯
             if saved {
                 hasUnprocessedNotice = true
@@ -301,14 +306,26 @@ final class NotchService: ObservableObject {
     }
     
     private func animateTo(size: CGSize, gentle: Bool = false) {
-        surfaceSize = size
+        // 收起时先别把 SwiftUI 收成气泡尺寸。玻璃还是整张卡片，内容先缩进气泡
+        // 会在卡片中间闪出一块，气泡越大越明显，调到最小就看不见。
+        let toBubble = !expanded && (size.width < surfaceSize.width - 0.5 || size.height < surfaceSize.height - 0.5)
+        if !toBubble {
+            surfaceSize = size
+        }
         Log.debug("NotchService.animateTo: surfaceSize=\(size), expanded=\(expanded), activeCard=\(activeCard)", topic: "layout")
         windowHost?.present(
             size: size,
             geometry: geometry,
             animated: true,
             showsContent: expanded,
-            gentle: gentle
+            gentle: gentle,
+            preserveContentFrame: toBubble,
+            onSettled: toBubble ? { [weak self] in
+                guard let self, !self.expanded else { return }
+                self.surfaceSize = size
+                self.closingCard = nil
+                self.isClosing = false
+            } : nil
         )
     }
     
@@ -561,6 +578,7 @@ final class NotchService: ObservableObject {
             expanded = true
             expandedAt = Date()
             isClosing = false
+            closingCard = nil
         }
 
         animateTo(size: CGSize(width: NotchLayout.historyWidth, height: height))
@@ -585,6 +603,7 @@ final class NotchService: ObservableObject {
             expanded = true
             expandedAt = Date()
             isClosing = false
+            closingCard = nil
         }
         animateTo(size: bannerSize)
         syncKeyFocus()
@@ -615,6 +634,7 @@ final class NotchService: ObservableObject {
             expanded = true
             expandedAt = Date()
             isClosing = false
+            closingCard = nil
         }
         animateTo(size: targetSizeForCurrentCard())
         syncKeyFocus()
@@ -644,6 +664,7 @@ final class NotchService: ObservableObject {
             expanded = true
             expandedAt = Date()
             isClosing = false
+            closingCard = nil
         }
         // 每个 todo 事件都会走到这里；高度没变时不必再推进画布，
         // 否则同一尺寸反复 animateTo 会让岛面出现细微抖动。

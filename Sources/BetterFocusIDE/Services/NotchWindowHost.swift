@@ -568,8 +568,8 @@ final class NotchCanvas: NSView {
         return t * t * (3 - 2 * t)
     }
 
-    /// 内容不透明度。展开时先送走气泡上的圆点，再把卡片文字淡进来；
-    /// 收起是反向，并且在回到刘海前把不透明度送回 1，落定不必再从 0 弹回去。
+    /// 内容不透明度。展开时先送走气泡上的圆点，再把卡片文字淡进来。
+    /// 收起只淡出，落定后再显示气泡内容。
     private func contentOpacity(openness: CGFloat, opening: Bool) -> CGFloat {
         let span = min(1, max(0, openness))
         if opening {
@@ -581,11 +581,8 @@ final class NotchCanvas: NSView {
             let t = min(1, max(0, (span - 0.16) / 0.44))
             return t * t * (3 - 2 * t)
         }
-        if span >= 0.42 {
-            let t = min(1, max(0, (span - 0.42) / 0.38))
-            return t * t * (3 - 2 * t)
-        }
-        let t = min(1, max(0, (0.28 - span) / 0.28))
+        // 收到刘海前不再把内容重新亮起，避免半途又闪出一块。
+        let t = min(1, max(0, (span - 0.12) / 0.88))
         return t * t * (3 - 2 * t)
     }
 
@@ -968,7 +965,7 @@ final class NotchCanvas: NSView {
 
     /// 窗口已经停在包络上。记下张开程度的起点，把内容框放到目标尺寸（不再每帧重排），
     /// 辉光先关掉。玻璃框要等 `renderMorph` 按采样来放，不能在这里铺成最终卡片。
-    func beginLiveMorph(from: CGSize, to: CGSize) {
+    func beginLiveMorph(from: CGSize, to: CGSize, preserveContentFrame: Bool) {
         morphing = true
         morphFromOpen = displayedOpenness
         morphToOpen = to.height > 60 ? 1 : 0
@@ -980,7 +977,11 @@ final class NotchCanvas: NSView {
         glass.layer?.removeAnimation(forKey: "fade")
         silhouette.removeAnimation(forKey: "morph")
         edge.removeAnimation(forKey: "morph")
-        host.frame = islandRect(for: to)
+        // 收起时内容框留在卡片尺寸上，等落定再收到气泡。一开始就收到气泡，
+        // 会在还没缩小的玻璃中间闪出一块气泡大小的内容。
+        if !preserveContentFrame {
+            host.frame = islandRect(for: to)
+        }
         CATransaction.commit()
         applyGlow()
     }
@@ -1123,7 +1124,9 @@ final class NotchWindowHost: NSObject {
     ///
     /// 关键不变量：末尾必须调用 `orderFrontRegardless()`——仅 setFrame 不会让窗口显示。
     /// 尺寸变化且允许动画时走弹簧；否则禁用隐式动画直接落位。
-    func present(size: CGSize, geometry: NotchGeometry, animated: Bool, showsContent: Bool, gentle: Bool = false) {
+    func present(size: CGSize, geometry: NotchGeometry, animated: Bool, showsContent: Bool,
+                 gentle: Bool = false, preserveContentFrame: Bool = false,
+                 onSettled: (() -> Void)? = nil) {
         targetSize = size
         currentGeometry = geometry
         self.showsContent = showsContent
@@ -1135,7 +1138,8 @@ final class NotchWindowHost: NSObject {
         let canSpring = animated && fromSize != size
 
         if canSpring {
-            animateTo(size: size, geometry: geometry, from: fromSize, gentle: gentle)
+            animateTo(size: size, geometry: geometry, from: fromSize, gentle: gentle,
+                      preserveContentFrame: preserveContentFrame, onSettled: onSettled)
         } else {
         stopMorphClock()
         CATransaction.begin()
@@ -1146,6 +1150,7 @@ final class NotchWindowHost: NSObject {
         canvas.setContentSize(size)
         canvas.layoutSubtreeIfNeeded()
         CATransaction.commit()
+        onSettled?()
         }
         panel.orderFrontRegardless()
     }
@@ -1158,19 +1163,24 @@ final class NotchWindowHost: NSObject {
         }
         let collapsedSize = currentGeometry.restingSize(showsContent: false)
         animateTo(size: collapsedSize, geometry: currentGeometry,
-                  from: canvas.visibleSize ?? targetSize) {
+                  from: canvas.visibleSize ?? targetSize, completion: {
             self.panel.orderOut(nil)
-        }
+        })
     }
 
     /// 把窗口保持在包络（弹簧摆到的最宽/最高处，含阴影留白）以免超调被裁切，
     /// 再用与垂直同步对齐的时钟，按同一组弹簧采样去改玻璃框、圆角、洗色和遮罩。
     private func animateTo(size: CGSize, geometry: NotchGeometry, from fromSize: CGSize,
-                           completion: (() -> Void)? = nil, gentle: Bool = false) {
+                           completion: (() -> Void)? = nil, gentle: Bool = false,
+                           preserveContentFrame: Bool = false, onSettled: (() -> Void)? = nil) {
         animationGeneration += 1
         stopMorphClock()
         isAnimating = true
-        settleCompletion = completion
+        let hideDone = completion
+        settleCompletion = {
+            onSettled?()
+            hideDone?()
+        }
 
         // 悬停重展开用更弱回弹，避免收起后气泡明显"放大再缩小"。
         let bounceScale = gentle ? NotchMotion.hoverBounceScale : 1
@@ -1187,7 +1197,7 @@ final class NotchWindowHost: NSObject {
         // 否则第一帧会按收起窗口的宽度算中心，下一帧再跳到包络中心。
         canvas.layoutSubtreeIfNeeded()
 
-        canvas.beginLiveMorph(from: fromSize, to: size)
+        canvas.beginLiveMorph(from: fromSize, to: size, preserveContentFrame: preserveContentFrame)
         // 第 0 帧就是当前气泡，和静止态重合，避免时钟响起来之前空一帧。
         canvas.renderMorph(sample: fromSize, from: fromSize, to: size, settled: false)
         panel.orderFrontRegardless()
