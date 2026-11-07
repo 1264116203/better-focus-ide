@@ -25,6 +25,7 @@ struct HostInfo: Codable, Equatable {
         "com.jetbrains.intellij": "IntelliJ IDEA",
         "com.jetbrains.pycharm": "PyCharm",
         "com.jetbrains.webstorm": "WebStorm",
+        "com.jetbrains.WebStorm": "WebStorm",
         "com.jetbrains.goland": "GoLand",
         "com.jetbrains.rider": "Rider",
         "com.jetbrains.CLion": "CLion",
@@ -54,10 +55,13 @@ struct HostInfo: Codable, Equatable {
         "org.alacritty": "Alacritty",
         "com.github.wez.wezterm": "WezTerm",
         // 其他
+        "com.openai.codex": "ChatGPT",
         "com.tencent.workbuddy.mac": "WorkBuddy",
         "ai.workbuddy": "WorkBuddy",
+        "com.workbuddy.workbuddy-ai": "WorkBuddy",
         "ai.moonshot.kimi": "Kimi",
         "com.moonshot.kimichat": "Kimi",
+        "com.github.githubapp": "GitHub Copilot",
     ]
 
     init() {}
@@ -107,15 +111,19 @@ enum IDELauncher {
         // Cursor：ToDesktop 打包的实际 bundle id 在前，官方 id 兜底
         "cursor": ["com.todesktop.230313mzl4w4u92", "com.cursor"],
         // WorkBuddy：桌面应用（Electron），无 VS Code 系 CLI
-        "workbuddy": ["com.tencent.workbuddy.mac", "ai.workbuddy"],
+        "workbuddy": ["com.tencent.workbuddy.mac", "ai.workbuddy", "com.workbuddy.workbuddy-ai"],
         // Trae：国内版 cn.trae.app 在前，国际版与旧 id 兜底
         "trae": ["cn.trae.app", "com.trae.app", "com.byte-dance.trae", "com.bytedance.trae"],
         // Kimi 桌面应用（Kimi CLI 跑在终端里，不会用到这一项）
         "kimi": ["com.moonshot.kimichat", "ai.moonshot.kimi"],
-        // Claude Code / Codex 只有 CLI，没有可跳回的应用窗口——空列表意味着
+        // Claude Code 只有 CLI，没有可跳回的应用窗口——空列表意味着
         // 交给下面的「终端宿主」分支去激活终端。
         "claude_code": [],
-        "codex": [],
+        // GitHub Copilot.app。终端里的 CLI 会话不走这里，由下面的终端宿主分支激活。
+        "copilot": ["com.github.githubapp"],
+        // ChatGPT.app（原 Codex）。bundle id 未改名。终端里跑的 CLI 会话
+        // 不走这里，由下面的终端宿主分支激活对应终端。
+        "codex": ["com.openai.codex"],
     ]
     static let ideNames: [String: [String]] = [
         "qoder": ["Qoder"],
@@ -125,7 +133,8 @@ enum IDELauncher {
         "trae": ["Trae CN", "Trae"],
         "kimi": ["Kimi"],
         "claude_code": [],
-        "codex": [],
+        "copilot": ["GitHub Copilot"],
+        "codex": ["ChatGPT"],
     ]
     static let jetbrainsPrefix = "com.jetbrains."
     /// VS Code 系变体：支持 `code -r <cwd>` 精确复用项目窗口。
@@ -133,6 +142,12 @@ enum IDELauncher {
         "com.qoder.ide", "com.aliyun.lingma.ide",
         "com.todesktop.230313mzl4w4u92", "com.cursor",
     ]
+    /// Cursor 桌面端。Agents 窗口和 IDE 编辑器是两套窗口，不能跟 Qoder 一样用 `code -r`。
+    static let cursorBundles: Set<String> = [
+        "com.todesktop.230313mzl4w4u92", "com.cursor",
+    ]
+    /// Cursor 给 Agents 窗口写死的标题（`main.js` 里的 `sq`）。
+    private static let cursorAgentsWindowTitle = "Cursor Agents"
     /// 终端宿主的判定统一收在 `TerminalHost`：跳转、命名、图标三处必须用同一份
     /// 名单，否则会出现「卡片写着 Qoder CLI（Warp）但点不开」这类不一致。
     /// 需要终端名单时请用 `TerminalHost.bundles`。
@@ -180,10 +195,14 @@ enum IDELauncher {
     ///
     /// 二级定位策略（知道 `cwd` 时先尝试精确聚焦到具体项目窗口）：
     /// - JetBrains：CLI 直达 → AXRaise 同 Space → Window 菜单跨 Space/合并 tab
+    /// - Cursor：会话在 Agents 窗口里时把该窗口提到前台。`code -r <cwd>` 会打开 IDE 编辑器
     /// - Qoder IDE：`code -r <cwd>` 复用窗口
     /// - 其他/失败：回退 App 级激活
+    ///
+    /// `sessionID` 是 hook 上报的 `conversation_id`。Cursor 用它区分 Agents 窗口里的会话
+    /// 和经典 IDE 侧栏里的会话。
     @discardableResult
-    static func activate(provider: String, host: HostInfo?) -> Bool {
+    static func activate(provider: String, host: HostInfo?, sessionID: String? = nil) -> Bool {
         // 浏览器会话（`opencode serve` + Web UI）：没有窗口可激活，也不该把
         // 产品桌面端叫到前台——用户在浏览器里等着，落地就该是那个页面。
         if let raw = host?.url, !raw.isEmpty, let target = URL(string: raw) {
@@ -208,6 +227,17 @@ enum IDELauncher {
         let names = targets.names
         let hostBundle = host?.bundle ?? ""
         let cwd = host?.cwd ?? ""
+
+        // Cursor 3 的完成通知若走 `code -r <cwd>`，会新开 IDE 编辑器，而不是当时的 Agents 窗口。
+        // 状态库确认是 IDE 侧栏会话时不进这里，继续走下面的 `code -r`。
+        if cursorBundles.contains(hostBundle) {
+            let mode = cursorAgentsFocusMode(sessionID: sessionID)
+            if mode != .ide,
+               focusCursorAgentsWindow(bundle: hostBundle, openIfHidden: mode == .agents) {
+                Log.info("已定位 Cursor Agents 窗口", topic: "launcher")
+                return true
+            }
+        }
 
         // ── 窗口级二级定位：知道项目目录时先尝试精确聚焦 ──
         if !cwd.isEmpty {
@@ -274,9 +304,9 @@ enum IDELauncher {
     }
 
     /// 在主线程之外执行唤起——AppleScript 首次编译约需 1 秒，会卡主线程。
-    static func activateAsync(provider: String, host: HostInfo?) {
+    static func activateAsync(provider: String, host: HostInfo?, sessionID: String? = nil) {
         DispatchQueue.global(qos: .userInitiated).async {
-            _ = activate(provider: provider, host: host)
+            _ = activate(provider: provider, host: host, sessionID: sessionID)
         }
     }
 
@@ -428,6 +458,146 @@ enum IDELauncher {
             Log.debug("Window 菜单点击成功 leaf=\(leaf)", topic: "launcher")
         }
         return ok
+    }
+
+    // MARK: - 二级定位：Cursor Agents 窗口
+
+    /// 这次点击该去哪。`.ide` 继续 `code -r`；`.agents` 允许深链把隐藏的 Agents 窗口找出来；
+    /// `.agentsIfVisible` 只在屏幕上已经有该窗口时切换，读不到状态库时用，避免给纯 IDE 用户新开窗口。
+    private enum CursorAgentsFocusMode: Equatable {
+        case agents
+        case agentsIfVisible
+        case ide
+    }
+
+    /// Cursor 把 Agents 窗口里的会话记在 `state.vscdb` 的
+    /// `glass.agentConversationPanes.<conversation_id>`。
+    private static func cursorAgentsFocusMode(sessionID: String?) -> CursorAgentsFocusMode {
+        guard let id = sanitizedAgentID(sessionID),
+              let livesInAgents = cursorSessionLivesInAgentsWindow(id) else {
+            return .agentsIfVisible
+        }
+        return livesInAgents ? .agents : .ide
+    }
+
+    /// 把已经打开的 Agents 窗口提到前台。
+    ///
+    /// 先用辅助功能按窗口标题 `AXRaise`。`openIfHidden` 时若失败，改开
+    /// `cursor://anysphere.cursor-deeplink/glass`：Cursor 自己会聚焦现有的 Agents 窗口，
+    /// 不会把项目目录打开成 IDE。
+    /// 不用 `/agent?id=`——那条深链只认云端 agent，本地会话会弹出「找不到该 agent」。
+    private static func focusCursorAgentsWindow(bundle: String, openIfHidden: Bool) -> Bool {
+        switch raiseCursorAgentsWindow(bundle: bundle) {
+        case .raised:
+            return true
+        case .absent, .failed:
+            guard openIfHidden else { return false }
+            return openCursorAgentsDeeplink()
+        }
+    }
+
+    private enum CursorAgentsRaise: Equatable {
+        case raised
+        case absent
+        case failed
+    }
+
+    private static func raiseCursorAgentsWindow(bundle: String) -> CursorAgentsRaise {
+        let title = cursorAgentsWindowTitle
+        let source = """
+        tell application "System Events"
+          try
+            if not (exists (first process whose bundle identifier is "\(bundle)")) then return "absent"
+            tell (first process whose bundle identifier is "\(bundle)")
+              set hits to every window whose name is "\(title)"
+              if (count of hits) is 0 then return "absent"
+            end tell
+          on error
+            return "failed"
+          end try
+        end tell
+        tell application id "\(bundle)" to activate
+        tell application "System Events"
+          try
+            tell (first process whose bundle identifier is "\(bundle)")
+              set frontmost to true
+              tell (first window whose name is "\(title)") to perform action "AXRaise"
+              return "raised"
+            end tell
+          on error
+            return "failed"
+          end try
+        end tell
+        """
+        guard let (ok, result) = runAppleScriptWithResult(source), ok else { return .failed }
+        switch appleScriptText(result) {
+        case "raised": return .raised
+        case "absent": return .absent
+        default: return .failed
+        }
+    }
+
+    /// `cursor://anysphere.cursor-deeplink/glass` → `cursor.openOrFocusGlassWindow`。
+    private static func openCursorAgentsDeeplink() -> Bool {
+        guard let url = URL(string: "cursor://anysphere.cursor-deeplink/glass") else { return false }
+        let opened = NSWorkspace.shared.open(url)
+        if opened {
+            Log.debug("已用 glass 深链定位 Cursor Agents 窗口", topic: "launcher")
+        }
+        return opened
+    }
+
+    /// 会话号只允许字母数字、连字符和下划线，才能放进 sqlite 查询。
+    private static func sanitizedAgentID(_ raw: String?) -> String? {
+        let id = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard (8...80).contains(id.count) else { return nil }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+        guard id.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
+        return id
+    }
+
+    /// 查 Cursor 全局状态库，判断这个 conversation 是不是 Agents 窗口里的会话。
+    /// 读失败返回 nil，交给调用方用窗口标题兜底。
+    private static func cursorSessionLivesInAgentsWindow(_ sessionID: String) -> Bool? {
+        let db = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
+        guard FileManager.default.fileExists(atPath: db.path) else { return nil }
+        let sql = """
+        SELECT 1 FROM ItemTable WHERE key IN (
+          'glass.agentConversationPanes.\(sessionID)',
+          'cursor/glass.editorPanelFullscreen/\(sessionID)'
+        ) LIMIT 1;
+        """
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        task.arguments = ["-cmd", ".timeout 800", db.path, sql]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            Log.debug("读取 Cursor 状态库失败：\(error)", topic: "launcher")
+            return nil
+        }
+        guard task.terminationStatus == 0 else {
+            Log.debug("读取 Cursor 状态库退出码 \(task.terminationStatus)", topic: "launcher")
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let text = String(data: data, encoding: .utf8) ?? ""
+        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func appleScriptText(_ result: Any?) -> String {
+        if let text = result as? String {
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if let descriptor = result as? NSAppleEventDescriptor {
+            return descriptor.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+        return ""
     }
 
     // MARK: - 二级定位：Qoder / VS Code 系

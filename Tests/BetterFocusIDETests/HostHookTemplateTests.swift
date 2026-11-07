@@ -153,14 +153,20 @@ final class HostHookTemplateTests: XCTestCase {
 
     /// Cursor 只注册观测型事件：权限类事件会强制 allow/deny，绝不碰。
     func testCursorRegistersObserveOnlyEvents() {
-        XCTAssertEqual(CursorHookInstaller.events, ["stop", "sessionEnd"])
+        XCTAssertEqual(CursorHookInstaller.events, [
+            "beforeSubmitPrompt", "stop", "sessionEnd",
+            "postToolUseFailure", "subagentStop", "preCompact",
+        ])
     }
 
     /// WorkBuddy 的提问必须挂在 PreToolUse + AskUserQuestion 上，
     /// 否则 hook 收不到 tool_input，卡片弹不出来。
     func testWorkBuddyRegistersQuestionAndLifecycle() {
         let events = WorkBuddyHookInstaller.specs.map(\.event)
-        XCTAssertEqual(events, ["PreToolUse", "Notification", "PermissionRequest", "Stop", "SessionEnd"])
+        XCTAssertEqual(events, ["PreToolUse", "Notification", "PermissionRequest",
+                               "PostToolUse", "UserPromptSubmit", "Stop", "SessionEnd",
+                               "StopFailure", "PermissionDenied", "PostToolUseFailure",
+                               "SubagentStop", "PostCompact", "Elicitation"])
         let question = WorkBuddyHookInstaller.specs.first { $0.event == "PreToolUse" }
         XCTAssertEqual(question?.matcher, "AskUserQuestion")
         // Stop / SessionEnd 不带 matcher。

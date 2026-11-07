@@ -77,6 +77,8 @@ final class NotchCanvas: NSView {
     let host: NotchHostingView
     private let silhouette = CAShapeLayer()
     private let edge = CAShapeLayer()
+    /// 收起时钉在刘海尺寸上的实心气泡。卡片玻璃单独缩小，这块不再跟着变。
+    private let bubbleFill = CAShapeLayer()
     /// 展开卡片时的玻璃层。
     ///
     /// macOS 26+ 是系统液态玻璃（`NSGlassEffectView`）；更早系统仍是 `.hudWindow`
@@ -115,6 +117,10 @@ final class NotchCanvas: NSView {
     /// 弹簧形变进行中。这段时间 `layout` 不再改玻璃框和遮罩，
     /// 否则包络尺寸会先闪成整张卡片，动画再从胶囊长回去。
     private var morphing = false
+    /// 收起落定后先藏住 SwiftUI。卡片布局还在时若把不透明度拉回 1，
+    /// 会在气泡里闪出卡片顶栏；气泡跟刘海一样大时整段都看得见，
+    /// 调到最小就缩进摄像头壳体里。等视图换成收起内容后再揭开。
+    private var holdHostHidden = false
     /// 形变中屏幕上的内容尺寸（不含外缘、不含透镜留白）。打断动画时从这里续，
     /// 而不是从遮罩的包围盒——包围盒含 pad，会把下一次弹簧的起点撑大。
     private var liveSample: CGSize?
@@ -217,6 +223,16 @@ final class NotchCanvas: NSView {
         body.layer?.mask = silhouette
         addSubview(body)
 
+        // 收起动画里的实心气泡。铺在玻璃下面，尺寸不跟卡片弹簧走。
+        bubbleFill.fillColor = nil
+        bubbleFill.opacity = 0
+        bubbleFill.zPosition = -1
+        bubbleFill.actions = [
+            "path": NSNull(), "opacity": NSNull(), "fillColor": NSNull(),
+            "bounds": NSNull(), "position": NSNull(),
+        ]
+        body.layer?.addSublayer(bubbleFill)
+
         // 磨砂玻璃淡入：仅展开卡片时可见（由 updateContrast 按 contentSize 控制 alpha）。
         glass.alphaValue = 0
         body.addSubview(glass, positioned: .below, relativeTo: host)
@@ -297,17 +313,28 @@ final class NotchCanvas: NSView {
     /// 从 Settings 取岛底色（background_color × background_alpha），取代固定刘海黑，
     /// 使外观改动实时生效。底色设在 body 层上（受轮廓遮罩裁剪），根层保持透明。
     ///
-    /// 液态玻璃只要看得见，岛底就必须是透明的，否则透镜只模糊这块纯色。
-    /// 收起的细条（玻璃已藏起）保持用户设置的实色，用来融入物理刘海。
-    private func applyBaseColor(glassVisible: Bool) {
-        if usesLiquidGlass && glassVisible {
-            body.layer?.backgroundColor = NSColor.clear.cgColor
+    /// 液态玻璃盖得住时岛底透明，否则透镜只模糊这块纯色。
+    /// 收起时实色跟着玻璃一起补上，不要等玻璃消失后再整块换成黑气泡。
+    private func applyBaseColor(glassAlpha: CGFloat) {
+        let c = Settings.shared.backgroundRGB
+        let solid = CGFloat(min(1, max(0, Settings.shared.backgroundAlpha)))
+        if usesLiquidGlass {
+            let cover = min(1, max(0, glassAlpha))
+            // 玻璃从 0.75 落到 0.35 的过程中把岛底补实。补得太晚，半透明透镜会把菜单栏闪成一块白；
+            // 用阈值瞬间切到实色，又会在卡片收完后冒出一块黑气泡。
+            let reveal = min(1, max(0, (0.75 - cover) / 0.40))
+            let alpha = solid * reveal
+            if alpha < 0.012 {
+                body.layer?.backgroundColor = NSColor.clear.cgColor
+                return
+            }
+            body.layer?.backgroundColor = NSColor(
+                srgbRed: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: alpha
+            ).cgColor
             return
         }
-        let c = Settings.shared.backgroundRGB
-        let alpha = CGFloat(min(1, max(0, Settings.shared.backgroundAlpha)))
         body.layer?.backgroundColor = NSColor(
-            srgbRed: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: alpha
+            srgbRed: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: solid
         ).cgColor
     }
 
@@ -316,7 +343,8 @@ final class NotchCanvas: NSView {
     private func updateContrast() {
         let open: CGFloat = contentSize.height > 60 ? 1 : 0
         displayedOpenness = open
-        applySurface(content: contentSize, openness: open, hostOpacity: 1,
+        applySurface(content: contentSize, openness: open,
+                     hostOpacity: holdHostHidden ? 0 : 1,
                      moving: false, placeHost: true)
         applyGlow()
     }
@@ -500,14 +528,31 @@ final class NotchCanvas: NSView {
         let open = min(1, max(0, openness))
         let expanded = open > 0.999
         let distortOn = usesLiquidGlass && Settings.shared.glassDistort > 0.001
-        // 轮廓从刘海肩部收到透镜的过程比整段弹簧短：刚离开气泡就成为透镜，
-        // 之后全程都是「当前尺寸」的玻璃在长大，而不是收起轮廓一路撑到落定再换形。
-        let lensBlend: CGFloat = distortOn ? min(1, open / 0.18) : 0
+        let closing = morphing && morphToOpen + 0.001 < morphFromOpen
+        // 收向刘海气泡时，实心气泡钉死在目标尺寸。弹簧只推动卡片玻璃。
+        // 岛底不能铺满整张遮罩，否则黑底会以卡片尺寸再缩一次。
+        let pinBubble = closing && contentSize.height <= 60 && contentSize.width > 1
+        let drawn = pinBubble
+            ? CGSize(width: max(content.width, contentSize.width),
+                     height: max(content.height, contentSize.height))
+            : content
+        // 展开：刚离开气泡就换成透镜，之后只是同一块玻璃在变大。
+        // 收起且钉住气泡：卡片保持透镜往回收，最后一小段才并回刘海轮廓。
+        let lensBlend: CGFloat
+        if !distortOn {
+            lensBlend = 0
+        } else if pinBubble {
+            lensBlend = min(1, open / 0.15)
+        } else if closing {
+            lensBlend = open
+        } else {
+            lensBlend = min(1, open / 0.18)
+        }
         // 外缘和透镜留白跟着张开程度从 0 长到落定值。收起气泡上两者都是 0，
-        // 不会留下一圈固定外缘把气泡撑大。
+        // 不会留下一圈固定外缘把气泡撑大。钉住的气泡自己不加这圈留白。
         let rim = rimAmount(expanded: true) * open
         let pad = distortOn ? Self.distortLensPad * open : 0
-        let island = islandRect(for: content)
+        let island = islandRect(for: drawn)
         let glassRect = expandedGlassRect(island, rim: rim)
 
         if placeHost {
@@ -516,7 +561,14 @@ final class NotchCanvas: NSView {
         dim.frame = glassRect
         glass.frame = glassRect
 
-        let alpha = glassOpacity(openness: open)
+        let alpha: CGFloat
+        if pinBubble {
+            // 卡片收到尾声再淡掉，好让底下那颗固定气泡露出来，而不是整块一起变黑。
+            let t = min(1, open / 0.30)
+            alpha = t * t * (3 - 2 * t)
+        } else {
+            alpha = glassOpacity(openness: open, opening: !closing)
+        }
         glass.layer?.removeAnimation(forKey: "fade")
         glass.alphaValue = alpha
         glass.layer?.opacity = Float(alpha)
@@ -526,7 +578,19 @@ final class NotchCanvas: NSView {
         if body.layer?.mask !== silhouette {
             body.layer?.mask = silhouette
         }
-        let path = maskPath(glassRect: glassRect, lensBlend: lensBlend, pad: pad)
+        let cardPath = maskPath(glassRect: glassRect, lensBlend: lensBlend, pad: pad)
+        let path: CGPath
+        if pinBubble {
+            let bubblePath = notchPath(in: islandRect(for: contentSize))
+            let union = CGMutablePath()
+            union.addPath(bubblePath)
+            union.addPath(cardPath)
+            path = union
+            showPinnedBubble(bubblePath)
+        } else {
+            path = cardPath
+            hidePinnedBubble()
+        }
         silhouette.path = path
         edge.path = path
         if lensBlend > 0.999 {
@@ -551,20 +615,38 @@ final class NotchCanvas: NSView {
 
         host.layer?.removeAnimation(forKey: "fade")
         host.layer?.opacity = Float(hostOpacity)
-        // 玻璃还没盖住时岛底保持实色。清得太早，半透明透镜会把菜单栏当成一块白闪。
-        applyBaseColor(glassVisible: alpha > 0.72)
+        // 钉住气泡时岛底保持透明，实色只画在固定的气泡路径里。
+        // 其余时候玻璃还没盖住就补实色，避免半透明透镜把菜单栏闪成一块白。
+        applyBaseColor(glassAlpha: pinBubble ? 1 : alpha)
         let shadowStrength: CGFloat = morphing ? open : (content.height > 60 ? 1 : 0)
         updateBodyShadow(strength: shadowStrength)
     }
 
-    /// 液态玻璃在离开气泡后很快就完全显现，之后是同一块材料在长大。
-    /// 两端钉死：0 与收起气泡重合，1 与展开卡片重合。
-    private func glassOpacity(openness: CGFloat) -> CGFloat {
+    /// 把实心气泡钉在刘海路径上。调用方已关掉隐式动画。
+    private func showPinnedBubble(_ path: CGPath) {
+        let c = Settings.shared.backgroundRGB
+        let solid = CGFloat(min(1, max(0, Settings.shared.backgroundAlpha)))
+        bubbleFill.path = path
+        bubbleFill.fillColor = NSColor(
+            srgbRed: CGFloat(c.r), green: CGFloat(c.g), blue: CGFloat(c.b), alpha: solid
+        ).cgColor
+        bubbleFill.opacity = 1
+    }
+
+    private func hidePinnedBubble() {
+        bubbleFill.opacity = 0
+        bubbleFill.path = nil
+    }
+
+    /// 液态玻璃透明度。展开时很快显现；收起且没有单独钉住气泡时，
+    /// 跟着整段收缩淡掉。两端钉死：0 与收起气泡重合，1 与展开卡片重合。
+    private func glassOpacity(openness: CGFloat, opening: Bool) -> CGFloat {
         let span = min(1, max(0, openness))
         if !usesLiquidGlass { return span }
         if span <= 0 { return 0 }
         if span >= 1 { return 1 }
-        let t = min(1, span / 0.10)
+        let window: CGFloat = opening ? 0.10 : 0.65
+        let t = min(1, span / window)
         return t * t * (3 - 2 * t)
     }
 
@@ -967,6 +1049,8 @@ final class NotchCanvas: NSView {
     /// 辉光先关掉。玻璃框要等 `renderMorph` 按采样来放，不能在这里铺成最终卡片。
     func beginLiveMorph(from: CGSize, to: CGSize, preserveContentFrame: Bool) {
         morphing = true
+        // 新弹簧自己逐帧写不透明度。上一轮收起留下的「先藏住」不能带到这里。
+        holdHostHidden = false
         morphFromOpen = displayedOpenness
         morphToOpen = to.height > 60 ? 1 : 0
         contentSize = to
@@ -1012,10 +1096,14 @@ final class NotchCanvas: NSView {
 
     /// 弹簧落定后提交形变：撤掉动画、按静止（== 内容）尺寸布局。调用时 `bounds`
     /// 已是带留白的目标。
-    func settleMorph(to size: CGSize) {
+    ///
+    /// `revealContent == false` 时内容保持全透明，直到 `revealHostContent()`。
+    /// 收起落定和 SwiftUI 换成气泡布局不是同一帧，提前亮开会闪出卡片顶栏。
+    func settleMorph(to size: CGSize, revealContent: Bool = true) {
         morphing = false
         liveSample = nil
         contentSize = size
+        holdHostHidden = !revealContent
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         body.frame = bounds
@@ -1027,6 +1115,32 @@ final class NotchCanvas: NSView {
         glowLayer.contentsScale = window?.backingScaleFactor ?? 2
         setGlowPaths(morphPath(for: size))
         CATransaction.commit()
+    }
+
+    /// 立刻藏住内容。必须发生在 `setFrame(display: true)` 之前，
+    /// 否则那一次强制绘制会把卡片顶栏画进已经收到气泡的遮罩里。
+    func holdHostHiddenNow() {
+        holdHostHidden = true
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        host.layer?.removeAnimation(forKey: "fade")
+        host.layer?.opacity = 0
+        CATransaction.commit()
+    }
+
+    /// SwiftUI 已经换成收起内容。这时再亮，气泡里不会带上卡片顶栏。
+    func revealHostContent() {
+        guard holdHostHidden else { return }
+        holdHostHidden = false
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        host.layer?.opacity = 1
+        CATransaction.commit()
+    }
+
+    /// 新的展开打断了尚未揭开的收起。形变自己管不透明度，别把藏住的状态留到下一轮。
+    func releaseHostHidden() {
+        holdHostHidden = false
     }
 }
 
@@ -1045,6 +1159,8 @@ final class NotchWindowHost: NSObject {
     private var settleCompletion: (() -> Void)?
     /// 与屏幕刷新对齐的形变时钟。比 Timer 稳，也避免和遮罩关键帧各走各的。
     private var morphLink: CADisplayLink?
+    /// 这次弹簧是收到气泡：落定后先别把内容亮起来。
+    private var deferHostReveal = false
     private var morphFrom = CGSize.zero
     private var morphTo = CGSize.zero
     private var morphBounce = 1.0
@@ -1074,6 +1190,16 @@ final class NotchWindowHost: NSObject {
         canvas.onMouseExit = exit
         canvas.onMouseMove = move
         canvas.onRightClick = rightClick
+    }
+
+    /// 收起落定、SwiftUI 已换成气泡内容后，把藏住的内容亮起来。
+    func revealHostContent() {
+        canvas.revealHostContent()
+    }
+
+    /// 展开打断收起时清掉「先藏住」标记，避免下一帧被压成全透明。
+    func releaseHostHidden() {
+        canvas.releaseHostHidden()
     }
 
     /// 设置 / 清除气泡外缘呼吸辉光（转发到画布的 AppKit 辉光层）。
@@ -1142,13 +1268,14 @@ final class NotchWindowHost: NSObject {
                       preserveContentFrame: preserveContentFrame, onSettled: onSettled)
         } else {
         stopMorphClock()
+        if preserveContentFrame {
+            canvas.holdHostHiddenNow()
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         panel.setFrame(pixelAligned(panelFrame(for: size, showsContent: showsContent)), display: true)
         appliedFrame = panelFrame(for: size, showsContent: showsContent)
-        canvas.setMorphing(false)
-        canvas.setContentSize(size)
-        canvas.layoutSubtreeIfNeeded()
+        canvas.settleMorph(to: size, revealContent: !preserveContentFrame)
         CATransaction.commit()
         onSettled?()
         }
@@ -1176,6 +1303,7 @@ final class NotchWindowHost: NSObject {
         animationGeneration += 1
         stopMorphClock()
         isAnimating = true
+        deferHostReveal = preserveContentFrame
         let hideDone = completion
         settleCompletion = {
             onSettled?()
@@ -1257,11 +1385,16 @@ final class NotchWindowHost: NSObject {
         isAnimating = false
         let completion = settleCompletion
         settleCompletion = nil
+        let revealNow = !deferHostReveal
+        deferHostReveal = false
+        if !revealNow {
+            canvas.holdHostHiddenNow()
+        }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         panel.setFrame(pixelAligned(panelFrame(for: targetSize, showsContent: showsContent)), display: true)
         appliedFrame = panelFrame(for: targetSize, showsContent: showsContent)
-        canvas.settleMorph(to: targetSize)
+        canvas.settleMorph(to: targetSize, revealContent: revealNow)
         CATransaction.commit()
         completion?()
     }

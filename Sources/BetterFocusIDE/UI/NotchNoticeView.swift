@@ -70,7 +70,7 @@ struct NotchNoticeView: View {
                         .scaleEffect(bellScale)
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("任务完成")
+                            Text(notice.kind == .turn ? "任务完成" : notice.title)
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.95))
                                 .lineLimit(1)

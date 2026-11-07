@@ -71,6 +71,14 @@ enum SocketEvent: String {
     case permissionNotice = "permission_notice"
     case sessionEnded = "session_ended"
     case turnFinished = "turn_finished"
+    /// 工具失败、回合报错、自动拒绝、额度或登录失败。
+    case failureNotice = "failure_notice"
+    /// 子代理结束。
+    case subagentFinished = "subagent_finished"
+    /// 文档待审、浏览器在等、MCP 需要人输入但题面不在工具参数里。
+    case reviewNotice = "review_notice"
+    /// 上下文即将或已经压缩。
+    case compactNotice = "compact_notice"
     /// 待办整表覆盖：`TodoWrite` / `todowrite` / `SetTodoList` 每次重发完整列表。
     case todoUpdated = "todo_updated"
     /// 待办单条写入：Claude Code V2 / WorkBuddy 的 `TaskCreate` / `TaskUpdate`。

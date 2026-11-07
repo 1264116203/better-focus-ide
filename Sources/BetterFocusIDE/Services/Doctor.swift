@@ -43,10 +43,26 @@ enum Doctor {
             label: "Claude Code", hostDir: InstallerPaths.claudeDir,
             script: InstallerPaths.claudeScriptPath, helper: InstallerPaths.claudeHelperPath,
             registered: { ClaudeCodeHookInstaller.isRegistered }))
+        // 桌面应用已改名为 ChatGPT，bundle id 仍是 com.openai.codex。
+        // 只装了 App、还没生成 ~/.codex 时也要列出，不能当成「没装这个宿主」。
+        if CodexHookInstaller.isPresent {
+            checks.append(contentsOf: hostIntegration(
+                label: "ChatGPT", hostDir: InstallerPaths.codexDir,
+                script: InstallerPaths.codexScriptPath, helper: InstallerPaths.codexHelperPath,
+                registered: { CodexHookInstaller.isRegistered },
+                assumePresent: true,
+                registeredDetail: "已登记（需在 ChatGPT 里信任该 hook 后才会触发）"))
+        } else {
+            checks.append(DoctorCheck(ok: true, label: "ChatGPT 集成",
+                                      detail: "本机未检测到该宿主，跳过", hint: nil))
+        }
+        // Copilot 的配置在 ~/.copilot/hooks，和二进制是否在 PATH 上无关。
+        // 放在 ChatGPT 旁边，避免自检页要滚过一长串「跳过」才看得到。
         checks.append(contentsOf: hostIntegration(
-            label: "Codex", hostDir: InstallerPaths.codexDir,
-            script: InstallerPaths.codexScriptPath, helper: InstallerPaths.codexHelperPath,
-            registered: { CodexHookInstaller.isRegistered }))
+            label: "Copilot", hostDir: InstallerPaths.copilotDir,
+            script: InstallerPaths.copilotScriptPath, helper: InstallerPaths.copilotHelperPath,
+            registered: { CopilotHookInstaller.isRegistered },
+            assumePresent: CopilotHookInstaller.isPresent))
         checks.append(contentsOf: hostIntegration(
             label: "Trae CN", hostDir: InstallerPaths.traeCnDir,
             script: InstallerPaths.traeScriptPath(InstallerPaths.traeCnDir),
@@ -76,8 +92,10 @@ enum Doctor {
 
     /// 单个宿主的集成状态：脚本 / helper 文件与宿主配置登记情况。
     static func hostIntegration(label: String, hostDir: String, script: String,
-                                helper: String?, registered: () -> Bool) -> [DoctorCheck] {
-        guard InstallerPaths.hostDirectoryExists(hostDir) else {
+                                helper: String?, registered: () -> Bool,
+                                assumePresent: Bool = false,
+                                registeredDetail: String = "已登记") -> [DoctorCheck] {
+        guard assumePresent || InstallerPaths.hostDirectoryExists(hostDir) else {
             return [DoctorCheck(ok: true, label: "\(label) 集成",
                                 detail: "本机未检测到该宿主，跳过", hint: nil)]
         }
@@ -86,7 +104,7 @@ enum Doctor {
             checks.append(installedFile(label: "\(label) Helper", path: helper))
         }
         checks.append(registered()
-            ? DoctorCheck(ok: true, label: "\(label) Hook 开关", detail: "已登记", hint: nil)
+            ? DoctorCheck(ok: true, label: "\(label) Hook 开关", detail: registeredDetail, hint: nil)
             : DoctorCheck(ok: false, label: "\(label) Hook 开关",
                           detail: "未在宿主配置中登记",
                           hint: "菜单 → 一键安装 Hook / Plugin"))

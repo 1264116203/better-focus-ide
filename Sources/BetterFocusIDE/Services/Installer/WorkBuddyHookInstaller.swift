@@ -31,12 +31,18 @@ enum WorkBuddyHookInstaller {
     /// 兼容——脚本按工具名分流到 todo_item_updated / todo_updated。
     static let specs: [(event: String, matcher: String?, timeout: Int)] = [
         ("PreToolUse", "AskUserQuestion", InstallerPaths.hookTimeoutSeconds),
-        ("Notification", "permission_prompt", 5),
+        ("Notification", InstallerPaths.attentionNotificationMatcher, 5),
         ("PermissionRequest", nil, 5),
         ("PostToolUse", InstallerPaths.todoToolMatcher, 5),
         ("UserPromptSubmit", nil, 5),
         ("Stop", nil, 5),
         ("SessionEnd", nil, 5),
+        ("StopFailure", nil, 5),
+        ("PermissionDenied", nil, 5),
+        ("PostToolUseFailure", nil, 5),
+        ("SubagentStop", nil, 5),
+        ("PostCompact", nil, 5),
+        ("Elicitation", nil, 5),
     ]
 
     // MARK: - 生命周期

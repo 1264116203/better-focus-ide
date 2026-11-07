@@ -151,10 +151,15 @@ final class HostAdapterTests: XCTestCase {
     }
 
     /// Trae 的 `Notification` matcher 匹配的是 notification_type，不是工具名。
-    /// 写成工具名会让权限提醒永远不触发。
+    /// 写成工具名会让权限提醒永远不触发。任务完成是 `idle_prompt`，漏了就没有完成通知。
     func testTraeNotificationMatcherTargetsNotificationType() {
         let notification = TraeHookInstaller.specs.first { $0.event == "Notification" }
-        XCTAssertEqual(notification?.matcher, "permission_prompt")
+        XCTAssertEqual(notification?.matcher,
+                       "permission_prompt|ask_user_question|document_review|browser_interaction|idle_prompt")
+        let body = TraeHookInstaller.helperContent(.international)
+        XCTAssertTrue(body.contains("kind == \"idle_prompt\""))
+        XCTAssertTrue(body.contains("emit_turn_finished(session_id, payload)"))
+        XCTAssertTrue(TraeHookInstaller.specs.contains { $0.event == "UserPromptSubmit" })
     }
 
     /// Trae 只有六类事件，没有 SessionEnd——注册了也不会被调用，别假装有。
@@ -248,6 +253,7 @@ final class HostAdapterTests: XCTestCase {
             ("trae", TraeHookInstaller.helperContent(.international)),
             ("kimi", KimiHookInstaller.helperContent),
             ("qoder-cn", QoderCnHookInstaller.installer.helperContent),
+            ("copilot", CopilotHookInstaller.helperContent),
         ]
         let dir = NSTemporaryDirectory() + "bf-hook-syntax-\(UUID().uuidString)"
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -281,19 +287,35 @@ final class HostAdapterTests: XCTestCase {
         XCTAssertTrue(QoderCnHookInstaller.scriptContent.contains("\"$@\""))
     }
 
-    /// Codex 方言绝不能去读 stdin：stdin 上没东西，读下去会把终端卡死。
-    func testCodexDialectReadsArgvNotStdin() {
+    /// Codex 的 notify 走 argv，hooks.json 走 stdin。有 argv 时必须先返回，
+    /// 不能落到后面的 stdin 读取——notify 不关 stdin，读下去会把终端卡死。
+    func testCodexNotifyReadsArgvBeforeStdin() {
         let body = CodexHookInstaller.helperContent
-        XCTAssertTrue(body.contains("EVENT_STYLE == \"codex\""))
+        XCTAssertTrue(body.contains("EVENT_STYLE == \"codex\" and len(sys.argv) > 1"))
         XCTAssertTrue(body.contains("json.loads(sys.argv[1])"))
-        // read_payload 里 codex 分支必须在读 stdin 之前返回。
         let readPayload = body.components(separatedBy: "def read_payload").last ?? ""
         let codexIndex = readPayload.range(of: "EVENT_STYLE == \"codex\"")?.lowerBound
         let stdinIndex = readPayload.range(of: "json.load(sys.stdin)")?.lowerBound
         XCTAssertNotNil(codexIndex)
         XCTAssertNotNil(stdinIndex)
         if let codexIndex, let stdinIndex {
-            XCTAssertTrue(codexIndex < stdinIndex, "codex 分支必须早于 stdin 读取")
+            XCTAssertTrue(codexIndex < stdinIndex, "argv 分支必须早于 stdin 读取")
+        }
+        // notify 命中后直接返回；hooks.json 的载荷继续走 Claude 方言。
+        XCTAssertTrue(body.contains("payload.get(\"type\") == \"agent-turn-complete\""))
+        XCTAssertFalse(body.contains("Codex 只发 agent-turn-complete"))
+    }
+
+    /// hooks.json 的事件面以官方文档为准：SessionEnd 超时不得超过 3 秒，
+    /// 没有 Notification，待办工具 update_plan 也先不挂。
+    func testCodexHooksStayInsideDocumentedLimits() {
+        let events = CodexHookInstaller.specs.map(\.event)
+        XCTAssertEqual(events, ["PermissionRequest", "UserPromptSubmit",
+                                "Stop", "SessionEnd", "SubagentStop", "PostCompact"])
+        let sessionEnd = CodexHookInstaller.specs.first { $0.event == "SessionEnd" }
+        XCTAssertEqual(sessionEnd?.timeout, 3)
+        for spec in CodexHookInstaller.specs where spec.event != "SessionEnd" {
+            XCTAssertLessThanOrEqual(spec.timeout, 600)
         }
     }
 
@@ -376,9 +398,104 @@ final class HostAdapterTests: XCTestCase {
         XCTAssertEqual(target?.names, ["Warp"])
     }
 
+    /// ChatGPT.app 沿用 Codex 的 bundle id。点桌面版通知应唤起 ChatGPT，
+    /// 终端里的会话仍唤起那个终端。
+    func testChatGPTAppJumpLeavesTerminalSessionsAlone() {
+        XCTAssertEqual(AgentProvider.codex.displayName, "ChatGPT")
+        let app = HostInfo(from: ["bundle": .string("com.openai.codex"),
+                                  "name": .string("ChatGPT")],
+                           cwd: "/tmp/proj")
+        let appTarget = IDELauncher.target(for: "codex", host: app)
+        XCTAssertEqual(appTarget?.bundles, ["com.openai.codex"])
+        XCTAssertEqual(appTarget?.names, ["ChatGPT"])
+
+        let terminal = HostInfo(from: ["bundle": .string("com.apple.Terminal"),
+                                       "name": .string("Terminal")],
+                                cwd: "/tmp/proj")
+        let terminalTarget = IDELauncher.target(for: "codex", host: terminal)
+        XCTAssertEqual(terminalTarget?.bundles, ["com.apple.Terminal"])
+        XCTAssertEqual(terminalTarget?.names, ["Terminal"])
+    }
+
+    /// GitHub Copilot.app 的完成通知必须唤起这个桌面应用。
+    /// 终端里的 CLI 会话仍唤起那个终端，不能被桌面版 bundle 盖掉。
+    func testCopilotAppJumpLeavesTerminalSessionsAlone() {
+        let app = HostInfo(from: ["bundle": .string("com.github.githubapp"),
+                                  "name": .string("GitHub Copilot"),
+                                  "path": .string("/Users/bit_tiger/Applications/GitHub Copilot.app")],
+                           cwd: "/tmp/proj")
+        let appTarget = IDELauncher.target(for: "copilot", host: app)
+        XCTAssertEqual(appTarget?.bundles, ["com.github.githubapp"])
+        XCTAssertEqual(appTarget?.names, ["GitHub Copilot"])
+
+        let terminal = HostInfo(from: ["bundle": .string("dev.warp.Warp-Stable"),
+                                       "name": .string("Warp")],
+                                cwd: "/tmp/proj")
+        let terminalTarget = IDELauncher.target(for: "copilot", host: terminal)
+        XCTAssertEqual(terminalTarget?.bundles, ["dev.warp.Warp-Stable"])
+        XCTAssertEqual(terminalTarget?.names, ["Warp"])
+    }
+
+    /// Copilot 的 hook 文件是扁平 command 条目，并且只有 ask_user 会进 preToolUse。
+    /// 全量 preToolUse 在 Copilot 上是 fail-closed，脚本一出错就拒绝所有工具。
+    func testCopilotHookFileIsFlatAndQuestionScoped() {
+        let doc = CopilotHookInstaller.hookDocument(
+            scriptPath: "/tmp/betterfocus-notify.sh", questionTimeout: 120)
+        XCTAssertEqual(doc["version"] as? Int, 1)
+        let hooks = doc["hooks"] as? [String: [[String: Any]]]
+        let pre = hooks?["PreToolUse"]?.first
+        XCTAssertEqual(pre?["type"] as? String, "command")
+        XCTAssertEqual(pre?["command"] as? String, "/tmp/betterfocus-notify.sh")
+        XCTAssertEqual(pre?["matcher"] as? String, "AskUserQuestion")
+        XCTAssertEqual(pre?["timeoutSec"] as? Int, 120)
+        XCTAssertNil(pre?["hooks"], "不能写成 Claude 的嵌套 hooks 分组")
+        XCTAssertEqual(hooks?["PreToolUse"]?.count, 1)
+        let permission = hooks?["PermissionRequest"]?.first
+        XCTAssertNil(permission?["matcher"], "权限提醒要覆盖全部工具，但不能带空 matcher")
+        XCTAssertEqual(permission?["timeoutSec"] as? Int, 5)
+        XCTAssertEqual(hooks?["Stop"]?.first?["timeoutSec"] as? Int, 5)
+        XCTAssertEqual(hooks?["UserPromptSubmit"]?.first?["command"] as? String,
+                       "/tmp/betterfocus-notify.sh")
+    }
+
+    /// 只在显式打开环境变量时写 ~/.codex/hooks.json，避免普通测试碰用户目录。
+    /// notify 已被占用时安装必须成功，并且不能改 config.toml。
+    func testInstallCodexHooksWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["BETTERFOCUS_INSTALL_CODEX"] == "1")
+        let config = InstallerPaths.codexConfigPath
+        let before = try? String(contentsOfFile: config, encoding: .utf8)
+        try CodexHookInstaller.install()
+        XCTAssertTrue(CodexHookInstaller.isInstalled)
+        XCTAssertTrue(CodexHookInstaller.isRegistered)
+        let after = try? String(contentsOfFile: config, encoding: .utf8)
+        XCTAssertEqual(before, after, "已有 notify 时不能改 config.toml")
+    }
+
+    /// 本机安装入口。只在显式打开环境变量时写 ~/.copilot/hooks，避免普通测试碰用户目录。
+    func testInstallCopilotHooksWhenRequested() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["BETTERFOCUS_INSTALL_COPILOT"] == "1")
+        try CopilotHookInstaller.install()
+        XCTAssertTrue(CopilotHookInstaller.isInstalled)
+        XCTAssertTrue(CopilotHookInstaller.isRegistered)
+    }
+
+    /// Copilot 的放行必须是「什么都不写」。顶层 allow 会跳过用户确认。
+    func testCopilotDecisionStaysSilentOnAllow() {
+        let body = CopilotHookInstaller.helperContent
+        XCTAssertTrue(body.contains("EVENT_STYLE == \"copilot\""))
+        XCTAssertTrue(body.contains("\"permissionDecision\": \"deny\""))
+        XCTAssertTrue(body.contains("\"behavior\": \"deny\""))
+        XCTAssertTrue(body.contains("decision in (\"ask\", \"allow\")"))
+        XCTAssertTrue(body.contains("if EVENT_STYLE != \"copilot\":"))
+        XCTAssertEqual(AgentProvider.label(provider: .copilot, hostName: "Warp",
+                                           bundleID: "dev.warp.Warp-Stable"),
+                       "Copilot（Warp）")
+    }
+
     /// 每个 CLI provider 都必须被判为 isCLI，否则命名与跳转会走错分支。
     func testCLIClassification() {
-        let cli: [AgentProvider] = [.claude_code, .codex, .kimi, .qoder_cli, .qoder_cn_cli]
+        let cli: [AgentProvider] = [.claude_code, .codex, .kimi, .copilot,
+                                    .qoder_cli, .qoder_cn_cli]
         for provider in cli {
             XCTAssertTrue(provider.isCLI, "\(provider.rawValue) 应为 CLI")
         }

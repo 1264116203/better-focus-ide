@@ -3,8 +3,11 @@
 
 import Foundation
 
-/// 安装 / 卸载 OpenCode 插件，把提问、权限评估、会话空闲（轮次完成）等事件
+/// 安装 / 卸载 OpenCode 插件，把提问、会话空闲（轮次完成）和待办
 /// 通过 Unix socket 转发到 BetterFocusIDE 灵动岛。
+///
+/// 一份文件两个入口：V2 调 `setup()`，V1（1.18.29 起）调 `server()`。
+/// 权限卡两边都不做。
 enum OpenCodePluginInstaller {
     static let pluginPath = InstallerPaths.opencodePluginPath
 
@@ -45,23 +48,29 @@ enum PluginTemplate {
     static let body = """
         // BetterFocusIDE <-> OpenCode plugin.
         //
-        // 1. Questions: OpenCode's `question` tool blocks on a TUI form, so a
-        //    plugin cannot "answer" it directly. This takes over the tool's
-        //    execution: forwards the question to the island's socket, waits for
-        //    the answer file, returns the choice as the tool result. When the
-        //    island is unreachable the original execution runs (TUI still works).
-        // 2. Permissions: `permission.evaluate` runs after rules and before the
-        //    prompt; forwards to the island and rewrites effect to allow/deny.
-        // 3. Turn finished: on session idle, pops the "reply done" notice.
-        // 4. Todo progress: wraps the todo tool and forwards the whole list on
-        //    every write, so the island can draw the segmented progress card.
+        // One file, two entries. V2 calls setup(); V1 (1.18.29+) calls server()
+        // and ignores setup. A static import of @opencode/plugin would fail to
+        // load on V1, so this file exports a plain object.
+        //
+        // 1. Questions.
+        //    V2 replaces question.execute and returns the island's choice as the
+        //    tool result. If the island is unreachable the original tool runs.
+        //    V1 listens for question.asked and replies with client.question.reply.
+        //    The TUI form can flash until that reply arrives. If the client has
+        //    no reply method, or the island is down, the hook writes nothing.
+        // 2. Turn finished: V2 watches the event stream; V1 uses the event hook
+        //    for session.idle and session.status { type: idle }.
+        // 3. Todo progress: V2 wraps the todo tool when it still exists. V1
+        //    forwards tool.execute.after for the same names. A removed tool
+        //    simply never enters the hook.
+        //
+        // Permission cards are intentionally not implemented on either entry.
         //
         // Answer files:
-        //   __ANSWER_DIR__/<session>_<id>.json            (questions)
-        //   __ANSWER_DIR__/<session>_perm-<requestID>.json (permissions)
-        // carrying { answer_index, answer_label }; -1 = timeout, -2 = custom.
+        //   __ANSWER_DIR__/<session>_<request>_<id>.json
+        // carrying { answer_index, answer_label }; -1 = timeout, -2 = custom,
+        // -4 = hand the question back to the host.
 
-        import { Plugin } from '@opencode/plugin';
         import net from 'node:net';
         import fs from 'node:fs';
 
@@ -200,9 +209,70 @@ enum PluginTemplate {
           return { answers, resolved: false };
         }
 
-        export default Plugin.define({
+        // 有的版本会把 setup 和 server 都调一次。先到的入口占住，后到的直接返回，
+        // 避免同一轮弹出两张卡。
+        let entryClaimed = false;
+
+        const TODO_TOOL_NAMES = new Set(['todowrite', 'todo_write', 'TodoWrite', 'SetTodoList']);
+        const V1_TURN_DEBOUNCE_MS = 2000;
+        const v1LastTurnAt = new Map();
+
+        async function replyFromIsland(props, client) {
+          const sessionID = props.sessionID || props.session_id || 'unknown';
+          if (!alertsEnabled('question')) return;
+          const questions = normaliseQuestions({ questions: props.questions }, sessionID);
+          if (!questions.length) return;
+          const requestID = props.id || ('q' + Date.now());
+          const sent = await sendToIsland({
+            provider: 'opencode', event: 'question_requested',
+            session_id: sessionID, timestamp: new Date().toISOString(),
+            payload: { questions, request_id: requestID }
+          });
+          if (!sent) return;
+          const reply = client && client.question && client.question.reply;
+          if (typeof reply !== 'function') return;
+          const result = await awaitAnswers(questions, sessionID, requestID, Date.now());
+          if (result.deferred) return;
+          if (!result.resolved) {
+            await sendToIsland({
+              provider: 'opencode', event: 'question_timeout',
+              session_id: sessionID, timestamp: new Date().toISOString(),
+              payload: { question_id: questions[0].id, request_id: requestID }
+            });
+            return;
+          }
+          try {
+            await reply.call(client.question, { requestID, answers: result.answers });
+          } catch { /* 回写失败就留着 TUI 自己的提问框 */ }
+        }
+
+        async function handleV1Event(event, client, directory) {
+          if (!event || typeof event.type !== 'string') return;
+          const props = event.properties || {};
+          if (event.type === 'question.asked') {
+            await replyFromIsland(props, client);
+            return;
+          }
+          const idle = event.type === 'session.idle'
+            || (event.type === 'session.status' && props.status && props.status.type === 'idle');
+          if (!idle || !alertsEnabled('turn')) return;
+          const sessionID = props.sessionID || props.session_id || 'unknown';
+          const now = Date.now();
+          if (now - (v1LastTurnAt.get(sessionID) || 0) < V1_TURN_DEBOUNCE_MS) return;
+          v1LastTurnAt.set(sessionID, now);
+          if (v1LastTurnAt.size > 64) v1LastTurnAt.clear();
+          await sendToIsland({
+            provider: 'opencode', event: 'turn_finished',
+            session_id: sessionID, timestamp: new Date().toISOString(),
+            payload: { directory: directory || '', pid: process.pid }
+          });
+        }
+
+        export default {
           id: 'betterfocus-notify',
           async setup(ctx) {
+            if (entryClaimed) return;
+            entryClaimed = true;
             // Questions: take over the question tool's execution.
             await ctx.tool.transform((tools) => {
               const question = tools.get('question');
@@ -335,7 +405,33 @@ enum PluginTemplate {
                 }
               } catch { /* stream closed with the plugin */ }
             })();
-          }
-        });
+          },
+          async server(input) {
+            if (entryClaimed) return;
+            entryClaimed = true;
+            const directory = (input && input.directory) || '';
+            const client = input && input.client;
+            return {
+              // 宿主不 await 这个钩子。提问的等待另起任务，避免堵住事件总线。
+              event(payload) {
+                void handleV1Event(payload && payload.event, client, directory);
+              },
+              "tool.execute.after": async (toolInput) => {
+                try {
+                  const name = toolInput && toolInput.tool;
+                  if (!TODO_TOOL_NAMES.has(name)) return;
+                  const todos = normaliseTodos(toolInput && toolInput.args);
+                  if (!todos.length) return;
+                  await sendToIsland({
+                    provider: 'opencode', event: 'todo_updated',
+                    session_id: (toolInput && toolInput.sessionID) || 'unknown',
+                    timestamp: new Date().toISOString(),
+                    payload: { todos }
+                  });
+                } catch { /* 待办只是过程可视化，绝不影响工具本身 */ }
+              },
+            };
+          },
+        };
         """
 }

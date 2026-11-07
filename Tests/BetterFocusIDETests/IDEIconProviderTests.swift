@@ -117,13 +117,22 @@ final class IDEIconProviderTests: XCTestCase {
 
     /// 名称 / bundle 解析仍能命中图标（改尺寸不该动匹配逻辑）。
     func testIconLookupStillWorks() {
-        XCTAssertNotNil(IDEIconProvider.icon(for: "Cursor"))
-        XCTAssertNotNil(IDEIconProvider.icon(for: "WorkBuddy"))
-        XCTAssertNotNil(IDEIconProvider.icon(for: "Qoder", bundleID: "com.qoder.ide"))
-        XCTAssertNil(IDEIconProvider.icon(for: "Unknown App"))
-        // 注意（既有行为，不属本次改动）：名称走子串匹配，"code" 会让任何含
-        // code 的名字都判成 VS Code（如 "Claude Code"）。宿主名取的是 .app 的
-        // CFBundleName，实际不会撞上；将来要给 CLI 宿主配图标时需先补精确匹配。
+        XCTAssertTrue(IDEIconProvider.hasIcon(for: "ChatGPT", bundleID: "com.openai.codex"))
+        XCTAssertTrue(IDEIconProvider.hasIcon(for: "Codex"))
+        XCTAssertTrue(IDEIconProvider.hasIcon(for: "Claude"))
+        XCTAssertTrue(IDEIconProvider.hasIcon(for: "Claude Code", bundleID: "com.anthropic.claudefordesktop"))
+        XCTAssertTrue(IDEIconProvider.hasIcon(for: "Copilot"))
+        XCTAssertTrue(IDEIconProvider.hasIcon(for: "GitHub Copilot", bundleID: "com.github.githubapp"))
+        XCTAssertTrue(IDEIconProvider.hasIcon(for: "WorkBuddy AI", bundleID: "com.workbuddy.workbuddy-ai"))
+        XCTAssertTrue(IDEIconProvider.hasIcon(for: "WebStorm", bundleID: "com.jetbrains.WebStorm"))
+        XCTAssertEqual(IDEIconProvider.resolvedIconName(for: "Claude Code"), "claude")
+        XCTAssertEqual(IDEIconProvider.resolvedIconName(for: "Code"), "vscode")
+        XCTAssertEqual(IDEIconProvider.resolvedIconName(for: "Cursor"), "cursor")
+        XCTAssertEqual(IDEIconProvider.resolvedIconName(for: "WorkBuddy"), "workbuddy")
+        XCTAssertEqual(IDEIconProvider.resolvedIconName(for: "Qoder", bundleID: "com.qoder.ide"), "qoder-ide")
+        XCTAssertNil(IDEIconProvider.resolvedIconName(for: "Unknown App"))
+        // VS Code 的 CFBundleName 就是 "Code"，短键只能留给这个名字。
+        // 更长的名字（Claude Code）必须先命中自己的键。
     }
 
     // MARK: - 工具

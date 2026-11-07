@@ -17,6 +17,40 @@ final class OpenCodePluginTemplateTests: XCTestCase {
     /// 安装态正文（占位符已替换）。
     private var installed: String { OpenCodePluginInstaller.pluginContent }
 
+    // MARK: - V1 / V2 双入口
+
+    /// V2 只认 `id` + `setup()`，V1 从 1.18.29 起认 `{ id, server }`。
+    /// 静态 import `@opencode/plugin` 会让 V1 整份加载失败。
+    func testDualEntryExportsSetupAndServerWithoutPluginImport() {
+        XCTAssertTrue(body.contains("export default {"))
+        XCTAssertTrue(body.contains("async setup(ctx)"))
+        XCTAssertTrue(body.contains("async server(input)"))
+        XCTAssertFalse(body.contains("from '@opencode/plugin'"))
+        XCTAssertFalse(body.contains("Plugin.define"))
+    }
+
+    /// V1 不能改写 question.execute。提问走 `question.asked`，答完用
+    /// `client.question.reply` 回写；等答案必须另起异步任务，不能卡住事件总线。
+    func testV1QuestionUsesAskedEventAndClientReply() {
+        XCTAssertTrue(body.contains("'question.asked'"))
+        XCTAssertTrue(body.contains("client.question.reply"))
+        XCTAssertTrue(body.contains("void handleV1Event"))
+    }
+
+    /// V1 的回合完成走 event 钩子，待办走 tool.execute.after。
+    /// 目录来自插件入参（V1 按项目加载），工具不存在时这个钩子不会进来。
+    func testV1TurnAndTodoHooks() {
+        XCTAssertTrue(body.contains("\"tool.execute.after\""))
+        XCTAssertTrue(body.contains("input.directory"))
+        XCTAssertTrue(body.contains("todowrite"))
+    }
+
+    /// 同一个进程如果把两个入口都调了，后进来的那个必须直接返回。
+    func testSecondEntryReturnsEarly() {
+        XCTAssertTrue(body.contains("entryClaimed"))
+        XCTAssertEqual(body.components(separatedBy: "if (entryClaimed) return;").count - 1, 2)
+    }
+
     // MARK: - 事件订阅 API
 
     /// 测试：必须用 ctx.event.subscribe 异步迭代流订阅事件。

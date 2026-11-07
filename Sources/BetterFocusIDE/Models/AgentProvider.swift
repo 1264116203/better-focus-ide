@@ -17,7 +17,9 @@ import SwiftUI
 /// - `claude_code`：Claude Code 用户级 hooks（`~/.claude/settings.json`）
 /// - `trae` / `trae_cn`：Trae / Trae CN 用户级 hooks（`~/.trae{,-cn}/hooks.json`）
 /// - `kimi`：Kimi Code CLI（`~/.kimi-code/config.toml` 的 `[[hooks]]`）
-/// - `codex`：Codex CLI（`~/.codex/config.toml` 的 `notify`）
+/// - `codex`：ChatGPT 桌面版（原 Codex，bundle `com.openai.codex`；
+///   `~/.codex/config.toml` 的 `notify`）
+/// - `copilot`：GitHub Copilot CLI（`~/.copilot/hooks/betterfocus.json`）
 /// - `qoder_cn*`：Qoder CN（通义灵码）同名产品，识别结果由启动器里的
 ///   `BETTERFOCUS_VARIANT=cn` 决定（见 `HelperTemplate`）
 /// - `unknown`：无法识别
@@ -34,6 +36,7 @@ enum AgentProvider: String, CaseIterable, Codable {
     case trae
     case trae_cn
     case kimi
+    case copilot
     case qoder_cn
     case qoder_cn_ide
     case qoder_cn_cli
@@ -53,10 +56,11 @@ enum AgentProvider: String, CaseIterable, Codable {
         case .cursor: return "Cursor"
         case .workbuddy: return "WorkBuddy"
         case .claude_code: return "Claude Code"
-        case .codex: return "Codex"
+        case .codex: return "ChatGPT"
         case .trae: return "Trae"
         case .trae_cn: return "Trae CN"
         case .kimi: return "Kimi"
+        case .copilot: return "Copilot"
         case .qoder_cn: return "Qoder CN"
         case .qoder_cn_ide: return "Qoder CN IDE"
         case .qoder_cn_cli: return "Qoder CN CLI"
@@ -70,7 +74,7 @@ enum AgentProvider: String, CaseIterable, Codable {
     /// 点击时也要把终端窗口激活到前台。IDE / 桌面应用返回 false。
     var isCLI: Bool {
         switch self {
-        case .claude_code, .codex, .kimi, .qoder_cli, .qoder_cn_cli:
+        case .claude_code, .codex, .kimi, .copilot, .qoder_cli, .qoder_cn_cli:
             return true
         case .qoder, .opencode, .jetbrains_plugin, .qoder_ide, .cursor,
              .workbuddy, .trae, .trae_cn, .qoder_cn, .qoder_cn_ide, .unknown:
@@ -111,6 +115,7 @@ enum AgentProvider: String, CaseIterable, Codable {
         case .codex: return (0.15, 0.65, 0.45)         // OpenAI 绿
         case .trae, .trae_cn: return (0.25, 0.48, 0.95) // 字节蓝
         case .kimi: return (0.35, 0.30, 0.75)          // 月之暗面紫蓝
+        case .copilot: return (0.55, 0.36, 0.96)       // Copilot 紫
         case .unknown:
             return (red: 0.5, green: 0.5, blue: 0.5)
         }
@@ -127,6 +132,7 @@ enum AgentProvider: String, CaseIterable, Codable {
         case .workbuddy: return "workbuddy"
         case .trae, .trae_cn: return "trae"
         case .kimi: return "kimi"
+        case .copilot: return "copilot"
         case .claude_code: return "claude_code"
         case .codex: return "codex"
         case .qoder, .jetbrains_plugin, .qoder_ide, .qoder_cli,

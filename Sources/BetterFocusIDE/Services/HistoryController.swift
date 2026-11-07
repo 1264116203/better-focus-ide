@@ -104,7 +104,7 @@ final class HistoryController: ObservableObject {
     /// 点击某行：跳回该条目的来源应用。
     func tapped(_ entry: HistoryEntry) {
         if let provider = entry.provider {
-            IDELauncher.activateAsync(provider: provider, host: entry.host)
+            IDELauncher.activateAsync(provider: provider, host: entry.host, sessionID: entry.sessionID)
         }
     }
 

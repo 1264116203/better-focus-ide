@@ -19,6 +19,10 @@ final class TestTodoStepsTests: XCTestCase {
         XCTAssertEqual(HistoryKind.question.bodyLabel, "问：")
         XCTAssertEqual(HistoryKind.permission.bodyLabel, "详情：")
         XCTAssertEqual(HistoryKind.turn.bodyLabel, "用户：")
+        XCTAssertEqual(HistoryKind.failure.bodyLabel, "原因：")
+        XCTAssertEqual(HistoryKind.subagent.bodyLabel, "结果：")
+        XCTAssertEqual(HistoryKind.review.bodyLabel, "说明：")
+        XCTAssertEqual(HistoryKind.compact.bodyLabel, "说明：")
     }
     
     /// 步骤 5：边界输入——legacy 推断空串与未知状态。

@@ -87,7 +87,9 @@ struct DebugTarget: Identifiable, Hashable {
                     bundle: "com.googlecode.iterm2", hostName: "iTerm"),
         DebugTarget(provider: .claude_code, title: "Claude Code（Terminal）",
                     bundle: "com.apple.Terminal", hostName: "Terminal"),
-        DebugTarget(provider: .codex, title: "Codex（Terminal）",
+        DebugTarget(provider: .codex, title: "ChatGPT（Terminal）",
+                    bundle: "com.apple.Terminal", hostName: "Terminal"),
+        DebugTarget(provider: .copilot, title: "Copilot（Terminal）",
                     bundle: "com.apple.Terminal", hostName: "Terminal"),
         DebugTarget(provider: .kimi, title: "Kimi（Terminal）",
                     bundle: "com.apple.Terminal", hostName: "Terminal"),
@@ -141,6 +143,8 @@ enum DebugPayload {    /// 提问请求：数组内多问题 = 卡片分页。
     case permissionNotice(toolName: String, resource: String)
     /// 回复完成横幅：标题 / 正文由合成的 transcript 提供，留空则走兜底文案。
     case turnFinished(title: String, body: String)
+    /// 失败、子任务、待审阅、上下文压缩。标题和正文直接写进横幅。
+    case statusNotice(SocketEvent, title: String, body: String)
     /// 任务进度：`todos[]` 每项一句正文 + 原始状态字符串。
     case todo([(content: String, status: String)])
     case sessionEnded
@@ -163,7 +167,7 @@ struct DebugScene: Identifiable {
 
 /// 调试页的场景清单：按卡片类型分组，覆盖 hook 能上报的每一种事件形态。
 enum DebugCatalog {
-    static let groups = ["提问卡片", "权限卡片", "通知横幅", "任务进度", "其他"]
+    static let groups = ["提问卡片", "权限卡片", "通知横幅", "状态横幅", "任务进度", "其他"]
 
     static func scenes(in group: String) -> [DebugScene] {
         scenes.filter { $0.group == group }
@@ -336,12 +340,91 @@ enum DebugCatalog {
             payload: .permissionNotice(toolName: "Bash",
                                        resource: "npm publish --access public")),
 
+        // ---------------- 状态横幅 ----------------
+        DebugScene(
+            id: "status.toolFailure",
+            group: "状态横幅",
+            title: "工具没有跑成",
+            note: "PostToolUseFailure：工具名和报错写在正文",
+            payload: .statusNotice(.failureNotice, title: "工具没有跑成",
+                                   body: "Bash：swift test 退出码 1，HistoryEntryLabelTests 有 2 项失败")),
+        DebugScene(
+            id: "status.stopFailure",
+            group: "状态横幅",
+            title: "这一轮没有完成",
+            note: "StopFailure：模型这一轮自己停在报错上",
+            payload: .statusNotice(.failureNotice, title: "这一轮没有完成",
+                                   body: "rate_limit：请求过于频繁，稍后再试")),
+        DebugScene(
+            id: "status.denied",
+            group: "状态横幅",
+            title: "自动模式拒绝",
+            note: "PermissionDenied：自动模式替你拒绝了这次操作",
+            payload: .statusNotice(.failureNotice, title: "自动模式拒绝了这次操作",
+                                   body: "Bash：rm -rf ~/Documents/archive")),
+        DebugScene(
+            id: "status.quota",
+            group: "状态横幅",
+            title: "额度不足",
+            note: "Notification quota_*：额度用完，宿主不会继续跑",
+            payload: .statusNotice(.failureNotice, title: "额度不足",
+                                   body: "本周额度已用完，等到下个周期或换一个账号")),
+        DebugScene(
+            id: "status.auth",
+            group: "状态横幅",
+            title: "登录状态失效",
+            note: "Notification auth_storage_failure：需要回宿主重新登录",
+            payload: .statusNotice(.failureNotice, title: "登录状态失效",
+                                   body: "登录凭证读不出来，打开宿主重新登录后再继续")),
+        DebugScene(
+            id: "status.subagent",
+            group: "状态横幅",
+            title: "子任务完成",
+            note: "SubagentStop：子代理结束，正文是它最后一句",
+            payload: .statusNotice(.subagentFinished, title: "子任务完成",
+                                   body: "已把四个宿主的 hook 事件对过，Cursor 只观察、不回决策")),
+        DebugScene(
+            id: "status.document",
+            group: "状态横幅",
+            title: "文档待审阅",
+            note: "Notification document_review：计划或文档在等你看",
+            payload: .statusNotice(.reviewNotice, title: "文档待审阅",
+                                   body: "实施计划已写好，回到宿主确认后再继续")),
+        DebugScene(
+            id: "status.browser",
+            group: "状态横幅",
+            title: "浏览器在等你",
+            note: "Notification browser_interaction：页面停在需要人操作的地方",
+            payload: .statusNotice(.reviewNotice, title: "浏览器在等你",
+                                   body: "登录页已打开，完成验证后告诉宿主继续")),
+        DebugScene(
+            id: "status.input",
+            group: "状态横幅",
+            title: "需要你的输入",
+            note: "Elicitation 捞不到题面时的兜底，题面在宿主对话框里",
+            payload: .statusNotice(.reviewNotice, title: "需要你的输入",
+                                   body: "宿主弹出了补充信息框，岛上没有题面")),
+        DebugScene(
+            id: "status.compacted",
+            group: "状态横幅",
+            title: "上下文已压缩",
+            note: "PostCompact：压缩已经做完",
+            payload: .statusNotice(.compactNotice, title: "上下文已压缩",
+                                   body: "较早的对话已被收成摘要")),
+        DebugScene(
+            id: "status.compacting",
+            group: "状态横幅",
+            title: "即将压缩上下文",
+            note: "PreCompact：Cursor / Copilot / Qoder 只有这一条",
+            payload: .statusNotice(.compactNotice, title: "即将压缩上下文",
+                                   body: "上下文快满了，宿主准备收成摘要")),
+
         // ---------------- 任务进度 ----------------
         DebugScene(
             id: "todo.running",
             group: "任务进度",
             title: "进行中（6 项）",
-            note: "3 项已完成、1 项进行中、2 项待开始；收起后气泡下沿有进度线",
+            note: "3 项已完成、1 项进行中、2 项待开始；收起后气泡下沿仍有进度线，再点可展开",
             payload: .todo([
                 (content: "读一遍各宿主的 hook 文档", status: "completed"),
                 (content: "定下任务条的信息层级", status: "completed"),
@@ -453,6 +536,13 @@ enum DebugInjector {
             }
             service.injectDebugMessage(message(
                 event: .turnFinished, payload: payload,
+                target: target, sessionID: session, project: project))
+
+        case .statusNotice(let event, let title, let body):
+            service.flushDebugChannels()
+            service.injectDebugMessage(message(
+                event: event,
+                payload: ["title": .string(title), "body": .string(body)],
                 target: target, sessionID: session, project: project))
 
         case .todo(let items):
