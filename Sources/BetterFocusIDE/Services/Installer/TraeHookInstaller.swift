@@ -8,7 +8,7 @@ import Foundation
 /// Trae 的 hooks 结构与 Claude Code 同构（`version: 1` + 按事件分组的 matcher 组），
 /// 事件名也是 PascalCase，因此复用 `claude` 方言的 Python 正文。
 ///
-/// 差异点只有两个，都直接影响能不能用：
+/// 差异点有三处，都直接影响能不能用：
 /// 1. **没有 `SessionEnd`**。Trae 只有六类事件（SessionStart / UserPromptSubmit /
 ///    PreToolUse / PostToolUse / Stop / Notification），会话结束不会通知我们，
 ///    待答卡片只能靠自己的超时收场。
@@ -16,6 +16,9 @@ import Foundation
 ///    权限提醒是 `permission_prompt`，提问通知是 `ask_user_question`，
 ///    任务完成是 `idle_prompt`。写成工具名，或漏掉 `idle_prompt`，
 ///    对应的卡片都不会出现。
+/// 3. **进度卡挂不上**。`PostToolUse` 的工具枚举没有 `TodoWrite` /
+///    `TaskCreate` / `TaskUpdate`（2026-11-07 实测确认）。对话里的任务清单
+///    不会变成 hook 事件，登记 `PostToolUse` 也收不到，所以这里不挂。
 enum TraeHookInstaller {
     /// Trae 的两个发行版。国内版在 `~/.trae-cn`，国际版在 `~/.trae`。
     enum Flavor {

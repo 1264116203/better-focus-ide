@@ -832,6 +832,438 @@ enum HostHookTemplate {
                 emit_todo_upsert(session_id, payload)
 
 
+        # ── Copilot CLI 的待办 ──────────────────────────────────────────
+        # 技能里的 TodoWrite 在 Copilot CLI 上没有同名工具。官方对照是：
+        # TodoWrite → `sql`，写会话库里已经存在的 `todos` 表
+        # （id / title / description / status）。INSERT 建任务，UPDATE 改状态，
+        # DELETE 删任务。todo_deps 和其它表不是进度，SELECT 也不改卡片。
+
+
+        def _sql_strip_comments(sql):
+            out = []
+            i = 0
+            n = len(sql)
+            in_str = False
+            quote = ""
+            while i < n:
+                c = sql[i]
+                if in_str:
+                    out.append(c)
+                    if c == quote:
+                        if quote == "'" and i + 1 < n and sql[i + 1] == "'":
+                            out.append("'")
+                            i += 2
+                            continue
+                        in_str = False
+                    i += 1
+                    continue
+                if c == "'" or c == '"':
+                    in_str = True
+                    quote = c
+                    out.append(c)
+                    i += 1
+                    continue
+                if c == "-" and i + 1 < n and sql[i + 1] == "-":
+                    i += 2
+                    while i < n and sql[i] != chr(10):
+                        i += 1
+                    continue
+                if c == "/" and i + 1 < n and sql[i + 1] == "*":
+                    end = sql.find("*/", i + 2)
+                    i = n if end < 0 else end + 2
+                    continue
+                out.append(c)
+                i += 1
+            return "".join(out)
+
+
+        def _sql_split_statements(sql):
+            parts = []
+            buf = []
+            in_str = False
+            quote = ""
+            i = 0
+            n = len(sql)
+            while i < n:
+                c = sql[i]
+                if in_str:
+                    buf.append(c)
+                    if c == quote:
+                        if quote == "'" and i + 1 < n and sql[i + 1] == "'":
+                            buf.append("'")
+                            i += 2
+                            continue
+                        in_str = False
+                    i += 1
+                    continue
+                if c == "'" or c == '"':
+                    in_str = True
+                    quote = c
+                    buf.append(c)
+                    i += 1
+                    continue
+                if c == ";":
+                    text = "".join(buf).strip()
+                    if text:
+                        parts.append(text)
+                    buf = []
+                    i += 1
+                    continue
+                buf.append(c)
+                i += 1
+            tail = "".join(buf).strip()
+            if tail:
+                parts.append(tail)
+            return parts
+
+
+        def _sql_word_at(text, index):
+            n = len(text)
+            if index >= n or not (text[index].isalpha() or text[index] == "_"):
+                return ""
+            end = index + 1
+            while end < n and (text[end].isalnum() or text[end] == "_"):
+                end += 1
+            return text[index:end]
+
+
+        def _sql_find_word(text, word, start=0):
+            low = text.lower()
+            target = word.lower()
+            i = max(0, start)
+            n = len(low)
+            width = len(target)
+            while i < n:
+                if low.startswith(target, i):
+                    before = low[i - 1] if i else " "
+                    after_i = i + width
+                    after = low[after_i] if after_i < n else " "
+                    if not (before.isalnum() or before == "_") and not (after.isalnum() or after == "_"):
+                        return i
+                i += 1
+            return -1
+
+
+        def _sql_unquote(token):
+            token = token.strip()
+            if len(token) >= 2 and token[0] == token[-1] and token[0] in ("'", '"'):
+                body = token[1:-1]
+                if token[0] == "'":
+                    return body.replace("''", "'")
+                return body.replace('""', '"')
+            return token
+
+
+        def _sql_split_commas(text):
+            parts = []
+            buf = []
+            depth = 0
+            in_str = False
+            quote = ""
+            i = 0
+            n = len(text)
+            while i < n:
+                c = text[i]
+                if in_str:
+                    buf.append(c)
+                    if c == quote:
+                        if quote == "'" and i + 1 < n and text[i + 1] == "'":
+                            buf.append("'")
+                            i += 2
+                            continue
+                        in_str = False
+                    i += 1
+                    continue
+                if c == "'" or c == '"':
+                    in_str = True
+                    quote = c
+                    buf.append(c)
+                    i += 1
+                    continue
+                if c == "(":
+                    depth += 1
+                    buf.append(c)
+                    i += 1
+                    continue
+                if c == ")":
+                    depth = max(0, depth - 1)
+                    buf.append(c)
+                    i += 1
+                    continue
+                if c == "," and depth == 0:
+                    parts.append("".join(buf).strip())
+                    buf = []
+                    i += 1
+                    continue
+                buf.append(c)
+                i += 1
+            tail = "".join(buf).strip()
+            if tail:
+                parts.append(tail)
+            return parts
+
+
+        def _sql_tuples(text):
+            tuples = []
+            i = 0
+            n = len(text)
+            while i < n:
+                if text[i] != "(":
+                    i += 1
+                    continue
+                depth = 0
+                buf = []
+                in_str = False
+                quote = ""
+                while i < n:
+                    c = text[i]
+                    if in_str:
+                        buf.append(c)
+                        if c == quote:
+                            if quote == "'" and i + 1 < n and text[i + 1] == "'":
+                                buf.append("'")
+                                i += 2
+                                continue
+                            in_str = False
+                        i += 1
+                        continue
+                    if c == "'" or c == '"':
+                        in_str = True
+                        quote = c
+                        buf.append(c)
+                        i += 1
+                        continue
+                    if c == "(":
+                        depth += 1
+                        if depth > 1:
+                            buf.append(c)
+                        i += 1
+                        continue
+                    if c == ")":
+                        depth -= 1
+                        if depth == 0:
+                            tuples.append("".join(buf))
+                            i += 1
+                            break
+                        buf.append(c)
+                        i += 1
+                        continue
+                    if depth >= 1:
+                        buf.append(c)
+                    i += 1
+            return tuples
+
+
+        def _sql_table_after(stmt, keyword):
+            at = _sql_find_word(stmt, keyword)
+            if at < 0:
+                return ""
+            i = at + len(keyword)
+            while i < len(stmt) and stmt[i].isspace():
+                i += 1
+            return _sql_word_at(stmt, i).lower()
+
+
+        def _todo_change(todo_id, content, status):
+            return {"id": str(todo_id), "content": content or "", "status": status or ""}
+
+
+        def _changes_from_where(where, content, status):
+            if not where or not where.strip():
+                return []
+            at = _sql_find_word(where, "id")
+            if at < 0:
+                return []
+            rest = where[at + 2:].lstrip()
+            changes = []
+            if rest[:2].lower() == "in" and (len(rest) == 2 or not rest[2].isalnum()):
+                open_at = rest.find("(")
+                close_at = rest.rfind(")")
+                if open_at < 0 or close_at < open_at:
+                    return []
+                for token in _sql_split_commas(rest[open_at + 1:close_at]):
+                    todo_id = _sql_unquote(token).strip()
+                    if todo_id and todo_id.lower() != "null":
+                        changes.append(_todo_change(todo_id, content, status))
+                return changes
+            if not rest.startswith("="):
+                return []
+            token = rest[1:].strip()
+            if token[:1] in ("'", '"'):
+                quote = token[0]
+                body = []
+                i = 1
+                while i < len(token):
+                    if token[i] == quote:
+                        if quote == "'" and i + 1 < len(token) and token[i + 1] == "'":
+                            body.append("'")
+                            i += 2
+                            continue
+                        break
+                    body.append(token[i])
+                    i += 1
+                todo_id = "".join(body)
+            else:
+                todo_id = token.split()[0].rstrip(",") if token else ""
+            if todo_id and todo_id.lower() != "null":
+                changes.append(_todo_change(todo_id, content, status))
+            return changes
+
+
+        def _changes_from_insert(stmt):
+            if _sql_table_after(stmt, "into") != "todos":
+                return []
+            values_at = _sql_find_word(stmt, "values")
+            if values_at < 0:
+                return []
+            into_at = _sql_find_word(stmt, "into")
+            between = stmt[into_at + 4:values_at]
+            open_at = between.find("(")
+            close_at = between.rfind(")")
+            if open_at >= 0 and close_at > open_at:
+                columns = [_sql_unquote(col).lower()
+                           for col in _sql_split_commas(between[open_at + 1:close_at])]
+            else:
+                columns = ["id", "title", "description", "status", "created_at", "updated_at"]
+            changes = []
+            for row in _sql_tuples(stmt[values_at + 6:]):
+                values = [_sql_unquote(part) for part in _sql_split_commas(row)]
+                fields = {}
+                for index, column in enumerate(columns):
+                    if index < len(values):
+                        fields[column] = values[index]
+                todo_id = (fields.get("id") or "").strip()
+                title = (fields.get("title") or fields.get("content")
+                         or fields.get("subject") or "").strip()
+                if not todo_id or not title or title.lower() == "null":
+                    continue
+                status = (fields.get("status") or "").strip()
+                if not status or status.lower() == "null":
+                    status = "pending"
+                changes.append(_todo_change(todo_id, title, status))
+            return changes
+
+
+        def _changes_from_update(stmt):
+            if _sql_table_after(stmt, "update") != "todos":
+                return []
+            set_at = _sql_find_word(stmt, "set")
+            if set_at < 0:
+                return []
+            where_at = _sql_find_word(stmt, "where", set_at)
+            set_clause = stmt[set_at + 3:where_at if where_at >= 0 else len(stmt)]
+            where = stmt[where_at + 5:] if where_at >= 0 else ""
+            fields = {}
+            for part in _sql_split_commas(set_clause):
+                if "=" not in part:
+                    continue
+                key, val = part.split("=", 1)
+                fields[_sql_unquote(key).lower()] = _sql_unquote(val)
+            content = (fields.get("title") or fields.get("content") or "").strip()
+            status = (fields.get("status") or "").strip()
+            if content.lower() == "null":
+                content = ""
+            if status.lower() == "null":
+                status = ""
+            if not content and not status:
+                return []
+            return _changes_from_where(where, content, status)
+
+
+        def _changes_from_delete(stmt):
+            if _sql_table_after(stmt, "from") != "todos":
+                return []
+            where_at = _sql_find_word(stmt, "where")
+            where = stmt[where_at + 5:] if where_at >= 0 else ""
+            if not where.strip():
+                return [_todo_change("*", "", "deleted")]
+            return _changes_from_where(where, "", "deleted")
+
+
+        def copilot_todo_changes(query):
+            # 一条 query 里可以有多句。只认 todos 表上的写操作。
+            if not isinstance(query, str) or not query.strip():
+                return []
+            changes = []
+            for stmt in _sql_split_statements(_sql_strip_comments(query)):
+                head = _sql_word_at(stmt.lstrip(), 0).lower()
+                if head == "insert":
+                    changes.extend(_changes_from_insert(stmt))
+                elif head == "update":
+                    changes.extend(_changes_from_update(stmt))
+                elif head == "delete":
+                    changes.extend(_changes_from_delete(stmt))
+            return changes
+
+
+        def _copilot_sql_failed(payload):
+            result = payload.get("tool_response")
+            if not isinstance(result, dict):
+                result = payload.get("toolResult")
+            if not isinstance(result, dict):
+                return False
+            kind = str(result.get("resultType") or result.get("result_type") or "").strip().lower()
+            return bool(kind) and kind not in ("success", "ok")
+
+
+        def emit_copilot_sql_todos(session_id, payload):
+            \"\"\"把 Copilot 会话库的 todos 写操作收成单条进度更新。
+
+            UPDATE 往往只带 id 和 status，标题要靠同一次会话里 INSERT 记下来的
+            映射补上。`database` 不是 session 时这是用户自己的库，不能当成待办。
+            \"\"\"
+            tool = str(payload.get("tool_name") or payload.get("toolName") or "")
+            if tool != "sql":
+                return
+            args = todo_input(payload)
+            database = str(args.get("database") or "session").strip().lower()
+            if database not in ("", "session"):
+                return
+            if _copilot_sql_failed(payload):
+                return
+            query = args.get("query") or ""
+            changes = copilot_todo_changes(query if isinstance(query, str) else "")
+            if not changes:
+                return
+            state = _load_todo_state(session_id)
+            mapping = state.get("tasks") or {}
+            if not isinstance(mapping, dict):
+                mapping = {}
+            for change in changes:
+                todo_id = str(change.get("id") or "")
+                content = str(change.get("content") or "")
+                status = str(change.get("status") or "")
+                if todo_id == "*":
+                    for known_id, known_title in list(mapping.items()):
+                        msg = base_event("todo_item_updated", session_id, payload)
+                        msg["payload"] = {"todo": {
+                            "id": known_id,
+                            "content": known_title or known_id,
+                            "status": "deleted",
+                        }}
+                        send(msg)
+                    mapping = {}
+                    continue
+                if content:
+                    mapping[todo_id] = content
+                else:
+                    content = str(mapping.get(todo_id) or "")
+                if status == "deleted":
+                    mapping.pop(todo_id, None)
+                    if not content:
+                        content = todo_id
+                elif not status:
+                    status = "pending"
+                if not content:
+                    continue
+                msg = base_event("todo_item_updated", session_id, payload)
+                msg["payload"] = {"todo": {"id": todo_id, "content": content,
+                                           "status": status}}
+                send(msg)
+            state["tasks"] = mapping
+            _save_todo_state(session_id, state)
+
+
         # Claude Code / Trae 的 AskUserQuestion 成功路径是 allow + updatedInput.answers。
         # 没有 answers 的 allow 不会打开原提问框。WorkBuddy 已按 deny 回灌验证过，
         # Kimi 的文档只定义了 deny，这两家保持原回包。
@@ -1271,13 +1703,16 @@ enum HostHookTemplate {
                                 str(payload.get("message") or ""))
                 return
 
-            # 待办进度：只在 PostToolUse 上、且工具是 todo 家族时才转发。
-            # 发后即忘，脚本进到 todo 分支后立刻返回，不打印任何东西、不等答。
+            # 待办进度：只在 PostToolUse 上转发。todo 家族走整表/单条；
+            # Copilot CLI 的 TodoWrite 实际是会话库 `sql`。发后即忘，
+            # 不打印任何东西、不等答。
             if event == "PostToolUse":
                 tool = str(payload.get("tool_name") or payload.get("toolName") or "")
-                if tool in TODO_OVERWRITE_TOOLS or tool in TODO_UPSERT_TOOLS:
-                    if os.path.exists(SOCKET_PATH):
+                if os.path.exists(SOCKET_PATH):
+                    if tool in TODO_OVERWRITE_TOOLS or tool in TODO_UPSERT_TOOLS:
                         handle_todo_event(session_id, payload, tool)
+                    elif tool == "sql":
+                        emit_copilot_sql_todos(session_id, payload)
                 return
 
             # 提问先于一切权限判定分发。
