@@ -13,7 +13,9 @@ import Foundation
 ///    PreToolUse / PostToolUse / Stop / Notification），会话结束不会通知我们，
 ///    待答卡片只能靠自己的超时收场。
 /// 2. **`Notification` 的 matcher 匹配的是 `notification_type`**，不是工具名。
-///    所以这里写字面量 `permission_prompt`，否则权限提醒永远不触发。
+///    权限提醒是 `permission_prompt`，提问通知是 `ask_user_question`，
+///    任务完成是 `idle_prompt`。写成工具名，或漏掉 `idle_prompt`，
+///    对应的卡片都不会出现。
 enum TraeHookInstaller {
     /// Trae 的两个发行版。国内版在 `~/.trae-cn`，国际版在 `~/.trae`。
     enum Flavor {
@@ -68,7 +70,10 @@ enum TraeHookInstaller {
         [
             HookGroupSpec("PreToolUse", matcher: "AskUserQuestion",
                           timeout: InstallerPaths.hookTimeoutSeconds),
-            HookGroupSpec("Notification", matcher: "permission_prompt", timeout: 5),
+            // idle_prompt 是「智能体完成当前任务」。不挂这条就没有完成通知。
+            HookGroupSpec("Notification", matcher: "permission_prompt|ask_user_question|document_review|browser_interaction|idle_prompt", timeout: 5),
+            // 完成横幅的标题来自这里缓存的用户原话。空 stdout 表示放行。
+            HookGroupSpec("UserPromptSubmit", matcher: "", timeout: 5),
             HookGroupSpec("Stop", matcher: "", timeout: 5),
         ]
     }

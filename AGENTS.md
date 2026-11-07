@@ -29,6 +29,8 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gateke
 
 **没有 Xcode 工程** —— 这是一个纯 SwiftPM 库 + 可执行目标。不要生成 `.xcodeproj` 或 `.xcworkspace`。Xcode 可直接打开 `Package.swift`，SwiftUI Preview 在库目标（`BetterFocusIDE`）下可用。
 
+**改完代码必须重新编译并重启。** 源码、资源、脚本模板或构建脚本有变更时，先 `./build.sh`，再 `pkill -f BetterFocusIDEApp; sleep 1; open .build/debug/BetterFocusIDE.app`。只改文档不必重启。编译失败先修好，不要启动旧包。旧实例占着 socket 时，直接 `open` 会静默退出，看起来像改动没生效。
+
 ## 目录结构
 
 ```
@@ -192,10 +194,10 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gateke
 |------|----------|----------|------------|------|
 | **Qoder** | `~/.qoder/settings.json` | PascalCase | `PermissionRequest` / `PreToolUse` / `Stop` / `SessionEnd` | 提问卡、权限提醒、回合完成、会话结束 |
 | **OpenCode** | 无需配置（插件目录） | JS 事件流 | `session.idle` 等 | 回合完成、会话结束 |
-| **Cursor** | `~/.cursor/hooks.json` | camelCase | `stop` / `sessionEnd` | **仅**回合完成、会话结束（观测型） |
+| **Cursor** | `~/.cursor/hooks.json` | camelCase | `beforeSubmitPrompt` / `stop` / `sessionEnd` / `postToolUseFailure` / `subagentStop` / `preCompact` | 回合完成、会话结束，以及失败 / 子任务 / 即将压缩（观测型） |
 | **WorkBuddy** | `~/.workbuddy/settings.json` 的 `hooks` | PascalCase | `PreToolUse` / `Notification` / `PermissionRequest` / `Stop` / `SessionEnd` | 提问卡、权限提醒、回合完成、会话结束 |
 
-**Cursor 为什么只做观测**：Cursor 的权限类 hook（`preToolUse` / `beforeShellExecution` / `beforeReadFile` 等）必须在 stdout 返回 `permission: allow|deny`。返回 `deny` 等于替用户拦掉工具，返回 `allow` 等于绕过用户审批，输出非法 JSON 还会直接阻塞调用。因此 Cursor 侧只注册 `stop` / `sessionEnd`，且恒回 `{}`（合法空对象，不携带 `followup_message`，Agent 循环正常停止）。
+**Cursor 为什么只做观测**：Cursor 的权限类 hook（`preToolUse` / `beforeShellExecution` / `beforeReadFile` 等）必须在 stdout 返回 `permission: allow|deny`。返回 `deny` 等于替用户拦掉工具，返回 `allow` 等于绕过用户审批，输出非法 JSON 还会直接阻塞调用。因此 Cursor 侧只注册观测事件：`beforeSubmitPrompt`（回 `{"continue":true}`）、`stop` / `sessionEnd` / `postToolUseFailure` / `subagentStop` / `preCompact`（恒回 `{}`，不携带 `followup_message`，Agent 循环正常停止）。后三个只发失败、子任务完成、即将压缩这三张横幅。
 
 **WorkBuddy 的事件选择**：
 - 提问走 `PreToolUse` + matcher `AskUserQuestion`，用 `hookSpecificOutput.permissionDecision = "deny"` 拦掉宿主原生提问框，并把岛上答案写进 `permissionDecisionReason` 回灌给 Agent（与 Qoder hook 同一手法）。
@@ -567,12 +569,12 @@ echo '{"provider":"qoder","product":"qoder_ide","event":"turn_finished","session
 |---|---|---|---|
 | Qoder / Qoder CN | `~/.qoder{,-cn}/settings.json` | matcher 分组 | 提问、权限、回合、会话结束 |
 | OpenCode | `~/.config/opencode/plugins/*.js` | 插件 | 提问、回合 |
-| Cursor | `~/.cursor/hooks.json` | camelCase，权限类必须回决策 | 回合、会话结束（观测型） |
+| Cursor | `~/.cursor/hooks.json` | camelCase，权限类必须回决策 | 回合、会话结束、失败、子任务、即将压缩（观测型） |
 | WorkBuddy | `~/.workbuddy/settings.json` | PascalCase | 全部 |
 | Claude Code | `~/.claude/settings.json` | PascalCase | 全部 |
 | Trae / Trae CN | `~/.trae{,-cn}/hooks.json` | 同 Claude + `version:1` | 提问、权限提醒、回合（**无 SessionEnd**） |
 | Kimi Code CLI | `~/.kimi-code/config.toml` | TOML `[[hooks]]`（只认 4 字段） | 全部 |
-| Codex CLI | `~/.codex/config.toml` 的 `notify` | 外部程序，payload 走 argv | 仅回合完成 |
+| Codex / ChatGPT | `~/.codex/hooks.json`；`notify` 仅在槽位空着时写入 | stdin 的 PascalCase hook；`notify` 的 payload 走 argv | 提问（仅当工具名是 AskUserQuestion）、权限提醒、回合完成、会话结束 |
 
 **CLI 宿主的双身份**：产品身份来自 hook（编译期写入的 `PROVIDER`），终端身份来自父进程走查到的
 最外层 `.app`。卡片标成 `Qoder CLI（Warp）`、图标用终端图标、点击激活终端窗口，
@@ -580,7 +582,7 @@ echo '{"provider":"qoder","product":"qoder_ide","event":"turn_finished","session
 （那会把「Qoder CN CLI」显示成「WorkBuddy」）。
 
 **三条踩过的坑**（详见 `knowledge/technologies/active/sprint2611/cli-host-adaptation/01-适配经验.md`）：
-1. Codex 的 payload 在 **argv**：启动器必须 `exec python hook.py "$@"`，且 codex 方言绝不能读 stdin（会卡死终端）。
-2. TOML 没有「只加一条」的入口：用注释界标维护受管区块，界标外一字节不碰；外来 `notify` 冲突时**放弃安装并报错**。
+1. Codex 的 `notify` payload 在 **argv**：启动器必须 `exec python hook.py "$@"`。有 argv 时不能读 stdin（notify 不关 stdin，会卡死终端）。`hooks.json` 没有 argv，这时才读 stdin。
+2. TOML 没有「只加一条」的入口：用注释界标维护受管区块，界标外一字节不碰。`notify` 被别人占用时跳过这一键，改登记 `hooks.json`，不要覆盖、也不要因此让整个安装失败。
 3. Trae 的 `Notification` matcher 匹配 `notification_type`（不是工具名），应为 `permission_prompt`。
 

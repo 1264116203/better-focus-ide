@@ -72,6 +72,10 @@ enum QoderHookInstaller {
             ("PostToolUse", InstallerPaths.todoToolMatcher, 5),
             ("SessionEnd", "*", 5),
             ("Stop", "*", 5),
+            ("PostToolUseFailure", "*", 5),
+            ("SubagentStop", "*", 5),
+            ("PreCompact", "*", 5),
+            ("Notification", InstallerPaths.attentionNotificationMatcher, 5),
         ]
         for (event, matcher, timeout) in specs {
             var groups = hooks[event] as? [[String: Any]] ?? []
@@ -90,7 +94,8 @@ enum QoderHookInstaller {
     /// 从各事件中剔除属于我们的分组；某事件剔空后连键一起移除。
     static func hooksAfterRemoval(_ hooks: [String: Any]) -> [String: Any] {
         var hooks = hooks
-        for event in ["PreToolUse", "PostToolUse", "PermissionRequest", "SessionEnd", "Stop"] {
+        for event in ["PreToolUse", "PostToolUse", "PermissionRequest", "SessionEnd", "Stop",
+                      "PostToolUseFailure", "SubagentStop", "PreCompact", "Notification"] {
             guard var groups = hooks[event] as? [[String: Any]] else { continue }
             groups.removeAll { isOurGroup($0) }
             if groups.isEmpty { hooks.removeValue(forKey: event) }

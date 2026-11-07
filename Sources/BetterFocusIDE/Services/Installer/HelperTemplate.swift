@@ -594,6 +594,19 @@ enum HelperTemplate {
                                        "status": str(status)}}})
 
 
+        def emit_status(session_id, event_name, title, body, payload):
+            if not alerts_enabled("turn") or not os.path.exists(SOCKET_PATH):
+                return
+            text = " ".join(str(body or "").split())[:180]
+            send({"provider": "qoder", "product": _get_product(session_id),
+                  "event": event_name, "session_id": session_id,
+                  "host": host_app(),
+                  "cwd": payload.get("cwd") or os.getcwd(),
+                  "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                  "payload": {"title": " ".join(str(title or "").split())[:80],
+                              "body": text}})
+
+
         def main():
             try:
                 payload = json.load(sys.stdin)
@@ -608,6 +621,35 @@ enum HelperTemplate {
             # 后续调用从 state 读取，保证同一会话 product 一致。
             product = _identify_product()
             _merge_state(session_id, product)
+
+            if event in ("PostToolUseFailure", "StopFailure", "PermissionDenied"):
+                tool = str(payload.get("tool_name") or "")
+                detail = str(payload.get("error") or payload.get("message") or tool)
+                title = "自动模式拒绝了这次操作" if event == "PermissionDenied" else "工具没有跑成"
+                if event == "StopFailure":
+                    title = "这一轮没有完成"
+                emit_status(session_id, "failure_notice", title, detail, payload)
+                return
+            if event == "SubagentStop":
+                detail = str(payload.get("last_assistant_message") or payload.get("message") or "子任务已结束")
+                emit_status(session_id, "subagent_finished", "子任务完成", detail, payload)
+                return
+            if event in ("PreCompact", "PostCompact"):
+                title = "上下文已压缩" if event == "PostCompact" else "即将压缩上下文"
+                emit_status(session_id, "compact_notice", title, "", payload)
+                return
+            if event == "Notification":
+                kind = str(payload.get("notification_type") or "")
+                message = str(payload.get("message") or "")
+                if kind in ("document_review", "browser_interaction"):
+                    title = "文档待审阅" if kind == "document_review" else "浏览器在等你"
+                    emit_status(session_id, "review_notice", title, message, payload)
+                elif kind == "auth_storage_failure" or kind.startswith("quota_"):
+                    title = "登录状态失效" if kind == "auth_storage_failure" else "额度不足"
+                    emit_status(session_id, "failure_notice", title, message, payload)
+                elif kind in ("agent_needs_input", "elicitation_url_dialog"):
+                    emit_status(session_id, "review_notice", "需要你的输入", message, payload)
+                return
 
             if event == "Stop":
                 if alerts_enabled("turn"):

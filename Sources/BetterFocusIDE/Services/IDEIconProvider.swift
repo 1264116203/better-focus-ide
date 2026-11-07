@@ -9,7 +9,7 @@ import SwiftUI
 /// - JetBrains: IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider, CLion, PhpStorm, RubyMine
 /// - VS Code 系: VS Code, Cursor, Qoder IDE, Qoder CN IDE, Trae CN
 /// - 终端: Warp, iTerm
-/// - 其他: OpenCode, Qoder, Qoder Work, Qoder CN, Qoder CN Work, WorkBuddy, Kimi
+/// - 其他: OpenCode, Qoder, Qoder Work, Qoder CN, Qoder CN Work, WorkBuddy, Kimi, ChatGPT, Claude, Copilot
 ///
 /// 无真实图标的 IDE（如 Claude Code）使用带品牌色的文字徽章作为回退。
 enum IDEIconProvider {
@@ -38,6 +38,8 @@ enum IDEIconProvider {
         // VS Code 及衍生
         "visual studio code": "vscode",
         "vscode": "vscode",
+        // 必须比 "code" 长，否则 "Claude Code" 会先被当成 VS Code。
+        "claude code": "claude",
         "code": "vscode",
         // Cursor
         "cursor": "cursor",
@@ -63,6 +65,12 @@ enum IDEIconProvider {
         "workbuddy": "workbuddy",
         "kimi": "kimi",
         "moonshot": "kimi",
+        // ChatGPT 桌面版（原 Codex）。名字比 "code" 长，避免被 VS Code 的子串抢走。
+        "chatgpt": "chatgpt",
+        "codex": "chatgpt",
+        "claude": "claude",
+        "github copilot": "copilot",
+        "copilot": "copilot",
     ]
 
     /// Bundle ID → 图标文件名直接映射。
@@ -90,8 +98,13 @@ enum IDEIconProvider {
         "com.bytedance.trae": "trae-cn",
         "cn.trae.app": "trae-cn",
         "com.trae.app": "trae-cn",
+        "com.openai.codex": "chatgpt",
+        "com.anthropic.claudefordesktop": "claude",
+        "com.github.githubapp": "copilot",
         "com.tencent.workbuddy.mac": "workbuddy",
         "ai.workbuddy": "workbuddy",
+        "com.workbuddy.workbuddy-ai": "workbuddy",
+        "com.jetbrains.WebStorm": "webstorm",
         "ai.moonshot.kimi": "kimi",
         "com.moonshot.kimichat": "kimi",
         // 终端
@@ -116,7 +129,8 @@ enum IDEIconProvider {
         "claude": (0.85, 0.55, 0.25),
         "claude code": (0.85, 0.55, 0.25),
         "anthropic": (0.85, 0.55, 0.25),
-        // Codex / OpenAI - 绿色
+        // ChatGPT（原 Codex）/ OpenAI - 绿色
+        "chatgpt": (0.15, 0.65, 0.45),
         "codex": (0.15, 0.65, 0.45),
         "openai": (0.15, 0.65, 0.45),
         // OpenCode - 蓝绿色
@@ -147,15 +161,19 @@ enum IDEIconProvider {
 
     /// 检查是否有对应 IDE 名称的真实图标
     static func hasIcon(for hostName: String?, bundleID: String? = nil) -> Bool {
-        // 优先用 bundle ID 精确匹配
-        if let bundle = bundleID, !bundle.isEmpty, bundleIconMapping[bundle] != nil {
-            return true
+        resolvedIconName(for: hostName, bundleID: bundleID) != nil
+    }
+
+    /// 命中的图标文件名（不含扩展名）。bundle 优先于名字。
+    static func resolvedIconName(for hostName: String?, bundleID: String? = nil) -> String? {
+        if let bundle = bundleID, !bundle.isEmpty, let iconName = bundleIconMapping[bundle] {
+            return iconName
         }
-        guard let name = hostName?.lowercased() else { return false }
-        for (key, _) in sortedMappings {
-            if name.contains(key) { return true }
+        guard let name = hostName?.lowercased() else { return nil }
+        for (key, iconName) in sortedMappings where name.contains(key) {
+            return iconName
         }
-        return false
+        return nil
     }
 
     /// 获取 IDE 图标（如果有真实图标），否则返回 nil
@@ -163,22 +181,8 @@ enum IDEIconProvider {
     /// 优先用 bundle ID 精确匹配（解决同名歧义，如 Qoder IDE vs Qoder 聊天应用），
     /// 回退到名称模糊匹配。
     static func icon(for hostName: String?, bundleID: String? = nil) -> Image? {
-        // 优先用 bundle ID 精确匹配
-        if let bundle = bundleID, !bundle.isEmpty,
-           let iconName = bundleIconMapping[bundle],
-           let image = loadImage(named: iconName) {
-            return image
-        }
-        // 回退到名称模糊匹配
-        guard let name = hostName?.lowercased() else { return nil }
-        for (key, iconName) in sortedMappings {
-            if name.contains(key) {
-                if let image = loadImage(named: iconName) {
-                    return image
-                }
-            }
-        }
-        return nil
+        guard let iconName = resolvedIconName(for: hostName, bundleID: bundleID) else { return nil }
+        return loadImage(named: iconName)
     }
 
     /// 按 key 长度降序排列的品牌色条目

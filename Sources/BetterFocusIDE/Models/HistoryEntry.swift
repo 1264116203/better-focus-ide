@@ -16,6 +16,14 @@ enum HistoryKind: String, Codable {
     case permission
     /// 轮次完成通知。
     case turn
+    /// 失败、限额、自动拒绝。
+    case failure
+    /// 子任务完成。
+    case subagent
+    /// 待审阅或需要人回到宿主看一眼。
+    case review
+    /// 上下文压缩。
+    case compact
 
     /// 副文字前缀（含全角冒号）。跳转兜底文案由调用方过滤，不走这里。
     var bodyLabel: String {
@@ -23,6 +31,10 @@ enum HistoryKind: String, Codable {
         case .question: return "问："
         case .permission: return "详情："
         case .turn: return "用户："
+        case .failure: return "原因："
+        case .subagent: return "结果："
+        case .review: return "说明："
+        case .compact: return "说明："
         }
     }
 

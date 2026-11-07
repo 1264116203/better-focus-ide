@@ -64,6 +64,10 @@ final class DebugScenariosTests: XCTestCase {
         XCTAssertTrue(has { if case .permission = $0 { return true }; return false })
         XCTAssertTrue(has { if case .permissionNotice = $0 { return true }; return false })
         XCTAssertTrue(has { if case .turnFinished = $0 { return true }; return false })
+        XCTAssertTrue(has { if case .statusNotice(let event, _, _) = $0 { return event == .failureNotice }; return false })
+        XCTAssertTrue(has { if case .statusNotice(let event, _, _) = $0 { return event == .subagentFinished }; return false })
+        XCTAssertTrue(has { if case .statusNotice(let event, _, _) = $0 { return event == .reviewNotice }; return false })
+        XCTAssertTrue(has { if case .statusNotice(let event, _, _) = $0 { return event == .compactNotice }; return false })
         XCTAssertTrue(has { if case .sessionEnded = $0 { return true }; return false })
         XCTAssertTrue(has { if case .history = $0 { return true }; return false })
         XCTAssertTrue(has { if case .clearCards = $0 { return true }; return false })
@@ -80,7 +84,7 @@ final class DebugScenariosTests: XCTestCase {
             XCTAssertTrue(providers.contains(p), "目标清单缺少 \(p.rawValue)")
         }
         // CLI 宿主。
-        for p in [AgentProvider.qoder_cli, .qoder_cn_cli, .claude_code, .codex] {
+        for p in [AgentProvider.qoder_cli, .qoder_cn_cli, .claude_code, .codex, .copilot] {
             XCTAssertTrue(providers.contains(p), "目标清单缺少 \(p.rawValue)")
         }
 

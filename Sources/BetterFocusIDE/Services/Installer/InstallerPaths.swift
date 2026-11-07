@@ -17,7 +17,8 @@ import Foundation
 ///   - Claude Code: ~/.claude/settings.json + ~/.claude/hooks/betterfocus-notify.sh (+ .py)
 ///   - Trae / Trae CN: ~/.trae{,-cn}/hooks.json + ~/.trae{,-cn}/hooks/betterfocus-notify.sh
 ///   - Kimi Code CLI: ~/.kimi-code/config.toml（`[[hooks]]` 数组）+ hooks/
-///   - Codex CLI: ~/.codex/config.toml（`notify` 数组）+ hooks/
+///   - Codex CLI: ~/.codex/hooks.json（生命周期）+ config.toml 的 notify（单值，可被占用）
+///   - GitHub Copilot CLI: ~/.copilot/hooks/betterfocus.json（独立文件，不改 settings.json）
 ///   - Qoder CN: ~/.qoder-cn/settings.json + ~/.qoder-cn/hooks/（与 Qoder 同构）
 enum InstallerPaths {
     /// 数据目录命名空间（决定 Application Support 下的子目录名）。
@@ -158,6 +159,32 @@ enum InstallerPaths {
     static var codexHelperPath: String {
         (codexHooksDir as NSString).appendingPathComponent("betterfocus-hook.py")
     }
+    /// 生命周期 hook。和 `config.toml` 的 `notify` 不是同一个槽，两边可以并存。
+    static var codexHooksConfigPath: String {
+        (codexDir as NSString).appendingPathComponent("hooks.json")
+    }
+
+    // MARK: GitHub Copilot CLI（用户级 ~/.copilot/hooks/*.json）
+
+    /// Copilot CLI 从 `~/.copilot/hooks/` 按文件名加载 hook。`COPILOT_HOME` 设了
+    /// 就改读 `$COPILOT_HOME/hooks/`，否则用默认目录。
+    static var copilotDir: String {
+        if let home = ProcessInfo.processInfo.environment["COPILOT_HOME"], !home.isEmpty {
+            return (home as NSString).expandingTildeInPath
+        }
+        return (self.home as NSString).appendingPathComponent(".copilot")
+    }
+    static var copilotHooksDir: String { (copilotDir as NSString).appendingPathComponent("hooks") }
+    /// 整份文件归我们所有：别的 `*.json` 是用户或插件的，卸载时不能碰。
+    static var copilotHooksConfigPath: String {
+        (copilotHooksDir as NSString).appendingPathComponent("betterfocus.json")
+    }
+    static var copilotScriptPath: String {
+        (copilotHooksDir as NSString).appendingPathComponent("betterfocus-notify.sh")
+    }
+    static var copilotHelperPath: String {
+        (copilotHooksDir as NSString).appendingPathComponent("betterfocus-hook.py")
+    }
 
     // MARK: Qoder CN（与 Qoder 完全同构，只是根目录不同）
 
@@ -209,6 +236,11 @@ enum InstallerPaths {
     /// 脚本按工具名分流到 todo_updated / todo_item_updated，这里只负责把它们
     /// 全接进来。
     static let todoToolMatcher = "TodoWrite|todo_write|todowrite|SetTodoList|TaskCreate|TaskUpdate"
+
+    /// `Notification` 的 matcher 匹配 `notification_type`，不是工具名。
+    /// 权限提醒、提问预览、待审阅、浏览器等待、MCP 追问、登录和额度失败都从这里进。
+    static let attentionNotificationMatcher =
+        "permission_prompt|ask_user_question|elicitation_dialog|elicitation_url_dialog|document_review|browser_interaction|agent_needs_input|auth_storage_failure|quota_"
 
     /// 卡片侧等待上限；Hook / Plugin 的轮询超时跟随它，确保卡片总是先于平台过期。
     /// Qoder 额外给脚本 +60s 缓冲，之后才杀死 hook。修改 `agentWaitLimit`

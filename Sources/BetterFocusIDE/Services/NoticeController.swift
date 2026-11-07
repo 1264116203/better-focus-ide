@@ -156,6 +156,63 @@ final class NoticeController: ObservableObject {
         show(notice)
     }
 
+    /// 失败、子任务、待审阅、上下文压缩。都是横幅，不拦截宿主。
+    ///
+    /// 跟着回合提醒开关走：关掉「回合完成」时，这几张状态卡也不响。
+    func handleStatusNotice(message: AgentSocketMessage, kind: HistoryKind) {
+        guard Settings.shared.turnNotifyEnabled || bypassGates else { return }
+        let sessionID = message.sessionID
+        let now = Date()
+        let debounceKey = sessionID + ":" + kind.rawValue
+        if let last = lastNoticeAt[debounceKey],
+           now.timeIntervalSince(last) < Settings.shared.notifyBannerDuration * 0.4 {
+            return
+        }
+        let providerEnum = message.resolvedProvider
+        let host = HostInfo(from: message.host, cwd: message.cwd)
+        let name = AgentProvider.label(provider: providerEnum,
+                                       hostName: host.name,
+                                       bundleID: host.bundle)
+        let title = message.payload?["title"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = message.payload?["body"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let headline: String
+        if let title, !title.isEmpty {
+            headline = title
+        } else {
+            switch kind {
+            case .failure: headline = "这一轮没有完成"
+            case .subagent: headline = "子任务完成"
+            case .review: headline = "需要你看一眼"
+            case .compact: headline = "上下文已压缩"
+            case .question, .permission, .turn: headline = name
+            }
+        }
+        let detail = (body?.isEmpty == false) ? body! : name
+        let project = host.cwd.isEmpty ? "" : (host.cwd as NSString).lastPathComponent
+        let notice = TurnNotice(
+            provider: providerEnum.rawValue,
+            providerName: name,
+            sessionID: sessionID,
+            title: headline,
+            body: detail,
+            bodyIsFallback: body?.isEmpty != false,
+            kind: kind,
+            project: project,
+            host: host.isEmpty ? nil : host,
+            arrivedAt: now,
+            jumpEnabled: Settings.shared.turnNotifyJump,
+            fromCLI: false
+        )
+        if lastNoticeAt.count > 32 { lastNoticeAt.removeAll() }
+        lastNoticeAt[debounceKey] = now
+        onRemember?(notice)
+        if hasActiveNotice || hasPendingCard() {
+            queue.append(notice)
+            return
+        }
+        show(notice)
+    }
+
     // MARK: - 展示 / 消失
 
     /// 展示一条通知：设置 notice 并触发 onPresent 回调。
@@ -217,7 +274,7 @@ final class NoticeController: ObservableObject {
     func tapped() {
         guard let notice = notice else { return }
         if notice.jumpEnabled {
-            IDELauncher.activateAsync(provider: notice.provider, host: notice.host)
+            IDELauncher.activateAsync(provider: notice.provider, host: notice.host, sessionID: notice.sessionID)
         }
         dismiss()
     }

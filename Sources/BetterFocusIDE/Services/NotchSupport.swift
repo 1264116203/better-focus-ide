@@ -91,6 +91,38 @@ enum NotchLayout {
     static func surfaceRadius(height: CGFloat) -> CGFloat {
         min(CGFloat(Settings.shared.radiusExpanded), height * 0.34)
     }
+
+    /// 收起态气泡下沿进度线的左右内收。气泡窄，12pt 足够避开端头圆角。
+    static let progressLineBubbleInset: CGFloat = 12
+    /// 进度线高度。气泡下沿与展开卡片底边共用。
+    static let progressLineHeight: CGFloat = 2
+    /// 进度线离轮廓底边的距离，避免端头贴进圆角被遮罩切平。
+    static let progressLineBottomPadding: CGFloat = 3
+    /// 收起态要在刘海壳体下方多留出的高度。
+    ///
+    /// 气泡高与刘海齐平，线若只在底边内收 3pt，会画进摄像头壳体里，菜单栏上看不到。
+    /// 岛向下加高这一截后，线落在壳体之下。
+    static var progressLineChin: CGFloat {
+        progressLineBottomPadding + progressLineHeight + 4
+    }
+
+    /// 展开卡片底边进度线的水平内收。
+    ///
+    /// 轮廓两侧先收进 `shoulder`，底角再以 `surfaceRadius` 圆掉。线高 2pt、
+    /// 底边距 3pt 时，端头必须落在该高度的轮廓之内，气泡用的 12pt 不够。
+    static func progressLineInset(cardHeight: CGFloat,
+                                   bottomPadding: CGFloat = progressLineBottomPadding,
+                                   lineHeight: CGFloat = progressLineHeight,
+                                   endCapSlack: CGFloat = 4) -> CGFloat {
+        let height = max(0, cardHeight)
+        let side = shoulder(height: height)
+        let bottom = min(surfaceRadius(height: height), height / 2)
+        let centerFromBottom = bottomPadding + lineHeight / 2
+        let dy = max(0, bottom - centerFromBottom)
+        let inside = sqrt(max(0, bottom * bottom - dy * dy))
+        let cornerInset = max(0, bottom - inside)
+        return side + cornerInset + endCapSlack
+    }
     /// 该高度下的实际肩部（不超过高度 19%）。
     static func shoulder(height: CGFloat) -> CGFloat { min(shoulder, height * 0.19) }
     
@@ -276,7 +308,8 @@ enum NotchMotion {
     static var growingWidth: Spring { Spring(duration: 0.42 * speedScale, bounce: growBounce) }
     static var growingHeight: Spring { Spring(duration: 0.36 * speedScale, bounce: growBounce) }
     static var shrinkingWidth: Spring { Spring(duration: 0.30 * speedScale, bounce: 0.0) }
-    static var shrinkingHeight: Spring { Spring(duration: 0.26 * speedScale, bounce: 0.0) }
+    /// 与宽度同时长。高度先收完的话，卡片会先压成一条，气泡再从这条的宽度缩到刘海，看起来像两段动画。
+    static var shrinkingHeight: Spring { Spring(duration: 0.30 * speedScale, bounce: 0.0) }
     /// 超调位移上限（像素）。
     static let overshootLimit: CGFloat = 12
     /// 悬停重展开的回弹缩放：悬停触发展开用更弱的超调，避免收起后气泡明显"放大再缩小"。

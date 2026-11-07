@@ -30,10 +30,16 @@ enum ClaudeCodeHookInstaller {
             HookGroupSpec("PreToolUse", matcher: "AskUserQuestion",
                           timeout: InstallerPaths.hookTimeoutSeconds),
             HookGroupSpec("PermissionRequest", matcher: "", timeout: 5),
-            HookGroupSpec("Notification", matcher: "permission_prompt", timeout: 5),
+            HookGroupSpec("Notification", matcher: InstallerPaths.attentionNotificationMatcher, timeout: 5),
             HookGroupSpec("PostToolUse", matcher: InstallerPaths.todoToolMatcher, timeout: 5),
             HookGroupSpec("Stop", matcher: "", timeout: 5),
             HookGroupSpec("SessionEnd", matcher: "", timeout: 5),
+            HookGroupSpec("StopFailure", matcher: "", timeout: 5),
+            HookGroupSpec("PermissionDenied", matcher: "", timeout: 5),
+            HookGroupSpec("PostToolUseFailure", matcher: "", timeout: 5),
+            HookGroupSpec("SubagentStop", matcher: "", timeout: 5),
+            HookGroupSpec("PostCompact", matcher: "", timeout: 5),
+            HookGroupSpec("Elicitation", matcher: "", timeout: 5),
         ]
     }
 

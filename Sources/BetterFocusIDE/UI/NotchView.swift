@@ -27,9 +27,18 @@ struct NotchView: View {
                     .frame(maxWidth: .infinity)  // 水平居中
             } else {
                 collapsedContent
+                    .onAppear { service.collapsedContentDidLayout() }
             }
         }
         .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
+        .onChange(of: service.surfaceSize) { _, _ in
+            service.collapsedContentDidLayout()
+        }
+        // 提问 / 权限 / 通知占主体时，进行中的进度缩成卡片底边这条线。
+        // 挂在整张岛的底边，而不是顶部气泡里，避免和气泡下沿再叠一条。
+        .overlay(alignment: .bottom) {
+            TodoProgressLine(service: service, todos: service.todoController, placement: .cardEdge)
+        }
         .modifier(IslandGlassClip())
         .foregroundStyle(.white)
         // 表面点击：整层只用这一个手势，按落点区分。
@@ -75,35 +84,10 @@ struct NotchView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            // 收起态进度：零额外高度，余光即可看到推进；全部完成后自动消失。
-            if service.todoController.hasTodo,
-               !service.todoController.progress.isFinished {
-                todoProgressLine
-            }
+            // 收起态，以及展开后顶部那颗气泡：进行中才画。
+            // 卡片底边已经在画同一条线时，这里留空，避免上下各一条。
+            TodoProgressLine(service: service, todos: service.todoController, placement: .bubble)
         }
-    }
-
-    /// 贴气泡下沿的进度线。
-    ///
-    /// 高度只有 2pt 且留了左右内边距——气泡的圆角轮廓由 AppKit 遮罩裁出，
-    /// 让线条贴到边缘会被切掉端头，看起来像「线画歪了」。
-    private var todoProgressLine: some View {
-        let fraction = service.todoController.progress.fraction
-        let tint = service.todoController.provider.tint
-        return GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.16))
-                Capsule()
-                    .fill(tint)
-                    .frame(width: max(2, geo.size.width * fraction))
-            }
-        }
-        .frame(height: 2)
-        .padding(.horizontal, 12)
-        .padding(.bottom, 3)
-        .allowsHitTesting(false)
-        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: fraction)
-        .transition(.opacity)
     }
     
     /// 气泡内容。外缘呼吸辉光由 AppKit 画布层绘制（NotchCanvas.glowLayer），
@@ -161,6 +145,48 @@ struct NotchView: View {
         .padding(.top, service.geometry.safeContentTop)
         // 控件单独成组。间距 0：相邻行不融合，每条都保留自己的折光棱边。
         .liquidGlassGroup()
+    }
+}
+
+/// 进行中的待办进度线。气泡下沿和展开卡片底边共用这一套画法。
+///
+/// 自己订阅 `TodoController`：通知 / 提问 / 权限在屏时进度不换卡，
+/// `NotchService` 不会因此再发布一次，线仍要跟着刷新。
+private struct TodoProgressLine: View {
+    @ObservedObject var service: NotchService
+    @ObservedObject var todos: TodoController
+    var placement: NotchService.ProgressLineSlot
+
+    private var slot: NotchService.ProgressLineSlot {
+        let card = service.activeCard != .none ? service.activeCard : (service.closingCard ?? .none)
+        return NotchService.progressLineSlot(
+            expanded: service.expanded,
+            closing: service.closingCard != nil,
+            card: card,
+            inProgress: todos.hasTodo && !todos.progress.isFinished)
+    }
+
+    var body: some View {
+        if slot == placement {
+            let fraction = todos.progress.fraction
+            let tint = todos.provider.tint
+            let horizontal = placement == .bubble
+                ? NotchLayout.progressLineBubbleInset
+                : NotchLayout.progressLineInset(cardHeight: service.surfaceSize.height)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.white.opacity(0.16))
+                    Capsule()
+                        .fill(tint)
+                        .frame(width: max(2, geo.size.width * fraction))
+                }
+            }
+            .frame(height: NotchLayout.progressLineHeight)
+            .padding(.horizontal, horizontal)
+            .padding(.bottom, NotchLayout.progressLineBottomPadding)
+            .allowsHitTesting(false)
+            .animation(.spring(response: 0.34, dampingFraction: 0.82), value: fraction)
+        }
     }
 }
 

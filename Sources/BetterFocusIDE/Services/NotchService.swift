@@ -45,6 +45,9 @@ final class NotchService: ObservableObject {
     private var lastGlowLit: Bool?
     /// 正在撤下的卡片（收起动画期间可见，随后清空）。
     @Published private(set) var closingCard: ActiveCard?
+    /// 收起弹簧已经落在气泡上，但 SwiftUI 还显示着卡片。这段时间画布把内容藏住，
+    /// 视图换成收起布局后由 `collapsedContentDidLayout()` 再亮起来。
+    private var pendingCollapsedReveal = false
 
     enum ActiveCard {
         case none, question, permission, notice, history, todo
@@ -166,15 +169,16 @@ final class NotchService: ObservableObject {
         windowHost?.hide(animated: true)
     }
     
-    /// 点击表面的三分支：已展开则收起；有卡片但收起（按需模式）则展开；空闲岛则优先展示未读通知，否则回顾历史。
+    /// 点击表面：已展开则收起；提问/权限优先展开；未读通知先于进度卡；
+    /// 进行中的进度卡收起后仍占着 `activeCard`，点气泡展开它；否则回顾历史。
     func toggle() {
         if expanded {
             collapse()
-        } else if activeCard != .none {
-            // 有卡片但处于收起态（按需模式）：展开它。
+        } else if activeCard == .question || activeCard == .permission {
+            // 提问与权限仍在等用户，优先于未读通知。
             expand()
         } else if hasUnprocessedNotice, let restored = noticeController.restoreLastDismissed() {
-            // 有自动收起的未读通知：恢复展示（而非打开历史）。
+            // 有自动收起的未读通知：恢复展示（而非打开历史或进度卡）。
             hasUnprocessedNotice = false
             unprocessedNoticeTint = nil
             updateBreathingTint()
@@ -189,6 +193,9 @@ final class NotchService: ObservableObject {
                 activeCard = .notice
                 showNoticeBanner()
             }
+        } else if activeCard != .none {
+            // 进行中的进度卡收起后仍是当前卡：点气泡展开它。
+            expand()
         } else {
             // 空闲岛：点击回顾最近通知。
             showHistory()
@@ -209,8 +216,9 @@ final class NotchService: ObservableObject {
     
     /// 收起岛。
     ///
-    /// 固定模式下记录让位期，避免自动展开立刻重开。历史与通知是瞬态的，收起即消失；
-    /// 提问与权限持续存在（卡片仍在等用户）。
+    /// 一律记录让位期，避免自动展开立刻重开。历史与通知是瞬态的，收起即消失；
+    /// 提问与权限持续存在（卡片仍在等用户）。进行中的进度同样留下，气泡下沿继续画线；
+    /// 全部完成的进度是收尾态，收起即清空。
     func collapse() {
         guard expanded else { return }
         if activeCard != .none { closingCard = activeCard }
@@ -223,13 +231,16 @@ final class NotchService: ObservableObject {
         manualCollapseNeedsMouseExit = hovering
         cancelAutoCollapse()
         collapseAt = nil
-        // 历史、通知、任务进度是瞬态的：收起即消失。提问与权限持续（卡片仍等用户）。
+        // 历史与通知是瞬态的：收起即消失。提问与权限持续（卡片仍等用户）。
+        // 进行中的进度也留下：点气泡能再展开，下一次 todo 事件仍由 presentTodoCard 上屏。
         if activeCard == .history {
             activeCard = .none
         } else if activeCard == .todo {
-            // 收起即视为「看过了」：不清空控制器会挡住下一次自动上屏。
-            todoController.reset()
-            activeCard = .none
+            if Self.clearsTodoOnCollapse(hasTodo: todoController.hasTodo,
+                                         isFinished: todoController.progress.isFinished) {
+                todoController.reset()
+                activeCard = .none
+            }
         } else if activeCard == .notice {
             // 手动收起通知前，先保存通知数据供气泡点击恢复
             let savedTint = noticeController.notice.flatMap {
@@ -251,7 +262,11 @@ final class NotchService: ObservableObject {
             }
             activeCard = .none
         }
-        let newSize = geometry.restingSize(showsContent: false)
+        // 进行中的进度线要露在刘海下方。气泡与刘海齐高，不加高的话线贴在底边，
+        // 整段被摄像头壳体挡住。
+        let newSize = Self.collapsedSize(
+            base: geometry.restingSize(showsContent: false),
+            inProgress: todoController.hasTodo && !todoController.progress.isFinished)
         animateTo(size: newSize)
         syncKeyFocus()
         updatePendingTotal()
@@ -310,6 +325,8 @@ final class NotchService: ObservableObject {
         // 会在卡片中间闪出一块，气泡越大越明显，调到最小就看不见。
         let toBubble = !expanded && (size.width < surfaceSize.width - 0.5 || size.height < surfaceSize.height - 0.5)
         if !toBubble {
+            pendingCollapsedReveal = false
+            windowHost?.releaseHostHidden()
             surfaceSize = size
         }
         Log.debug("NotchService.animateTo: surfaceSize=\(size), expanded=\(expanded), activeCard=\(activeCard)", topic: "layout")
@@ -322,11 +339,26 @@ final class NotchService: ObservableObject {
             preserveContentFrame: toBubble,
             onSettled: toBubble ? { [weak self] in
                 guard let self, !self.expanded else { return }
+                // 先挂上标记再改尺寸：视图这次刷新会走到收起布局，
+                // 刷新完才把藏住的内容亮起来。亮得早，卡片顶栏会在气泡里闪一帧。
+                self.pendingCollapsedReveal = true
                 self.surfaceSize = size
                 self.closingCard = nil
                 self.isClosing = false
             } : nil
         )
+    }
+
+    /// 收起布局已经画进 SwiftUI。再等一轮，让宿主视图把新内容提交到图层上，然后才亮。
+    /// 同一轮就亮的话，图层里可能还是卡片顶栏。
+    func collapsedContentDidLayout() {
+        guard pendingCollapsedReveal, !expanded else { return }
+        pendingCollapsedReveal = false
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.expanded else { return }
+            self.windowHost?.revealHostContent()
+            Log.debug("collapsed content revealed", topic: "layout")
+        }
     }
     
     private func observeScreenChanges() {
@@ -450,7 +482,7 @@ final class NotchService: ObservableObject {
             install("Claude Code Hook") { try ClaudeCodeHookInstaller.install() }
         }
         if CodexHookInstaller.isPresent {
-            install("Codex Notify") { try CodexHookInstaller.install() }
+            install("ChatGPT Notify") { try CodexHookInstaller.install() }
         }
         if TraeHookInstaller.Flavor.cn.isPresent {
             install("Trae CN Hook") { try TraeHookInstaller.install(.cn) }
@@ -463,6 +495,9 @@ final class NotchService: ObservableObject {
         }
         if QoderCnHookInstaller.isPresent {
             install("Qoder CN Hook") { try QoderCnHookInstaller.install() }
+        }
+        if CopilotHookInstaller.isPresent {
+            install("Copilot Hook") { try CopilotHookInstaller.install() }
         }
         Log.info("installAll: " + lines.joined(separator: " | "), topic: "install")
         return lines.joined(separator: "\n")
@@ -479,6 +514,7 @@ final class NotchService: ObservableObject {
         TraeHookInstaller.uninstall(.international)
         KimiHookInstaller.uninstall()
         QoderCnHookInstaller.uninstall()
+        CopilotHookInstaller.uninstall()
     }
 
     /// 启动时校验**已装**的集成，内容与本构建不一致就重写回去。
@@ -529,7 +565,10 @@ final class NotchService: ObservableObject {
             repair("Kimi Hook", KimiHookInstaller.isInstalled, KimiHookInstaller.install)
         }
         if CodexHookInstaller.isPresent {
-            repair("Codex Hook", CodexHookInstaller.isInstalled, CodexHookInstaller.install)
+            repair("ChatGPT Hook", CodexHookInstaller.isInstalled, CodexHookInstaller.install)
+        }
+        if CopilotHookInstaller.isPresent {
+            repair("Copilot Hook", CopilotHookInstaller.isInstalled, CopilotHookInstaller.install)
         }
         if !repaired.isEmpty {
             Log.info("已校验安装态集成：" + repaired.joined(separator: "、"), topic: "install")
@@ -645,16 +684,58 @@ final class NotchService: ObservableObject {
         FeedbackService.onArrive()
     }
 
+    /// 提问、权限、完成通知占着卡片主体时，进行中的待办不换卡，只留底边进度线。
+    /// 历史是用户打开的只读面板，进度卡可以替换。
+    static func todoYieldsCard(to card: ActiveCard) -> Bool {
+        switch card {
+        case .question, .permission, .notice: return true
+        case .none, .history, .todo: return false
+        }
+    }
+
+    /// 收起时是否清掉待办。进行中的留下；没有待办或已经全部完成则清掉。
+    static func clearsTodoOnCollapse(hasTodo: Bool, isFinished: Bool) -> Bool {
+        !hasTodo || isFinished
+    }
+
+    /// 收起后的岛尺寸。进行中的待办把高度加上 `progressLineChin`，
+    /// 进度线才落在刘海壳体下面。
+    static func collapsedSize(base: CGSize, inProgress: Bool) -> CGSize {
+        guard inProgress else { return base }
+        return CGSize(width: base.width, height: base.height + NotchLayout.progressLineChin)
+    }
+
+    /// 进行中的进度线画在哪。
+    ///
+    /// 提问 / 权限 / 通知占着主体时贴卡片底边；收起态，以及进度卡自己在屏时，贴气泡下沿。
+    /// 两处不会同时画，避免展开态顶部气泡和卡片底边各一条。
+    enum ProgressLineSlot: Equatable {
+        case hidden, bubble, cardEdge
+    }
+
+    static func progressLineSlot(expanded: Bool, closing: Bool,
+                                 card: ActiveCard, inProgress: Bool) -> ProgressLineSlot {
+        guard inProgress else { return .hidden }
+        if (expanded || closing), todoYieldsCard(to: card) { return .cardEdge }
+        return .bubble
+    }
+
     /// 待办进度卡片上屏。
     ///
     /// 与 `showCard` 的差别有三处，都是刻意的：
     /// - **不受功能开关门控**：它不拦截任何请求，用户没有需要回应的东西。
     /// - **不进入 `pendingTotal`**：待处理圆点表示「等你处理」，任务进度不是。
-    /// - **让位交互式卡片**：提问/权限在屏时不抢占，等它们撤下后由
-    ///   `handleCardDismissal` 把进度接回来。
+    /// - **让位提问 / 权限 / 通知**：这三张卡在屏时不换 `activeCard`，数据照常更新，
+    ///   底边进度线跟着刷。等它们撤下后由 `handleCardDismissal` 把完整进度卡接回来。
     private func presentTodoCard() {
         guard todoController.hasTodo else { return }
-        if activeCard == .question || activeCard == .permission { return }
+        if Self.todoYieldsCard(to: activeCard) { return }
+        revealTodoCard()
+    }
+
+    /// 把完整进度卡展开到前台。新的 todo 事件与「前台卡撤下后接回」共用这一段：
+    /// 清掉手动收起的让位期，避免数据还在时被悬停状态机压住；全部完成则 2.5s 后收起。
+    private func revealTodoCard() {
         activeCard = .todo
         refreshPinned()
         manualCollapseUntil = nil
@@ -666,8 +747,7 @@ final class NotchService: ObservableObject {
             isClosing = false
             closingCard = nil
         }
-        // 每个 todo 事件都会走到这里；高度没变时不必再推进画布，
-        // 否则同一尺寸反复 animateTo 会让岛面出现细微抖动。
+        // 高度没变时不必再推进画布，否则同一尺寸反复 animateTo 会让岛面出现细微抖动。
         let size = targetSizeForCurrentCard()
         if size != surfaceSize { animateTo(size: size) }
         syncKeyFocus()
@@ -690,10 +770,12 @@ final class NotchService: ObservableObject {
         } else if noticeController.hasActiveNotice {
             activeCard = .notice
         } else if todoController.hasTodo {
-            // 交互式卡片撤下后，把仍在进行中的任务进度接回来（不必等下一次 todo 事件）。
-            activeCard = .todo
-            animateTo(size: targetSizeForCurrentCard())
-            if todoController.progress.isFinished { scheduleAutoCollapse(after: 2.5) }
+            // 提问 / 权限 / 通知撤下后，把仍在的任务进度接回来（不必等下一次 todo 事件）。
+            // 进行中的展开后保持；全部完成走 2.5s 收尾。
+            // 收起过程中（例如手动收起通知时 dismiss 会进到这里）不要把岛重新弹开。
+            if !isClosing {
+                revealTodoCard()
+            }
         } else if noticeController.count > 0 {
             // 通知队列有待展示项（之前因交互卡片在屏而被排队）：弹出下一条。
             hasUnprocessedNotice = false
@@ -716,6 +798,10 @@ final class NotchService: ObservableObject {
                     animateTo(size: newSize)
                 }
             }
+        } else if isClosing {
+            // collapse() 已经在收。这里再 animateTo 会在几十毫秒内把弹簧重启一次，
+            // 并把 closingCard 提前清掉，卡片布局缩进气泡里闪一下。
+            activeCard = .none
         } else {
             // No more content: play withdrawal animation then collapse.
             closingCard = activeCard
@@ -728,14 +814,14 @@ final class NotchService: ObservableObject {
                 let newSize = geometry.restingSize(showsContent: false)
                 animateTo(size: newSize)
                 syncKeyFocus()
-                // Clear closing card once animation settles.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
-                    guard let self else { return }
-                    self.closingCard = nil
-                    self.isClosing = false
-                }
+                // closingCard 留到弹簧落定。0.45s 提前清掉的话，玻璃还没收完，
+                // 视图就换成气泡布局，大气泡会在卡片中间闪出一块。
             } else {
                 closingCard = nil
+                // 收起态上的进度下沿加高要收回去，否则待办清空后岛还比刘海高一截。
+                let resting = Self.collapsedSize(
+                    base: geometry.restingSize(showsContent: false), inProgress: false)
+                if surfaceSize != resting { animateTo(size: resting) }
             }
         }
         syncKeyFocus()
@@ -1011,15 +1097,17 @@ final class NotchService: ObservableObject {
                         AgentProvider(rawValue: $0.provider)?.tint
                     }
                     noticeController.saveForRestore()   // 保存当前通知供气泡点击恢复
-                    noticeController.dismiss()        // 清当前 + onDismiss + promoteNext()
+                    noticeController.dismiss()        // 清当前 + onDismiss；有进行中的进度时接回进度卡
                     if !noticeController.hasActiveNotice {
-                        // 队列已空：标记未处理以驱动呼吸灯，然后收起。
+                        // 队列已空：记下未读，点气泡时先恢复这条通知。
                         hasUnprocessedNotice = true
                         unprocessedNoticeTint = savedTint
-                        collapse()
-                        // 必须显式刷新：上面的 dismiss() 已同步触发
-                        // handleCardDismissal，岛在那时就收起了，collapse() 会命中
-                        // `guard expanded` 提前返回，灯就永远不亮。
+                        // 进度卡已经接回来就留在屏上。立刻 collapse 会把它折掉，
+                        // 用户看不到「通知撤下后回到进度」。
+                        if activeCard != .todo {
+                            collapse()
+                        }
+                        // dismiss 期间岛可能已经收起，collapse() 会提前返回，灯要显式刷新。
                         updateBreathingTint()
                     }
                     // promoteNext 成功时 showNoticeBanner 已重设 autoCollapse，无需额外处理。
@@ -1150,14 +1238,20 @@ final class NotchService: ObservableObject {
             if activeCard == .todo, !todoController.hasTodo { handleCardDismissal() }
         case .turnFinished:
             noticeController.handleTurnFinished(message: message)
-            // 回合结束：清掉本会话的任务进度。正常完成路径靠这里立即清空，
-            // 兜底超时（todoIdleTimeout）只需兜住「手动中断」这种不发事件的场景。
-            todoController.handleSessionEnded(message.sessionID)
-            if activeCard == .todo, !todoController.hasTodo { handleCardDismissal() }
+            // 进行中的待办不因回合结束清空。完成通知占卡片主体时，底边还要画进度线。
+            // 会话结束、todoCleared、空闲超时仍会清空；全部完成的收尾仍走 2.5s。
             // 回合结束同样意味着：阻塞式提问卡（AskUserQuestion）不再有宿主在等答案。
             // 手动停止模型生成时宿主也发 Stop → turn_finished，此时应把挂在岛上的
             // 提问卡一并收掉，否则它会一直等一个永远不会来的作答。
             questionController.handleEvent(.sessionEnded, message: message)
+        case .failureNotice:
+            noticeController.handleStatusNotice(message: message, kind: .failure)
+        case .subagentFinished:
+            noticeController.handleStatusNotice(message: message, kind: .subagent)
+        case .reviewNotice:
+            noticeController.handleStatusNotice(message: message, kind: .review)
+        case .compactNotice:
+            noticeController.handleStatusNotice(message: message, kind: .compact)
         case .todoUpdated, .todoItemUpdated:
             // 待办不拦截任何请求，也不参与待处理计数：它只是过程可视化。
             let provider = message.resolvedProvider
@@ -1379,8 +1473,12 @@ final class NotchService: ObservableObject {
             refreshPinned()
         }
         guard windowHost != nil else { return }
-        let size = expanded ? targetSizeForCurrentCard()
-                            : geometry.restingSize(showsContent: true)  // 收起态也使用 bubbleWidth/bubbleHeight
+        let resting = geometry.restingSize(showsContent: true)  // 收起态也使用 bubbleWidth/bubbleHeight
+        let size = expanded
+            ? targetSizeForCurrentCard()
+            : Self.collapsedSize(
+                base: resting,
+                inProgress: todoController.hasTodo && !todoController.progress.isFinished)
         // 给 surfaceSize 赋值（哪怕是相同值）会重新发布，使 SwiftUI 内容重渲染、
         // 采纳新的字号 / 颜色。
         surfaceSize = size
@@ -1397,7 +1495,7 @@ final class NotchService: ObservableObject {
     func handleSurfaceTap() {
         if activeCard == .permission, Settings.shared.permissionNoticeJump,
            let req = permissionController.request {
-            IDELauncher.activateAsync(provider: req.provider.rawValue, host: req.host)
+            IDELauncher.activateAsync(provider: req.provider.rawValue, host: req.host, sessionID: req.sessionID)
         }
         toggle()
     }
@@ -1450,13 +1548,17 @@ final class NotchService: ObservableObject {
         if let timer = todoIdleTimer { RunLoop.main.add(timer, forMode: .common) }
     }
 
-    /// 若任务进度已超过 `todoIdleTimeout` 秒没有新事件，则清空并收起。
+    /// 若任务进度已超过 `todoIdleTimeout` 秒没有新事件，则清空。
+    ///
+    /// 进度可能只是别的卡片底边的一条线（`activeCard` 不是 `.todo`），
+    /// 这种时候只清数据，不把正在看的通知 / 提问 / 权限一起收掉。
     private func sweepIdleTodo() {
-        guard todoController.hasTodo, activeCard == .todo else { return }
+        guard todoController.hasTodo else { return }
         let timeout = TimeInterval(max(3, Settings.shared.todoIdleTimeout))
         guard todoController.shouldDismissIdle(after: timeout) else { return }
         Log.info("待办 \(timeout)s 无新事件，兜底清空收起", topic: "todo")
+        let showingTodo = activeCard == .todo
         todoController.reset()
-        handleCardDismissal()
+        if showingTodo { handleCardDismissal() }
     }
 }

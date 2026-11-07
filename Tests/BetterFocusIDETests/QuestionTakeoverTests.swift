@@ -117,16 +117,18 @@ final class QuestionTakeoverTests: XCTestCase {
         XCTAssertTrue(body.contains("if (deferred) return original(input, context);"))
     }
 
-    /// 作答一律走 `deny + reason`：`allow + updatedInput.answers` 那条代答
-    /// 捷径试过、也撤了——宿主自己的面板关不掉不是我们要解决的问题，
-    /// 岛只需要**尽快出现**（见启动器的 `-S`）。这里钉住「不再有按宿主
-    /// 分叉的代答路径」，免得有人又把它请回来。
-    func testAnswersAlwaysGoBackThroughDenyReason() {
+    /// 作答按宿主文档分叉：Claude Code / Trae 回 `allow` + `updatedInput.answers`，
+    /// Copilot 回顶层 `allow` + `modifiedArgs`，Kimi 回文档里的 `deny` 且不带
+    /// `hookEventName`。WorkBuddy 已按 `deny` + reason 验证过，继续走这条。
+    func testAnswersFollowEachHostsDocumentedShape() {
         let body = HostHookTemplate.body
-        XCTAssertFalse(body.contains("emit_native_answer"))
-        XCTAssertFalse(body.contains("updatedInput"))
-        XCTAssertTrue(body.contains(#"reason = ("The person answered on the BetterFocusIDE island. ""#))
+        XCTAssertTrue(body.contains("ANSWER_WITH_INPUT = (\"claude_code\", \"trae\", \"trae_cn\")"))
+        XCTAssertTrue(body.contains("\"updatedInput\": answered_input(payload, questions, labels)"))
+        XCTAssertTrue(body.contains("\"modifiedArgs\": answered_input(payload, questions, labels)"))
+        XCTAssertTrue(body.contains("if PROVIDER == \"kimi\":"))
         XCTAssertTrue(body.contains(#"emit("deny", reason, hook_event)"#))
+        XCTAssertTrue(body.contains("The person answered on the BetterFocusIDE island."))
+        XCTAssertFalse(body.contains("emit_native_answer"))
     }
 
     // MARK: - 权限通道上的提问
