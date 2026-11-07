@@ -168,6 +168,12 @@ final class HostAdapterTests: XCTestCase {
         XCTAssertTrue(TraeHookInstaller.specs.contains { $0.event == "Stop" })
     }
 
+    /// 进度卡靠 PostToolUse 转发 TodoWrite。Trae 的工具枚举没有这项，
+    /// 2026-11-07 实测也不会发事件。挂上只会空转。
+    func testTraeDoesNotRegisterTodoProgress() {
+        XCTAssertFalse(TraeHookInstaller.specs.contains { $0.event == "PostToolUse" })
+    }
+
     // MARK: - TOML 受管区块（Kimi / Codex）
 
     /// 区块插入 → 替换 → 移除的完整回路，且界标之外一个字符都不变。
@@ -456,6 +462,82 @@ final class HostAdapterTests: XCTestCase {
         XCTAssertEqual(hooks?["Stop"]?.first?["timeoutSec"] as? Int, 5)
         XCTAssertEqual(hooks?["UserPromptSubmit"]?.first?["command"] as? String,
                        "/tmp/betterfocus-notify.sh")
+        let post = hooks?["PostToolUse"]?.first?["matcher"] as? String ?? ""
+        XCTAssertTrue(post.contains("|sql"), "TodoWrite 在 Copilot CLI 里是 sql，进度卡必须挂上")
+        XCTAssertFalse((pre?["matcher"] as? String ?? "").contains("sql"),
+                       "sql 不能进 PreToolUse，那条失败即拒绝")
+    }
+
+    /// Copilot CLI 的待办不叫 TodoWrite。技能里的 TodoWrite 落到会话库的
+    /// `sql` 工具，表是内置的 `todos`。INSERT 建任务，UPDATE 改状态；
+    /// 其它表和 todo_deps 不能误当成进度。
+    func testCopilotSessionSqlBecomesTodoRows() throws {
+        let dir = NSTemporaryDirectory() + "bf-copilot-sql-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let hook = dir + "/hook.py"
+        try CopilotHookInstaller.helperContent.write(toFile: hook, atomically: true, encoding: .utf8)
+        let probe = dir + "/probe.py"
+        let script = """
+        import importlib.util, json, sys
+        spec = importlib.util.spec_from_file_location("hook", sys.argv[1])
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        insert = (
+            "INSERT INTO todos (id, title, description) VALUES "
+            "('tool-test-01', 'Creating test task 1', 'd1'), "
+            "('tool-test-02', 'Creating test task 2', 'd2')"
+        )
+        rows = mod.copilot_todo_changes(insert)
+        assert rows == [
+            {"id": "tool-test-01", "content": "Creating test task 1", "status": "pending"},
+            {"id": "tool-test-02", "content": "Creating test task 2", "status": "pending"},
+        ], rows
+        updated = mod.copilot_todo_changes(
+            "UPDATE todos SET status = 'done' WHERE id = 'tool-test-01'")
+        assert updated == [
+            {"id": "tool-test-01", "content": "", "status": "done"},
+        ], updated
+        assert mod.copilot_todo_changes(
+            "INSERT INTO todo_deps (todo_id, depends_on) VALUES ('a', 'b')") == []
+        assert mod.copilot_todo_changes(
+            "INSERT INTO session_state (key, value) VALUES ('a', 'b')") == []
+        box = {"tasks": {}}
+        sent = []
+        mod._load_todo_state = lambda sid: {"tasks": dict(box["tasks"])}
+        def save(sid, state):
+            box["tasks"] = dict(state.get("tasks") or {})
+        mod._save_todo_state = save
+        mod.send = lambda msg: sent.append(msg)
+        mod.emit_copilot_sql_todos("sess", {"tool_name": "sql", "tool_input": {"query": insert}})
+        mod.emit_copilot_sql_todos("sess", {
+            "tool_name": "sql",
+            "tool_input": {"query": "UPDATE todos SET status = 'in_progress' WHERE id = 'tool-test-02'"},
+        })
+        mod.emit_copilot_sql_todos("sess", {
+            "tool_name": "sql",
+            "tool_input": {"database": "project", "query": insert},
+        })
+        titles = [(m["payload"]["todo"]["id"], m["payload"]["todo"]["content"], m["payload"]["todo"]["status"]) for m in sent]
+        assert titles == [
+            ("tool-test-01", "Creating test task 1", "pending"),
+            ("tool-test-02", "Creating test task 2", "pending"),
+            ("tool-test-02", "Creating test task 2", "in_progress"),
+        ], titles
+        print("ok")
+        """
+        try script.write(toFile: probe, atomically: true, encoding: .utf8)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = [probe, hook]
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+        let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertEqual(process.terminationStatus, 0, err)
     }
 
     /// 只在显式打开环境变量时写 ~/.codex/hooks.json，避免普通测试碰用户目录。

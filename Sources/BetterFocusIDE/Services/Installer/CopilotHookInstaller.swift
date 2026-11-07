@@ -21,7 +21,9 @@ import Foundation
 /// 2. `PermissionRequest` / `Notification(permission_prompt)` —— 只提醒。
 ///    空 stdout + 退出码 0 才是「交给原生对话框」；退出码 2 会被当成拒绝。
 /// 3. `UserPromptSubmit` / `Stop` / `SessionEnd` —— 回合标题、完成横幅、会话结束。
-/// 4. `PostToolUse` 的 todo 家族 —— 进度条，形状对得上才转发。
+/// 4. `PostToolUse` 的 todo 家族，外加 `sql` —— 进度条。技能里的
+///    `TodoWrite` 在 Copilot CLI 上就是会话库的 `sql`，表是内置 `todos`。
+///    `sql` 只挂在 PostToolUse：PreToolUse 失败即拒绝，不能把整条工具链带上。
 enum CopilotHookInstaller {
     static var scriptPath: String { InstallerPaths.copilotScriptPath }
     static var helperPath: String { InstallerPaths.copilotHelperPath }
@@ -91,8 +93,9 @@ enum CopilotHookInstaller {
             return item
         }
         // PostToolUse 的 matcher 是整名正则。PascalCase 会把工具名翻成
-        // TodoWrite，camelCase 载荷仍是 update_todo，两边都列上。
-        let todos = InstallerPaths.todoToolMatcher + "|update_todo"
+        // TodoWrite，camelCase 载荷仍是 update_todo。当前 CLI 的待办不走这两个
+        // 名字，而是 `sql` 写会话库的 `todos` 表，所以这里一并挂上。
+        let todos = InstallerPaths.todoToolMatcher + "|update_todo|sql"
         return [
             "version": 1,
             "hooks": [
