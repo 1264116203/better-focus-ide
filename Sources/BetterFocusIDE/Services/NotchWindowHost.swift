@@ -359,9 +359,9 @@ final class NotchCanvas: NSView {
 
     /// 透镜曲率、样式、染色和中心洗色都读设置，拖动滑块后下一次 layout 就生效。
     /// `moving` 为真时洗色用半分辨率、按约 24pt 量化，避免弹簧每帧重跑整张位图。
-    private func updateLiquidCorner(moving: Bool) {
+    /// `radius` 来自可见玻璃框，不从已经上移过的 bounds 再算一遍。
+    private func updateLiquidCorner(moving: Bool, radius: CGFloat) {
         guard #available(macOS 26, *), let liquid = glass as? NSGlassEffectView else { return }
-        let radius = lensRadius(in: liquid.bounds.size)
         if liquid.cornerRadius != radius {
             liquid.cornerRadius = radius
         }
@@ -385,9 +385,18 @@ final class NotchCanvas: NSView {
         guard let wash = liquid.contentView?.subviews.first(where: {
             $0.identifier == Self.washIdentifier
         }) else { return }
-        // 铺满玻璃边界。羽化做在位图 alpha 里，不再内缩出第二块矩形。
-        wash.frame = CGRect(origin: .zero, size: b.size)
+        // 洗色只铺可见的那一段。上移出去的顶角不参与羽化，顶边按直角收到 0。
+        let lift = min(max(0, radius), b.height)
+        wash.frame = CGRect(x: 0, y: lift, width: b.width, height: max(0, b.height - lift))
         applyFeatheredWash(to: wash, radius: radius, moving: moving)
+    }
+
+    /// 系统玻璃只有一只圆角，四角一起弯。顶边贴着屏幕，这两只外圆角会切进肩部，
+    /// 和肩部内圆角叠成两条线。上移一个圆角后，顶上的弯折落到屏幕外被裁掉，底角仍在卡片下沿。
+    private func liftedGlassFrame(_ rect: CGRect, radius: CGFloat) -> CGRect {
+        guard usesLiquidGlass, radius > 0.5 else { return rect }
+        return CGRect(x: rect.minX, y: rect.minY - radius,
+                      width: rect.width, height: rect.height + radius)
     }
 
     /// 把羽化洗色写进洗色视图的 `layer.contents`。
@@ -448,10 +457,10 @@ final class NotchCanvas: NSView {
         CATransaction.commit()
     }
 
-    /// 圆角矩形的距离场：中心黑度 `washPeakAlpha`，沿外缘 `falloffPx` 内 smoothstep 到 0。
+    /// 距离场：中心黑度 `washPeakAlpha`，沿外缘 `falloffPx` 内 smoothstep 到 0。
     ///
-    /// 等值线是玻璃同一圆角的偏移曲线，外缘 alpha 为 0，所以不会出现内缩矩形的硬边。
-    /// 黑是预乘的（RGB = 0），避免半透明边缘被抬成灰雾。
+    /// 只圆底角。顶边贴屏，圆角若连顶角一起弯，会在肩部内侧再切出一条向下的外圆角。
+    /// 外缘 alpha 为 0，所以不会出现内缩矩形的硬边。黑是预乘的（RGB = 0）。
     private static func renderFeatheredWash(pixelWidth: Int, pixelHeight: Int,
                                             radiusPx: CGFloat, falloffPx: CGFloat,
                                             peakAlpha: CGFloat) -> CGImage? {
@@ -477,15 +486,19 @@ final class NotchCanvas: NSView {
         let peak = Float(min(1, max(0, peakAlpha))) * 255
 
         for y in 0..<pixelHeight {
-            let qy = abs((Float(y) + 0.5) - hh) - hh + rad
+            // py > 0 是下半。顶角半径取 0，只有底角参与圆角，避免顶边再切出外圆角。
+            let py = (Float(y) + 0.5) - hh
+            let cr: Float = py > 0 ? rad : 0
             let row = pixels.advanced(by: y * rowBytes)
             for x in 0..<pixelWidth {
-                let qx = abs((Float(x) + 0.5) - hw) - hw + rad
+                let px = (Float(x) + 0.5) - hw
+                let qx = abs(px) - hw + cr
+                let qy = abs(py) - hh + cr
                 let ox = max(qx, 0)
                 let oy = max(qy, 0)
                 let outside = sqrt(ox * ox + oy * oy)
                 let inside = min(max(qx, qy), 0)
-                let dist = rad - (outside + inside)
+                let dist = cr - (outside + inside)
                 var byte: UInt8 = 0
                 if dist > 0 {
                     let t = min(1, dist / falloff)
@@ -559,7 +572,9 @@ final class NotchCanvas: NSView {
             host.frame = island
         }
         dim.frame = glassRect
-        glass.frame = glassRect
+        // 圆角按可见玻璃框算，不能用上移之后的 bounds，否则半径会跟着被抬高的高度变大。
+        let glassRadius = lensRadius(in: glassRect.size)
+        glass.frame = liftedGlassFrame(glassRect, radius: glassRadius)
 
         let alpha: CGFloat
         if pinBubble {
@@ -573,7 +588,7 @@ final class NotchCanvas: NSView {
         glass.alphaValue = alpha
         glass.layer?.opacity = Float(alpha)
         // 玻璃还藏着时不重绘洗色。看得见的那一帧再铺，和透明度同一次提交。
-        updateLiquidCorner(moving: moving && alpha > 0.02)
+        updateLiquidCorner(moving: moving && alpha > 0.02, radius: glassRadius)
 
         if body.layer?.mask !== silhouette {
             body.layer?.mask = silhouette
@@ -594,9 +609,10 @@ final class NotchCanvas: NSView {
         silhouette.path = path
         edge.path = path
         if lensBlend > 0.999 {
-            let tightR = min(lensRadius(in: glassRect.size), min(glassRect.width, glassRect.height) / 2)
-            shadowOutline = CGPath(roundedRect: glassRect, cornerWidth: tightR,
-                                   cornerHeight: tightR, transform: nil)
+            let tightR = min(glassRadius, min(glassRect.width, glassRect.height) / 2)
+            let side = NotchLayout.shoulder(height: glassRect.height)
+            shadowOutline = contourPath(in: glassRect, topRadius: 0,
+                                       bottomRadius: tightR, shoulder: side)
             host.layer?.masksToBounds = false
         } else {
             shadowOutline = path
@@ -668,9 +684,9 @@ final class NotchCanvas: NSView {
         return t * t * (3 - 2 * t)
     }
 
-    /// 遮罩。`lensBlend == 0` 是刘海轮廓；`== 1` 是玻璃圆角矩形再向外松 `pad`，
-    /// 和落定态 `applySurface` 用的是同一条路径。中间帧用同一族三次曲线，
-    /// 肩部收到 0、圆角收到透镜半径，避免两套路径在切换时跳。
+    /// 遮罩。`lensBlend == 0` 是刘海轮廓；`== 1` 时底角收到透镜半径，再向外松 `pad`。
+    /// 顶边始终不圆：玻璃的外圆角如果弯到顶上，会和双肩内圆角叠成两条线。
+    /// 肩部不跟着 blend 收掉。中间帧仍是同一族三次曲线，避免切换时跳。
     private func maskPath(glassRect: CGRect, lensBlend: CGFloat, pad: CGFloat) -> CGPath {
         let u = min(1, max(0, lensBlend))
         if u <= 0.0001 {
@@ -688,8 +704,8 @@ final class NotchCanvas: NSView {
                    floatingGap: nil).path(in: rect).cgPath
     }
 
-    /// 畸变落定形态：玻璃框向左右和下方松出 `pad`，圆角比玻璃自己的再大 `pad`，
-    /// 侧棱折光留在遮罩内，又不会切到玻璃边上。顶边不外扩，仍贴住屏幕。
+    /// 畸变落定形态：玻璃框向左右和下方松出 `pad`，底角比玻璃自己的再大 `pad`，
+    /// 侧棱折光留在遮罩内，又不会切到玻璃边上。顶边不外扩、不圆角，肩部保留。
     private func lensMaskPath(glassRect: CGRect, pad: CGFloat) -> CGPath {
         var loose = glassRect
         loose.origin.x -= pad
@@ -697,11 +713,12 @@ final class NotchCanvas: NSView {
         loose.size.height += pad
         let glassR = lensRadius(in: glassRect.size)
         let looseR = min(glassR + pad, min(loose.width, loose.height) / 2)
-        return CGPath(roundedRect: loose, cornerWidth: looseR, cornerHeight: looseR, transform: nil)
+        let side = NotchLayout.shoulder(height: glassRect.height)
+        return contourPath(in: loose, topRadius: 0, bottomRadius: looseR, shoulder: side)
     }
 
-    /// 刘海轮廓收到透镜圆角矩形的中间态。`blend` 为 0 时几何上回到 NotchShape，
-    /// 为 1 时肩部为 0、上下半径等于玻璃圆角加 `pad`。
+    /// 刘海轮廓收到「顶边直角、底角为透镜」的中间态。`blend` 为 0 时几何上回到 NotchShape，
+    /// 为 1 时肩部仍在、底角等于玻璃圆角加 `pad`。顶角半径始终为 0。
     private func blendedContour(glassRect: CGRect, blend: CGFloat, pad: CGFloat) -> CGPath {
         let u = min(1, max(0, blend))
         var loose = glassRect
@@ -711,10 +728,8 @@ final class NotchCanvas: NSView {
         let glassR = lensRadius(in: glassRect.size)
         let notchBottom = NotchLayout.surfaceRadius(height: glassRect.height)
         let notchSide = NotchLayout.shoulder(height: glassRect.height)
-        let topR = (glassR + pad) * u
         let botR = notchBottom * (1 - u) + (glassR + pad) * u
-        let side = notchSide * (1 - u)
-        return contourPath(in: loose, topRadius: topR, bottomRadius: botR, shoulder: side)
+        return contourPath(in: loose, topRadius: 0, bottomRadius: botR, shoulder: notchSide)
     }
 
     /// 顶边贴屏的轮廓。`shoulder == 0` 且上下半径相等时是圆角矩形；
