@@ -24,6 +24,20 @@ final class Settings: ObservableObject {
         return appSupport.appendingPathComponent("BetterFocusIDE/settings.json")
     }()
 
+    // MARK: - 通用
+    /// 登录后自动打开。真正是否生效看系统登录项，不只看这个存盘值。
+    @Published var launchAtLogin = false
+    /// 菜单栏是否显示图标。关掉后仍可在灵动岛上右键打开设置。
+    @Published var showStatusBarIcon = true
+    /// 菜单栏图标样式。见 `statusBarIconChoices`。
+    @Published var statusBarIcon = "notch"
+    static let statusBarIconChoices: [(String, String)] = [
+        ("notch", "刘海"),
+        ("bell", "铃铛"),
+        ("sparkle", "闪光"),
+        ("circle", "圆点"),
+    ]
+
     // MARK: - 提醒 (alerts)
     @Published var permissionEnabled = true
     @Published var questionEnabled = true
@@ -34,7 +48,7 @@ final class Settings: ObservableObject {
     // MARK: - 尺寸 (sizes)
     @Published var cardWidth: Double = 540
     @Published var cardMinHeight: Double = 0
-    @Published var cardInset: Double = 32
+    @Published var cardInset: Double = 30
     @Published var bodyFont: Double = 12
     @Published var optionFont: Double = 12
     @Published var descFont: Double = 10.5
@@ -55,7 +69,7 @@ final class Settings: ObservableObject {
     @Published var cardFollowsNotch = true
     @Published var notifyHeight: Double = 106
     /// 刘海屏下卡片内容到摄像头区域的额外间距（pt），可为负值使内容更贴近刘海
-    @Published var notchTopPadding: Double = -3
+    @Published var notchTopPadding: Double = 0
     /// 气泡水平偏移（pt）：正值向右，负值向左。0 与物理刘海居中重叠。
     @Published var bubbleHorizontalOffset: Double = 0
     /// 卡片水平偏移（pt）：正值向右，负值向左，0 表示居中。展开态卡片通常保持居中
@@ -69,23 +83,23 @@ final class Settings: ObservableObject {
     @Published var opencodeTint = "0.06,0.73,0.51"
     @Published var cursorTint = "0.00,0.55,0.75"
     @Published var workbuddyTint = "0.85,0.55,0.20"
-    @Published var radiusExpanded: Double = 22
+    @Published var radiusExpanded: Double = 34
     @Published var radiusBubble: Double = 13
     /// 岛面液态玻璃。`clear` 折背后的光，`regular` 更磨砂。仅 macOS 26+ 生效。
     @Published var glassStyle = "clear"
     /// 玻璃自身圆角（点）。为 0 时棱边几乎不弯。
-    @Published var glassCorner: Double = 28
+    @Published var glassCorner: Double = 32
     /// 玻璃染色，配合 `glassTintAmount`。浓度为 0 时不染色。
     @Published var glassTint = "1,1,1"
     @Published var glassTintAmount: Double = 0
     /// 指针压在玻璃上时的交互反馈（macOS 27+）。
     @Published var glassInteractive = true
     /// 卡片中心洗色的黑度，0 为完全透，1 为实黑。
-    @Published var glassWash: Double = 0.50
+    @Published var glassWash: Double = 0.38
     /// 洗色从外缘淡到中心实色的宽度（点）。
-    @Published var glassWashFalloff: Double = 36
+    @Published var glassWashFalloff: Double = 49
     /// 展开落定后允许折射探出轮廓的宽度（点）。0 表示外缘与原来的岛一致。
-    @Published var glassRim: Double = 0
+    @Published var glassRim: Double = 12
     /// 畸变幅度 0…1。0 保持刘海直线边；升高时把左右收成圆弧，侧边才跟着折光。
     /// 系统玻璃没有单独的折光强度，可见弯折来自这条边有多弯。
     @Published var glassDistort: Double = 0
@@ -222,6 +236,9 @@ final class Settings: ObservableObject {
         guard let data = try? Data(contentsOf: settingsURL),
               let stored = try? JSONDecoder().decode(Stored.self, from: data) else { return }
         let v = stored.values
+        launchAtLogin = v["launchAtLogin"]?.boolValue ?? launchAtLogin
+        showStatusBarIcon = v["showStatusBarIcon"]?.boolValue ?? showStatusBarIcon
+        statusBarIcon = v["statusBarIcon"]?.stringValue ?? statusBarIcon
         permissionEnabled = v["permissionEnabled"]?.boolValue ?? permissionEnabled
         questionEnabled = v["questionEnabled"]?.boolValue ?? questionEnabled
         turnNotifyEnabled = v["turnNotifyEnabled"]?.boolValue ?? turnNotifyEnabled
@@ -310,6 +327,9 @@ final class Settings: ObservableObject {
     /// 把所有 @Published 字段序列化进 values 并原子写盘。
     func save() {
         var values: [String: AnyCodableValue] = [:]
+        values["launchAtLogin"] = .bool(launchAtLogin)
+        values["showStatusBarIcon"] = .bool(showStatusBarIcon)
+        values["statusBarIcon"] = .string(statusBarIcon)
         values["permissionEnabled"] = .bool(permissionEnabled)
         values["questionEnabled"] = .bool(questionEnabled)
         values["turnNotifyEnabled"] = .bool(turnNotifyEnabled)
@@ -441,20 +461,24 @@ final class Settings: ObservableObject {
     /// 把所有字段重置为默认值，随后广播变更并落盘。
     /// 这是整页恢复；分组按钮走 `reset(group:)`，不要从那里调到这里。
     func resetAll() {
+        launchAtLogin = false
+        showStatusBarIcon = true
+        statusBarIcon = "notch"
+        LoginItem.setEnabled(false)
         permissionEnabled = true; questionEnabled = true; turnNotifyEnabled = true
         turnNotifyJump = true; permissionNoticeJump = true
-        cardWidth = 540; cardMinHeight = 0; cardInset = 32; bodyFont = 12
+        cardWidth = 540; cardMinHeight = 0; cardInset = 30; bodyFont = 12
         optionFont = 12; descFont = 10.5; optionRowMin = 30
         bubbleWidth = 44; bubbleHeight = 26; bubbleFollowsNotch = true
         bubbleWidthPadding = 0; bubbleHeightPadding = 0
-        notifyWidth = 380; cardFollowsNotch = true; notifyHeight = 106; notchTopPadding = -3
+        notifyWidth = 380; cardFollowsNotch = true; notifyHeight = 106; notchTopPadding = 0
         bubbleHorizontalOffset = 0; cardHorizontalOffset = 0
         backgroundColor = "0.05,0.05,0.07"; backgroundAlpha = 0.96
         accentColor = "0.5679,0.03151,1"; qoderTint = "0.58,0.45,0.82"; opencodeTint = "0.06,0.73,0.51"
         cursorTint = "0.00,0.55,0.75"; workbuddyTint = "0.85,0.55,0.20"
-        radiusExpanded = 22; radiusBubble = 13
-        glassStyle = "clear"; glassCorner = 28; glassTint = "1,1,1"; glassTintAmount = 0
-        glassInteractive = true; glassWash = 0.50; glassWashFalloff = 36; glassRim = 0
+        radiusExpanded = 34; radiusBubble = 13
+        glassStyle = "clear"; glassCorner = 32; glassTint = "1,1,1"; glassTintAmount = 0
+        glassInteractive = true; glassWash = 0.38; glassWashFalloff = 49; glassRim = 12
         glassDistort = 0; glassControlStyle = "clear"
         cardShadowColor = "0,0,0"; cardShadowOpacity = 0.5; cardShadowRadius = 16
         cardShadowOffsetX = 0; cardShadowOffsetY = -14

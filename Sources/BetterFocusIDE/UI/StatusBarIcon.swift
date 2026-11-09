@@ -18,8 +18,33 @@ enum StatusBarIcon {
 
     /// 生成状态栏图标。
     ///
+    /// - Parameter style: `notch` 用自绘刘海；其余取同名 SF Symbol。认不出时回退刘海。
     /// - Parameter size: 画布边长（pt）。菜单栏惯用 18pt。
-    static func make(size: CGFloat = 18) -> NSImage {
+    static func make(style: String = "notch", size: CGFloat = 18) -> NSImage {
+        if style != "notch", let symbol = symbol(style, size: size) {
+            return symbol
+        }
+        return notch(size: size)
+    }
+
+    /// 菜单栏用的模板符号。点尺寸略小于画布，避免贴边被裁。
+    private static func symbol(_ name: String, size: CGFloat) -> NSImage? {
+        let symbolName: String
+        switch name {
+        case "bell": symbolName = "bell"
+        case "sparkle": symbolName = "sparkle"
+        case "circle": symbolName = "circle.fill"
+        default: return nil
+        }
+        let config = NSImage.SymbolConfiguration(pointSize: size * 0.78, weight: .regular)
+        guard let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "BetterFocusIDE")?
+            .withSymbolConfiguration(config) else { return nil }
+        image.isTemplate = true
+        return image
+    }
+
+    /// 自绘刘海 + 便签。
+    private static func notch(size: CGFloat) -> NSImage {
         let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
             NSColor.black.setStroke()
             NSColor.black.setFill()

@@ -112,39 +112,34 @@ final class SettingsTests: XCTestCase {
     
     /// 测试：SettingCatalog.byKey 能正确查找设置定义。
     ///
-    /// 字号已改为视图内硬编码（见 `NotchAgentQuestionView`），因此改用仍可配置的
-    /// `cardInset` 验证查找逻辑。
+    /// 尺寸页已从面板拿掉，改用仍留在目录里的背景不透明度。
     func testSettingCatalogByKey() {
-        let cardInsetDef = SettingCatalog.byKey("cardInset")
-        XCTAssertNotNil(cardInsetDef, "Should find cardInset definition")
-        XCTAssertEqual(cardInsetDef?.key, "cardInset")
-        XCTAssertEqual(cardInsetDef?.label, "卡片内边距")
+        let def = SettingCatalog.byKey("backgroundAlpha")
+        XCTAssertNotNil(def, "Should find backgroundAlpha definition")
+        XCTAssertEqual(def?.key, "backgroundAlpha")
+        XCTAssertEqual(def?.label, "背景不透明度")
     }
     
     /// 测试：SettingCatalog 的 get/set 闭包能正确读写 Settings。
     func testSettingCatalogGetSet() {
-        guard let cardInsetDef = SettingCatalog.byKey("cardInset") else {
-            XCTFail("cardInset definition not found")
+        guard let def = SettingCatalog.byKey("backgroundAlpha") else {
+            XCTFail("backgroundAlpha definition not found")
             return
         }
         
-        let originalValue = Settings.shared.cardInset
+        let originalValue = Settings.shared.backgroundAlpha
         
-        // 通过 catalog 的 set 闭包修改
-        cardInsetDef.set(.double(originalValue + 2))
+        def.set(.double(originalValue + 0.01))
         
-        // 验证 Settings 已更新
-        XCTAssertEqual(Settings.shared.cardInset, originalValue + 2, "Settings should be updated via catalog")
+        XCTAssertEqual(Settings.shared.backgroundAlpha, originalValue + 0.01, "Settings should be updated via catalog")
         
-        // 通过 catalog 的 get 闭包读取
-        if case .double(let value) = cardInsetDef.get() {
-            XCTAssertEqual(value, originalValue + 2, "Catalog get should return updated value")
+        if case .double(let value) = def.get() {
+            XCTAssertEqual(value, originalValue + 0.01, "Catalog get should return updated value")
         } else {
             XCTFail("Expected double value")
         }
         
-        // 恢复原值
-        cardInsetDef.set(.double(originalValue))
+        def.set(.double(originalValue))
     }
     
     // MARK: - 持久化测试

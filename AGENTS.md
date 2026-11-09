@@ -2,11 +2,11 @@
 
 ## 项目概述
 
-BetterFocusIDE 是一款 macOS 14+ 的附属应用（accessory app，LSUIElement，无 Dock 图标），把 MacBook 的刘海变成面向 AI 编码智能体的"灵动岛"通知助手。它通过 Unix 域套接字接收来自 **Qoder**（Python hook）、**OpenCode**（JavaScript 插件）、**Cursor**（`~/.cursor/hooks.json`）和 **WorkBuddy**（`~/.workbuddy/settings.json`）的事件，在刘海区域展示可交互卡片（提问、权限请求、回合完成通知），并把用户的回答回传给发起请求的智能体。
+BetterFocusIDE 是一款 macOS 15+ 的附属应用（accessory app，LSUIElement，无 Dock 图标），把 MacBook 的刘海变成面向 AI 编码智能体的"灵动岛"通知助手。它通过 Unix 域套接字接收来自 **Qoder**（Python hook）、**OpenCode**（JavaScript 插件）、**Cursor**（`~/.cursor/hooks.json`）和 **WorkBuddy**（`~/.workbuddy/settings.json`）的事件，在刘海区域展示可交互卡片（提问、权限请求、回合完成通知），并把用户的回答回传给发起请求的智能体。
 
 - **许可证**：GPL-3.0-or-later
 - **来源**：由 Python 项目 `dynamic-Island-python-validate` 迁移为 Swift（动画 / UI 参考 Vorssaint 的实现）
-- **运行要求**：macOS 14+，Apple Silicon（`arm64`）
+- **运行要求**：macOS 15+，Apple Silicon（`arm64`）。同一只发行包在 macOS 26 及以上用液态玻璃，在 macOS 15 用卡片磨砂。
 - **技术栈**：Swift 5.9，SwiftPM 库 + 可执行目标，AppKit 窗口外壳 + SwiftUI 内容
 
 ## 构建与运行
@@ -30,6 +30,28 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gateke
 **没有 Xcode 工程** —— 这是一个纯 SwiftPM 库 + 可执行目标。不要生成 `.xcodeproj` 或 `.xcworkspace`。Xcode 可直接打开 `Package.swift`，SwiftUI Preview 在库目标（`BetterFocusIDE`）下可用。
 
 **改完代码必须重新编译并重启。** 源码、资源、脚本模板或构建脚本有变更时，先 `./build.sh`，再 `pkill -f BetterFocusIDEApp; sleep 1; open .build/debug/BetterFocusIDE.app`。只改文档不必重启。编译失败先修好，不要启动旧包。旧实例占着 socket 时，直接 `open` 会静默退出，看起来像改动没生效。
+
+## 打包 DMG
+
+发行物是 `dist/BetterFocusIDE-<版本>.dmg`（当前 `dist/BetterFocusIDE-0.1.0.dmg`）。先 `./build.sh`，再拿 `.build/debug/BetterFocusIDE.app` 打可写镜像，最后压成 UDZO。包内是这个 app，外加一个指向 `/Applications` 的符号链接。`LSMinimumSystemVersion` 与二进制 `minos` 都是 15.0。液态玻璃符号（`NSGlassEffectView`、`glassEffect`）必须是弱链接，macOS 15 上找不到它们时走磨砂，不能因此拒绝启动。
+
+打包时按这个顺序，少一步图标就会丢：
+
+1. 若 `/Volumes/BetterFocusIDE` 已经挂着，先推出。挂载必须指定独立的 `-mountpoint`。机器上常有别的镜像，按 `diskN` 卸盘会卸错，写进去的图标也不会进最终文件。
+2. `hdiutil create -format UDRW`，卷名 `BetterFocusIDE`。拷入已通过 `codesign --verify --deep --strict` 的 app，并放上 `/Applications` 符号链接。
+3. 卷图标：把 `Resources/AppIcon-NotchCard.icns` 拷成挂载点上的 `.VolumeIcon.icns`，`SetFile -a V` 把它藏起来，`SetFile -a C` 给卷打上自定义图标。只写 `com.apple.FinderInfo` 这个 xattr，推出后会丢。推出后要只读再挂一次，确认 `.VolumeIcon.icns` 还在，再 `hdiutil convert -format UDZO`。
+4. 文件图标：`convert` 会换成一个新的 dmg 文件，之前贴在文件上的图标一起没了。转换完成后再用 `NSWorkspace.shared.setIcon` 把同一枚 icns 贴到 dmg 上（Finder 自定义图标位 + ResourceFork）。访达若仍显示旧的白磁盘，离开该文件夹再进去。
+
+打开 dmg 时，系统会尝试把里面唯一的 app 自动装进「应用程序」。本包是 ad-hoc 签名、没有公证，自动安装会失败，正文是「没有更改任何内容。你仍可将 App 拖到“应用程序”中。」镜像本身是好的，把 `BetterFocusIDE.app` 拖到窗口里的「应用程序」即可。Developer ID 签名并公证之后，这条自动安装才会走通。
+
+签名必须是不带加固运行时的 ad-hoc（`codesign --sign -`，先资源包再外层，不用 `--deep`）。不要加 `--options runtime`，也不要把 `com.apple.security.automation.apple-events` 签进包里。加固运行时加上这项受限权利后，签名只在编译这台 Mac 上有效。别人那边安装能成功，一点开就是「应用程序无法打开」，右键打开也绕不过。改掉之后重新发 `dist/BetterFocusIDE-0.1.0.dmg`，不要把旧包再传一次。不加固运行时，自动化授权仍会弹出，Apple Events 可以继续用。
+
+发给别人之后还有两句系统文案，不要混成同一件事：
+
+- 「应用程序无法打开」：包还是带加固运行时的那一只。换新包。
+- 「无法验证开发者」：签名已经能带走，但没有公证。在「应用程序」里右键该 app，选「打开」。
+
+这只包只有 `arm64`。Intel 的 Mac 即使用新包、清掉隔离属性，也打不开。
 
 ## 目录结构
 

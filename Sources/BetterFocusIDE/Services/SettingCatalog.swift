@@ -109,15 +109,14 @@ private let hapticOn: () -> Bool = { Settings.shared.hapticOnArrive || Settings.
 
 /// 完整设置目录，顺序与 Python 参考实现严格一致，使面板的分组 / 小节 / 行一一对应。
 enum SettingCatalog {
-    static let groups = ["提醒", "尺寸", "外观", "液态玻璃", "投影", "动画", "声音与触感", "行为", "超时与排队"]
+    static let groups = ["通用", "提醒", "外观", "液态玻璃", "动画", "声音与触感", "行为", "超时与排队"]
 
     /// 每个分组的一句话说明（面板顶部展示）。
     static let groupHints: [String: String] = [
+        "通用": "登录与平时怎么跟着这台 Mac",
         "提醒": "总开关：关掉即把请求交回 IDE 自己的弹窗与提问框",
-        "尺寸": "卡片的宽、高与内容区内边距",
         "外观": "颜色、圆角与淡入层次",
         "液态玻璃": "岛面和控件的液态玻璃。只在 macOS 26 及以上生效，拖动后卡片立即更新",
-        "投影": "展开卡片外圈的淡影。收起的气泡不投影",
         "动画": "展开 / 收起的节奏与悬停手感",
         "声音与触感": "提示音与触控板震动",
         "行为": "卡片上屏后的固定、防误触与让位",
@@ -127,14 +126,40 @@ enum SettingCatalog {
     /// 每个分组的 SF Symbol 图标名。
     /// 末尾的「调试」不是设置分组（见 `SettingsView.debugPage`），仅在此登记图标。
     static let groupSymbols: [String: String] = [
-        "提醒": "bell", "尺寸": "ruler", "外观": "paintpalette", "液态玻璃": "drop.fill",
-        "投影": "square.2.layers.3d", "动画": "sparkles",
+        "通用": "gearshape", "提醒": "bell", "外观": "paintpalette", "液态玻璃": "drop.fill",
+        "动画": "sparkles",
         "声音与触感": "speaker.wave.2", "行为": "hand.tap", "超时与排队": "clock",
         "调试": "ladybug",
     ]
 
     /// 所有设置项的定义列表（声明式；面板据此渲染，不硬编码 UI 行）。
     static let all: [SettingDefinition] = [
+        // ---------------- 通用 ----------------
+        SettingDefinition(key: "launchAtLogin", label: "开机自启动", kind: .toggle, group: "通用",
+            note: "登录这台 Mac 后自动打开。若系统弹出确认，到「系统设置 → 通用 → 登录项与扩展」里允许",
+            keywords: ["开机", "自启动", "登录", "login", "launch"],
+            defaultValue: .bool(false),
+            get: { .bool(Settings.shared.launchAtLogin) },
+            set: { if case .bool(let v) = $0 {
+                if LoginItem.setEnabled(v) {
+                    Settings.shared.launchAtLogin = v
+                } else {
+                    Settings.shared.launchAtLogin = LoginItem.isEnabled
+                }
+                Settings.shared.markChanged()
+            } }),
+        SettingDefinition(key: "showStatusBarIcon", label: "显示状态栏图标", kind: .toggle, group: "通用",
+            note: "关掉后菜单栏不再显示图标。设置仍可在灵动岛上右键打开",
+            keywords: ["状态栏", "菜单栏", "图标", "显示", "status"],
+            defaultValue: .bool(true), get: getB(\.showStatusBarIcon), set: setB(\.showStatusBarIcon)),
+        SettingDefinition(key: "statusBarIcon", label: "状态栏图标", kind: .choice, group: "通用",
+            choices: Settings.statusBarIconChoices,
+            note: "菜单栏里显示哪一枚。关掉上面的开关后这项不生效",
+            enabledBy: ["showStatusBarIcon"],
+            enabledWhen: { Settings.shared.showStatusBarIcon },
+            keywords: ["状态栏", "菜单栏", "图标", "样式", "icon"],
+            defaultValue: .string("notch"), get: getS(\.statusBarIcon), set: setS(\.statusBarIcon)),
+
         // ---------------- 提醒 ----------------
         SettingDefinition(key: "permissionEnabled", label: "权限申请提醒", kind: .toggle, group: "提醒",
             note: "Qoder / Cursor / WorkBuddy：只弹提醒，审批看宿主自己的弹窗（岛不代拍板）；OpenCode：仍可在岛上直接审批。关掉后都不弹",
@@ -159,55 +184,6 @@ enum SettingCatalog {
             keywords: ["跳转", "权限", "审批", "jump", "activate"],
             defaultValue: .bool(true), get: getB(\.permissionNoticeJump), set: setB(\.permissionNoticeJump)),
 
-        // ---------------- 尺寸 ----------------
-        SettingDefinition(key: "cardFollowsNotch", label: "卡片宽度跟随刘海", kind: .toggle, group: "尺寸",
-            note: "开启时卡片宽按黄金分割自适应：刘海宽 × 1.5 ÷ 0.618（卡片:刘海 = 1.5:0.618），换机型自动跟随；关闭后用下方手动宽度。无刘海屏恒用手动值",
-            keywords: ["卡片", "刘海", "跟随", "黄金分割", "自适应", "notch", "card", "宽度"],
-            defaultValue: .bool(true), get: getB(\.cardFollowsNotch), set: setB(\.cardFollowsNotch)),
-        SettingDefinition(key: "notifyWidth", label: "卡片宽度", kind: .slider, group: "尺寸",
-            min: 260, max: 520, step: 10, unit: "pt", digits: 0,
-            note: "所有卡片（提问、权限、通知、历史）的统一宽度",
-            enabledBy: ["cardFollowsNotch"], enabledWhen: { !Settings.shared.cardFollowsNotch },
-            defaultValue: .double(380), get: getD(\.notifyWidth), set: setD(\.notifyWidth)),
-        SettingDefinition(key: "notifyHeight", label: "卡片高度", kind: .slider, group: "尺寸",
-            min: 56, max: 180, step: 2, unit: "pt", digits: 0,
-            note: "通知横幅与历史面板的高度",
-            defaultValue: .double(106), get: getD(\.notifyHeight), set: setD(\.notifyHeight)),
-        SettingDefinition(key: "cardInset", label: "卡片内边距", kind: .slider, group: "尺寸",
-            min: 8, max: 40, step: 1, unit: "pt", digits: 0,
-            note: "卡片内容到边缘的水平距离",
-            defaultValue: .double(32), get: getD(\.cardInset), set: setD(\.cardInset)),
-        SettingDefinition(key: "notchTopPadding", label: "刘海顶部间距", kind: .slider, group: "尺寸",
-            min: -20, max: 20, step: 1, unit: "pt", digits: 0,
-            note: "刘海屏下卡片内容到摄像头区域的额外间距，负值 = 侵入刘海区域",
-            defaultValue: .double(-3), get: getD(\.notchTopPadding), set: setD(\.notchTopPadding)),
-        SettingDefinition(key: "bubbleHorizontalOffset", label: "气泡水平偏移", kind: .slider, group: "尺寸",
-            min: -300, max: 300, step: 5, unit: "pt", digits: 0,
-            note: "收起态气泡相对物理刘海的水平位置。0 与刘海居中重叠，正值向右，负值向左",
-            keywords: ["气泡", "bubble", "水平", "偏移", "位置", "offset", "horizontal"],
-            defaultValue: .double(0), get: getD(\.bubbleHorizontalOffset), set: setD(\.bubbleHorizontalOffset)),
-        SettingDefinition(key: "cardHorizontalOffset", label: "卡片水平偏移", kind: .slider, group: "尺寸",
-            min: -300, max: 300, step: 5, unit: "pt", digits: 0,
-            note: "展开态卡片的水平位置，正值向右移动，负值向左移动，0 = 居中。通常保持 0 使卡片居中",
-            keywords: ["卡片", "card", "水平", "偏移", "位置", "offset", "horizontal"],
-            defaultValue: .double(0), get: getD(\.cardHorizontalOffset), set: setD(\.cardHorizontalOffset)),
-        SettingDefinition(key: "bubbleFollowsNotch", label: "气泡跟随刘海尺寸", kind: .toggle, group: "尺寸",
-            note: "开启时收起态气泡自动贴合本机物理刘海（宽×高），换机型自适应；关闭后用下方手动宽高。无刘海屏恒用手动值",
-            keywords: ["气泡", "刘海", "跟随", "自适应", "notch", "bubble", "尺寸"],
-            defaultValue: .bool(true), get: getB(\.bubbleFollowsNotch), set: setB(\.bubbleFollowsNotch)),
-        SettingDefinition(key: "bubbleWidth", label: "气泡宽度", kind: .slider, group: "尺寸",
-            min: 30, max: 240, step: 2, unit: "pt", digits: 0,
-            note: "收起态气泡的宽度，影响呼吸灯辉光显示范围",
-            enabledBy: ["bubbleFollowsNotch"], enabledWhen: { !Settings.shared.bubbleFollowsNotch },
-            keywords: ["气泡", "bubble", "宽度", "width", "辉光"],
-            defaultValue: .double(44), get: getD(\.bubbleWidth), set: setD(\.bubbleWidth)),
-        SettingDefinition(key: "bubbleHeight", label: "气泡高度", kind: .slider, group: "尺寸",
-            min: 20, max: 80, step: 2, unit: "pt", digits: 0,
-            note: "收起态气泡的高度，影响呼吸灯辉光显示范围",
-            enabledBy: ["bubbleFollowsNotch"], enabledWhen: { !Settings.shared.bubbleFollowsNotch },
-            keywords: ["气泡", "bubble", "高度", "height", "辉光"],
-            defaultValue: .double(26), get: getD(\.bubbleHeight), set: setD(\.bubbleHeight)),
-
         // ---------------- 外观 ----------------
         SettingDefinition(key: "backgroundColor", label: "卡片背景色", kind: .color, group: "外观",
             note: "只改色相，不透明度用下面那一项",
@@ -228,7 +204,7 @@ enum SettingCatalog {
             defaultValue: .rgb(0.85, 0.55, 0.20), get: getRGB(\.workbuddyTint), set: setRGB(\.workbuddyTint)),
         SettingDefinition(key: "radiusExpanded", label: "卡片圆角", kind: .slider, group: "外观",
             min: 8, max: 34, step: 1, unit: "pt", digits: 0,
-            defaultValue: .double(22), get: getD(\.radiusExpanded), set: setD(\.radiusExpanded)),
+            defaultValue: .double(34), get: getD(\.radiusExpanded), set: setD(\.radiusExpanded)),
         SettingDefinition(key: "radiusBubble", label: "气泡圆角", kind: .slider, group: "外观",
             min: 6, max: 22, step: 1, unit: "pt", digits: 0,
             defaultValue: .double(13), get: getD(\.radiusBubble), set: setD(\.radiusBubble)),
@@ -266,7 +242,7 @@ enum SettingCatalog {
             min: 0, max: 64, step: 1, unit: "pt", digits: 0,
             note: "玻璃透镜的曲率。0 时棱边几乎不弯光",
             keywords: ["圆角", "corner", "透镜"],
-            defaultValue: .double(28), get: getD(\.glassCorner), set: setD(\.glassCorner)),
+            defaultValue: .double(32), get: getD(\.glassCorner), set: setD(\.glassCorner)),
         SettingDefinition(key: "glassTint", label: "染色", kind: .color, group: "液态玻璃",
             note: "配合下面的浓度。浓度为 0 时这颜色不参与",
             defaultValue: .rgb(1, 1, 1), get: getRGB(\.glassTint), set: setRGB(\.glassTint)),
@@ -280,42 +256,20 @@ enum SettingCatalog {
             min: 0, max: 1, step: 0.01, digits: 2,
             note: "文字区有多黑。0 完全透出背后，1 接近实心",
             keywords: ["洗色", "暗", "对比"],
-            defaultValue: .double(0.50), get: getD(\.glassWash), set: setD(\.glassWash)),
+            defaultValue: .double(0.38), get: getD(\.glassWash), set: setD(\.glassWash)),
         SettingDefinition(key: "glassWashFalloff", label: "暗部羽化", kind: .slider, group: "液态玻璃",
             min: 4, max: 80, step: 1, unit: "pt", digits: 0,
             note: "中心暗色淡到玻璃边缘的宽度，越大越没有分界",
-            defaultValue: .double(36), get: getD(\.glassWashFalloff), set: setD(\.glassWashFalloff)),
+            defaultValue: .double(49), get: getD(\.glassWashFalloff), set: setD(\.glassWashFalloff)),
         SettingDefinition(key: "glassRim", label: "外缘扩展", kind: .slider, group: "液态玻璃",
             min: 0, max: 32, step: 1, unit: "pt", digits: 0,
             note: "向左右和下方撑开的宽度。遮罩跟着变大，不会大于 0 就变成同一块矩形",
             keywords: ["外缘", "rim", "折射"],
-            defaultValue: .double(0), get: getD(\.glassRim), set: setD(\.glassRim)),
+            defaultValue: .double(12), get: getD(\.glassRim), set: setD(\.glassRim)),
         SettingDefinition(key: "glassControlStyle", label: "控件样式", kind: .choice, group: "液态玻璃",
             choices: Settings.glassStyleChoices,
             note: "选项行、按钮、图钉各自的玻璃",
             defaultValue: .string("clear"), get: getS(\.glassControlStyle), set: setS(\.glassControlStyle)),
-
-        // ---------------- 投影 ----------------
-        SettingDefinition(key: "cardShadowColor", label: "投影颜色", kind: .color, group: "投影",
-            note: "只作用于展开的卡片。收起的气泡不投影",
-            keywords: ["阴影", "shadow"],
-            defaultValue: .rgb(0, 0, 0), get: getRGB(\.cardShadowColor), set: setRGB(\.cardShadowColor)),
-        SettingDefinition(key: "cardShadowOpacity", label: "投影不透明度", kind: .slider, group: "投影",
-            min: 0, max: 1, step: 0.01, digits: 2,
-            note: "0 关掉那圈淡黑边",
-            defaultValue: .double(0.5), get: getD(\.cardShadowOpacity), set: setD(\.cardShadowOpacity)),
-        SettingDefinition(key: "cardShadowRadius", label: "投影模糊", kind: .slider, group: "投影",
-            min: 0, max: 64, step: 1, unit: "pt", digits: 0,
-            note: "越大越散，贴边的那圈越淡",
-            defaultValue: .double(16), get: getD(\.cardShadowRadius), set: setD(\.cardShadowRadius)),
-        SettingDefinition(key: "cardShadowOffsetX", label: "投影水平偏移", kind: .slider, group: "投影",
-            min: -48, max: 48, step: 1, unit: "pt", digits: 0,
-            note: "正值向右",
-            defaultValue: .double(0), get: getD(\.cardShadowOffsetX), set: setD(\.cardShadowOffsetX)),
-        SettingDefinition(key: "cardShadowOffsetY", label: "投影垂直偏移", kind: .slider, group: "投影",
-            min: -48, max: 48, step: 1, unit: "pt", digits: 0,
-            note: "正值向下。现在的 -14 是略微向上",
-            defaultValue: .double(-14), get: getD(\.cardShadowOffsetY), set: setD(\.cardShadowOffsetY)),
 
         // ---------------- 动画 ----------------
         SettingDefinition(key: "motionGrowBounce", label: "弹簧回弹（展开）", kind: .slider, group: "动画",

@@ -10,7 +10,7 @@ APP_NAME="BetterFocusIDE"
 EXECUTABLE="BetterFocusIDEApp"
 APP_BUNDLE_ID="com.betterfocus.ide"
 BUILD_CONFIGURATION="debug"
-TARGET="arm64-apple-macosx14.0"
+TARGET="arm64-apple-macosx15.0"
 ENTITLEMENTS="Resources/BetterFocusIDE.entitlements"
 
 # Clean previous build
@@ -61,9 +61,18 @@ if [ -n "$RESOURCE_BUNDLE" ]; then
     cp -R "$RESOURCE_BUNDLE" "$APP_DIR/Contents/Resources/"
 fi
 
-# Sign the app (ad-hoc with hardened runtime for more stable TCC permissions)
-echo "▸ Signing $APP_NAME.app (ad-hoc with hardened runtime)..."
-codesign --force --deep --sign - --options=runtime --entitlements "$ENTITLEMENTS" "$APP_DIR"
+# 本机临时签名（ad-hoc）。不要加 --options runtime，也不要把
+# com.apple.security.automation.apple-events 签进包里。
+# 加固运行时加上这项受限权利后，签名只在编译这台 Mac 上有效；
+# 拷到别的机器，系统直接拒绝启动，对话框是「应用程序无法打开」，右键打开也绕不过。
+# 不加固运行时的非沙盒应用仍会弹出自动化授权，Apple Events 可以继续用。
+# 先签资源包，再签外层。不要用 --deep，嵌套签名顺序反了会在别的机器上校验失败。
+echo "▸ Signing $APP_NAME.app (ad-hoc, no hardened runtime)..."
+NESTED_BUNDLE="$APP_DIR/Contents/Resources/$(basename "$RESOURCE_BUNDLE")"
+if [ -n "$RESOURCE_BUNDLE" ] && [ -d "$NESTED_BUNDLE" ]; then
+    codesign --force --sign - "$NESTED_BUNDLE"
+fi
+codesign --force --sign - "$APP_DIR"
 
 # Clear quarantine attribute to reduce permission prompts
 echo "▸ Clearing quarantine attribute..."
