@@ -156,6 +156,52 @@ final class NoticeController: ObservableObject {
         show(notice)
     }
 
+    /// WorkBuddy 提问：不接管作答，只留一张可点的通知，点一下跳回宿主。
+    func handleQuestionNotice(message: AgentSocketMessage) {
+        guard Settings.shared.questionEnabled || bypassGates else { return }
+        let sessionID = message.sessionID
+        let now = Date()
+        let debounceKey = sessionID + ":question"
+        if let last = lastNoticeAt[debounceKey],
+           now.timeIntervalSince(last) < Settings.shared.notifyBannerDuration * 0.4 {
+            return
+        }
+        let providerEnum = message.resolvedProvider
+        let host = HostInfo(from: message.host, cwd: message.cwd)
+        let name = AgentProvider.label(provider: providerEnum,
+                                       hostName: host.name,
+                                       bundleID: host.bundle)
+        let title = message.payload?["title"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = message.payload?["body"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let headline = (title?.isEmpty == false) ? title! : "需要你的回答"
+        let detail = (body?.isEmpty == false) ? body! : "请在 \(name) 里回答"
+        let project = host.cwd.isEmpty ? "" : (host.cwd as NSString).lastPathComponent
+        let notice = TurnNotice(
+            provider: providerEnum.rawValue,
+            providerName: name,
+            sessionID: sessionID,
+            title: headline,
+            body: detail,
+            bodyIsFallback: body?.isEmpty != false,
+            kind: .question,
+            project: project,
+            host: host.isEmpty ? nil : host,
+            arrivedAt: now,
+            jumpEnabled: true,
+            fromCLI: false
+        )
+        if lastNoticeAt.count > 32 { lastNoticeAt.removeAll() }
+        lastNoticeAt[debounceKey] = now
+        onRemember?(notice)
+        if hasActiveNotice || hasPendingCard() {
+            queue.append(notice)
+            return
+        }
+        show(notice)
+    }
+
     /// 失败、子任务、待审阅、上下文压缩。都是横幅，不拦截宿主。
     ///
     /// 跟着回合提醒开关走：关掉「回合完成」时，这几张状态卡也不响。

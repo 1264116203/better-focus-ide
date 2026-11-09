@@ -1217,6 +1217,9 @@ final class NotchService: ObservableObject {
             // 门控：question_enabled 关 → 忽略，请求回落到 IDE。
             guard Settings.shared.questionEnabled || debugBypassGates else { return }
             questionController.handleEvent(event, message: message)
+        case .questionNotice:
+            guard Settings.shared.questionEnabled || debugBypassGates else { return }
+            noticeController.handleQuestionNotice(message: message)
         case .questionAnswered, .questionTimeout:
             questionController.handleEvent(event, message: message)
         case .permissionRequested:
@@ -1384,11 +1387,13 @@ final class NotchService: ObservableObject {
             questionController.pick(.option(index), for: p.question.id)
         case .nav(let index):
             questionController.navigate(to: index)
+        case .moveOption(let delta):
+            questionController.moveSelection(by: delta)
         case .other:
             guard let p = questionController.prompt else { return }
             questionController.requestFocusOther(for: p.question.id)
         case .send:
-            questionController.submit()
+            questionController.confirmOrSubmit()
         case .decide(let decision):
             permissionController.decide(decision)
         case .collapse:

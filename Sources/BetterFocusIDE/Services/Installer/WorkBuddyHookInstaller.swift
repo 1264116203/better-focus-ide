@@ -11,7 +11,8 @@ import Foundation
 /// 灵动岛的提问与应答文件通道。
 ///
 /// 事件选择依据（WorkBuddy / CodeBuddy 官方 Hooks 文档）：
-/// - `PreToolUse` + `AskUserQuestion`：提问卡，阻塞式决策，可把岛上答案回灌给 Agent。
+/// - `PreToolUse` + `AskUserQuestion`：用户已在宿主里答完后才到。不再开提问卡，
+///   stdout 保持静默，避免答完后又弹第二次。
 /// - `Notification` + `permission_prompt`：官方推荐的权限提醒入口，纯观测、不返回决策。
 /// - `PermissionRequest`：新版 27+ 事件族中的权限事件，带 tool_name / tool_input，
 ///   信息更全；与 Notification 同时触发时由岛侧 `NoticeController` 去抖。

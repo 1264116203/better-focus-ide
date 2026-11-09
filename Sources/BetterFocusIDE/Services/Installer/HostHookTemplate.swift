@@ -11,7 +11,8 @@ import Foundation
 ///   `beforeSubmitPrompt` 回 `{"continue": true}`。
 /// - `claude`：Claude Code / WorkBuddy / Trae / Kimi 这一族，PascalCase。
 ///   Claude Code 与 Trae 的提问按官方格式回 `allow` + `updatedInput.answers`；
-///   WorkBuddy 与 Kimi 回 `deny` + `permissionDecisionReason`。权限只观测，
+///   Kimi 回 `deny` + `permissionDecisionReason`。WorkBuddy 的提问只发通知、
+///   不接管，PreToolUse 保持静默。权限只观测，
 ///   stdout 保持静默，让宿主原生对话框继续负责审批。
 /// - `copilot`：GitHub Copilot CLI。配置用 PascalCase，决策是顶层字段。
 ///   提问回 `allow` + `modifiedArgs`；其余 `allow` / `ask` 必须静默，
@@ -347,6 +348,35 @@ enum HostHookTemplate {
             msg["payload"] = {"questions": questions, "request_id": request_id,
                               "channel": "Notification"}
             send(msg)
+
+
+        def emit_question_notice(session_id, payload, questions):
+            # WorkBuddy 的提问不接管。宿主面板和这条通知同时出现，点通知跳回
+            # WorkBuddy 去答。PreToolUse 要等面板答完才来，再开一张提问卡就是
+            # 第二次弹出——同一份占位让后到的事件直接离开，不再发卡片。
+            if PROVIDER != "workbuddy":
+                return False
+            if not alerts_enabled("question") or not os.path.exists(SOCKET_PATH):
+                return True
+            signature = "q-" + "_".join(q.get("question", "")[:40] for q in questions)[:120]
+            if not claim(session_id, payload, "question", signature):
+                return True
+            first = questions[0] if questions else {}
+            title = " ".join(str(first.get("header") or "需要你的回答").split())[:80]
+            body = " ".join(str(first.get("question") or "").split())
+            if len(questions) > 1:
+                extra = "（共 %d 题）" % len(questions)
+                body = ((body + " " + extra) if body else extra)[:180]
+            if not body:
+                body = "请在 WorkBuddy 里回答"
+            msg = base_event("question_notice", session_id, payload)
+            msg["payload"] = {
+                "title": title,
+                "body": body[:180],
+                "transcript_path": transcript_path_of(payload),
+            }
+            send(msg)
+            return True
 
 
         def normalise(tool_input):
@@ -1697,7 +1727,8 @@ enum HostHookTemplate {
             if event == "Elicitation":
                 found = pending_question(payload) if alerts_enabled("question") else None
                 if found and os.path.exists(SOCKET_PATH):
-                    preview_question(session_id, payload, found[1], found[0])
+                    if not emit_question_notice(session_id, payload, found[1]):
+                        preview_question(session_id, payload, found[1], found[0])
                 else:
                     emit_status("review_notice", session_id, payload, "需要你的输入",
                                 str(payload.get("message") or ""))
@@ -1757,7 +1788,8 @@ enum HostHookTemplate {
                     if alerts_enabled("question") and os.path.exists(SOCKET_PATH):
                         found = pending_question(payload)
                     if found:
-                        preview_question(session_id, payload, found[1], found[0])
+                        if not emit_question_notice(session_id, payload, found[1]):
+                            preview_question(session_id, payload, found[1], found[0])
                     else:
                         emit_status("review_notice", session_id, payload,
                                     "需要你的输入", message)
@@ -1773,11 +1805,20 @@ enum HostHookTemplate {
                         and os.path.exists(SOCKET_PATH)):
                     found = pending_question(payload)
                     if found:
-                        preview_question(session_id, payload, found[1], found[0])
+                        if not emit_question_notice(session_id, payload, found[1]):
+                            preview_question(session_id, payload, found[1], found[0])
                         return
                     if kind == "ask_user_question":
                         return
             if looks_like_question(payload, tool_name):
+                # WorkBuddy：这条要等用户在 IDE 里答完才到。通知已经在
+                # Notification 那一次发出。再走 run_question 会再弹一张提问卡。
+                # 这里不回决策，宿主沿用刚提交的答案。
+                if PROVIDER == "workbuddy":
+                    questions = normalise(payload.get("tool_input") or {})
+                    if questions:
+                        emit_question_notice(session_id, payload, questions)
+                    return
                 if not alerts_enabled("question") or not os.path.exists(SOCKET_PATH):
                     release_question(event or "PreToolUse",
                                      "BetterFocusIDE question cards are off; ask in the host dialog.")
