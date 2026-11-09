@@ -62,6 +62,8 @@ struct AgentSocketMessage: Codable {
 /// Socket 协议中已识别的事件类型。
 enum SocketEvent: String {
     case questionRequested = "question_requested"
+    /// WorkBuddy 提问：只出可点跳转的通知，不接管作答。
+    case questionNotice = "question_notice"
     case questionAnswered = "question_answered"
     case questionTimeout = "question_timeout"
     case permissionRequested = "permission_requested"

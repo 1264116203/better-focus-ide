@@ -41,20 +41,23 @@ struct NotchView: View {
         }
         .modifier(IslandGlassClip())
         .foregroundStyle(.white)
-        // 表面点击：整层只用这一个手势，按落点区分。
-        // - 收起态：整块气泡都可点，走常规 toggle（恢复通知 / 展开待处理卡片 / 历史）。
-        // - 展开态：只有顶部气泡区域可收起；卡片内容区留给按钮和选项，
-        //   点选项间隙不会误关卡片。
-        .contentShape(Rectangle())
-        .onTapGesture(count: 1, coordinateSpace: .local) { location in
+        // 展开态不要在整张卡片上挂点击。祖先的 onTapGesture 会和「发送」等按钮抢同一次点击，
+        // 按钮看起来可点，动作却被这层手势吃掉；键盘不经过命中测试，所以 Enter 仍然有效。
+        // 收起只认气泡；展开时只有顶部那一块气泡负责收起。
+        .background {
+            if !(service.expanded || service.closingCard != nil) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { service.handleSurfaceTap() }
+            }
+        }
+        .overlay(alignment: .top) {
             if service.expanded || service.closingCard != nil {
-                let w = service.geometry.collapsed.width
-                let h = service.geometry.collapsed.height
-                let bubble = CGRect(x: (service.surfaceSize.width - w) / 2,
-                                    y: 0, width: w, height: h)
-                if bubble.contains(location) { service.collapse() }
-            } else {
-                service.handleSurfaceTap()
+                Color.clear
+                    .frame(width: service.geometry.collapsed.width,
+                           height: service.geometry.collapsed.height)
+                    .contentShape(Rectangle())
+                    .onTapGesture { service.collapse() }
             }
         }
         .environment(\.colorScheme, .dark)

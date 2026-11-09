@@ -18,6 +18,8 @@ final class QuestionController: ObservableObject {
     @Published var writingOwn: Set<String> = []
     /// 自增计数，通知 SwiftUI 卡片把焦点移入"其他…"输入框（Tab 键触发）。
     @Published private(set) var focusOtherTick = 0
+    /// 上下键当前落在的选项。单选时与勾选一致；多选只移动高亮，不逐项切换勾选。
+    @Published var keyboardFocus: Int?
 
     /// 待展示的提问队列。
     private var queue: [AgentQuestionPrompt] = []
@@ -99,12 +101,13 @@ final class QuestionController: ObservableObject {
         if let current = prompt, choice == nil,
            current.provider == newPrompt.provider,
            current.sessionID == newPrompt.sessionID {
-            prompt = newPrompt
-            picks = [:]
-            texts = [:]
-            writingOwn = []
-            onPresent?()
-            return
+        prompt = newPrompt
+        picks = [:]
+        texts = [:]
+        writingOwn = []
+        keyboardFocus = nil
+        onPresent?()
+        return
         }
         // 已在展示：入队，超限时丢最旧的（question_queue_limit），保证最新请求不丢。
         if prompt != nil || !queue.isEmpty {
@@ -117,6 +120,7 @@ final class QuestionController: ObservableObject {
         picks = [:]
         texts = [:]
         writingOwn = []
+        keyboardFocus = nil
         onPresent?()
     }
 
@@ -158,6 +162,7 @@ final class QuestionController: ObservableObject {
             picks = [:]
             texts = [:]
             writingOwn = []
+            keyboardFocus = nil
         }
     }
 
@@ -168,6 +173,7 @@ final class QuestionController: ObservableObject {
         picks = [:]
         texts = [:]
         writingOwn = []
+        keyboardFocus = nil
         onDismiss?()
         promoteNext()
     }
@@ -180,6 +186,7 @@ final class QuestionController: ObservableObject {
         picks = [:]
         texts = [:]
         writingOwn = []
+        keyboardFocus = nil
         onPresent?()
     }
 
@@ -190,16 +197,18 @@ final class QuestionController: ObservableObject {
         guard var p = prompt else { return }
         p.index = max(0, min(index, p.questions.count - 1))
         prompt = p
+        keyboardFocus = selectedIndex(for: p.question)
     }
 
-    /// 勾选某个答案。多选走切换语义，单选记录后尝试自动翻页。
-    func pick(_ answer: AgentQuestionAnswer, for questionID: String) {
+    /// 勾选某个答案。多选走切换语义。单选在 `advance` 为真时（鼠标、数字键）才自动翻页。
+    func pick(_ answer: AgentQuestionAnswer, for questionID: String, advance: Bool = true) {
         guard prompt != nil else { return }
         if let current = prompt, current.question.multiSelect {
             // 多选：切换该下标的选中状态
             var indices = Set(picks[questionID]?.answerIndices ?? [])
             switch answer {
             case .option(let idx):
+                keyboardFocus = idx
                 if indices.contains(idx) { indices.remove(idx) }
                 else { indices.insert(idx) }
                 picks[questionID] = indices.isEmpty ? nil : .options(Array(indices))
@@ -207,8 +216,64 @@ final class QuestionController: ObservableObject {
             }
         } else {
             picks[questionID] = answer
-            // 单选：自动前进到下一问
-            advanceIfNeeded()
+            if case .option(let idx) = answer {
+                keyboardFocus = idx
+                writingOwn.remove(questionID)
+            }
+            if advance { advanceIfNeeded() }
+        }
+    }
+
+    /// 上下键改当前题的选中项，不翻页。没有选中时，向下从第一项开始，向上从最后一项开始。
+    func moveSelection(by delta: Int) {
+        guard let p = prompt, choice == nil, delta != 0 else { return }
+        let question = p.question
+        let count = question.options.count
+        guard count > 0 else { return }
+        let current: Int
+        if let focus = keyboardFocus, (0..<count).contains(focus) {
+            current = focus
+        } else if case .option(let idx) = picks[question.id], (0..<count).contains(idx) {
+            current = idx
+        } else if case .options(let indices) = picks[question.id],
+                  let idx = indices.filter({ (0..<count).contains($0) }).min() {
+            current = idx
+        } else {
+            current = delta > 0 ? -1 : count
+        }
+        let next = min(max(current + delta, 0), count - 1)
+        keyboardFocus = next
+        // 多选只移动高亮。勾选仍由点击或数字键切换，避免按一次方向键就把路过的项都勾上。
+        guard !question.multiSelect else { return }
+        if case .option(let idx) = picks[question.id], idx == next { return }
+        pick(.option(next), for: question.id, advance: false)
+    }
+
+    private func selectedIndex(for question: AgentQuestion) -> Int? {
+        switch picks[question.id] {
+        case .option(let idx): return idx
+        case .options(let indices): return indices.min()
+        default: return nil
+        }
+    }
+
+    /// Enter：当前题已作答时进入下一题；已经是最后一题且全部作答完，则提交。
+    func confirmOrSubmit() {
+        guard let p = prompt, choice == nil else { return }
+        guard isAnswered(p.question) else { return }
+        if p.index + 1 < p.questions.count {
+            navigate(to: p.index + 1)
+        } else {
+            submit()
+        }
+    }
+
+    private func isAnswered(_ question: AgentQuestion) -> Bool {
+        switch picks[question.id] {
+        case .option: return true
+        case .options(let indices): return !indices.isEmpty
+        case .custom(let text): return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case nil: return false
         }
     }
 

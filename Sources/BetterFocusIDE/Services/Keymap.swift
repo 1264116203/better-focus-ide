@@ -21,6 +21,8 @@ enum Keymap {
     enum Action: Equatable {
         case option(Int)
         case nav(Int)
+        /// 上下键移动当前题的选中项，不翻页。正数向下。
+        case moveOption(Int)
         case other
         case send
         case decide(PermissionDecisionValue)
@@ -58,15 +60,19 @@ enum Keymap {
     static let tabKey = "tab"
     static let leftKey = "left"
     static let rightKey = "right"
+    static let upKey = "up"
+    static let downKey = "down"
 
     // 与键盘布局无关的 macOS keyCode 映射。
     private static let keyCodeNames: [UInt16: String] = [
-        53: escape, 36: returnKey, 76: returnKey, 48: tabKey, 123: leftKey, 124: rightKey,
+        53: escape, 36: returnKey, 76: returnKey, 48: tabKey,
+        123: leftKey, 124: rightKey, 126: upKey, 125: downKey,
     ]
     // 字符到具名键的映射（控制字符形态）。
     private static let charNames: [String: String] = [
         "\u{1b}": escape, "\r": returnKey, "\u{03}": returnKey, "\n": returnKey,
         "\t": tabKey, "\u{F702}": leftKey, "\u{F703}": rightKey,
+        "\u{F700}": upKey, "\u{F701}": downKey,
     ]
     // 数字键 keyCode：输入法可能改写 `characters`，故回退到 keyCode。
     private static let digitCodes: [UInt16: String] = [
@@ -146,7 +152,7 @@ enum Keymap {
         }
     }
 
-    /// 问题卡片的按键解析：数字选项、左右翻页、回车发送、tab 进入"其他…"。
+    /// 问题卡片的按键解析：数字选项、上下移动选中项、左右翻页、回车下一题或提交、tab 进入"其他…"。
     private static func questionAction(_ key: String, _ ctx: Context) -> Action? {
         if ctx.answered { return nil } // 已应答：只等收起，不能再改答案
         if key.count == 1, let digit = key.first, digit.isNumber, digit != "0",
@@ -157,6 +163,8 @@ enum Keymap {
         switch key {
         case leftKey: return ctx.index > 0 ? .nav(ctx.index - 1) : nil
         case rightKey: return ctx.index + 1 < ctx.questionCount ? .nav(ctx.index + 1) : nil
+        case upKey: return .moveOption(-1)
+        case downKey: return .moveOption(1)
         case returnKey: return .send
         case tabKey: return .other
         default: return nil

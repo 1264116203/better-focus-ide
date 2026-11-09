@@ -144,6 +144,7 @@ struct NotchAgentQuestionView: View {
     /// 单个选项行：勾选符号 + 标签 + 可选描述；选中时用提供方主题色高亮底。
     private func optionRow(index: Int, option: AgentQuestionOption, question: AgentQuestion) -> some View {
         let picked = isSelected(index, question: question)
+        let focused = controller.keyboardFocus == index
         return Button {
             controller.pick(.option(index), for: question.id)
         } label: {
@@ -177,6 +178,12 @@ struct NotchAgentQuestionView: View {
                             ? (prompt?.provider.tint ?? .blue).opacity(0.22)
                             : Color.white.opacity(0.06))
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                if focused && !picked {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(.white.opacity(0.45), lineWidth: 1)
+                }
+            }
         }
         .buttonStyle(.plain)
         .disabled(controller.choice != nil)
@@ -208,7 +215,7 @@ struct NotchAgentQuestionView: View {
                     .font(.system(size: optionFontSize))
                     .foregroundStyle(.white.opacity(0.95))
                     .focused($otherFocused)
-                    .onSubmit { controller.submit() }
+                    .onSubmit { controller.confirmOrSubmit() }
                     .disabled(controller.choice != nil)
                     .onChange(of: controller.focusOtherTick) {
                         otherFocused = true
@@ -251,9 +258,11 @@ struct NotchAgentQuestionView: View {
                 .foregroundStyle(controller.canSend ? .white : .white.opacity(0.4))
                 .frame(maxWidth: .infinity)
                 .frame(height: 26)
+                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                // 可点时不用交互玻璃。交互玻璃会把按下收成高光，按钮动作到不了。
                 .liquidGlass(.rounded(14), variant: .clear,
                              tint: controller.canSend ? prompt.provider.tint : nil,
-                             interactive: controller.canSend && controller.choice == nil,
+                             interactive: false,
                              fallback: controller.canSend
                                 ? prompt.provider.tint
                                 : Color.white.opacity(0.08))
