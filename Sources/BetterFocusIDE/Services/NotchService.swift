@@ -282,7 +282,7 @@ final class NotchService: ObservableObject {
     private func syncKeyFocus() {
         let cardShowing = expanded && (activeCard == .question || activeCard == .permission)
         windowHost?.panel.acceptsKeyFocus = cardShowing
-        if !cardShowing, let panel = windowHost?.panel, panel.isKeyWindow {
+        if !cardShowing, let panel = windowHost?.panel, panel.reallyIsKeyWindow() {
             panel.resignKey()
         }
     }
