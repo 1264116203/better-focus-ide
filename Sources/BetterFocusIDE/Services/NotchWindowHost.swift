@@ -24,8 +24,51 @@ final class NotchPanel: NSPanel {
     /// 是否允许成为 key 窗口（有交互卡片时才置 true）。
     var acceptsKeyFocus = false
 
+    /// 把鼠标事件送进视图的那一小段。这段时间对外假装已经是 key，
+    /// 否则非激活面板会把第一下点击吃掉用来“聚焦”，展开和收起都要点两次。
+    private var deliveringMouse = false
+
     override var canBecomeKey: Bool { acceptsKeyFocus }
     override var canBecomeMain: Bool { false }
+
+    override var isKeyWindow: Bool {
+        if deliveringMouse { return true }
+        return super.isKeyWindow
+    }
+
+    /// 没有被 `deliveringMouse` 伪装过的真实 key 状态。收起时要用它判断要不要 resign，
+    /// 避免一次点击把编辑器的焦点也清掉。
+    func reallyIsKeyWindow() -> Bool { super.isKeyWindow }
+
+    override func sendEvent(_ event: NSEvent) {
+        guard Self.deliversWhileInactive(event.type), !super.isKeyWindow else {
+            super.sendEvent(event)
+            return
+        }
+        // 提问 / 权限需要键盘，这一下顺便成为 key，快捷键才能用。
+        // 气泡展开收起不抢焦点：只在投递这一下时假装是 key。
+        if acceptsKeyFocus, event.type == .leftMouseDown || event.type == .rightMouseDown {
+            makeKey()
+        }
+        if super.isKeyWindow {
+            super.sendEvent(event)
+            return
+        }
+        deliveringMouse = true
+        super.sendEvent(event)
+        deliveringMouse = false
+    }
+
+    private static func deliversWhileInactive(_ type: NSEvent.EventType) -> Bool {
+        switch type {
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp,
+             .otherMouseDown, .otherMouseUp, .leftMouseDragged, .rightMouseDragged,
+             .otherMouseDragged:
+            return true
+        default:
+            return false
+        }
+    }
 
     @objc func _hasActiveAppearanceIgnoringKeyFocus() -> Bool { true }
 
@@ -39,6 +82,9 @@ final class NotchPanel: NSPanel {
 /// 自定义 `hitTest`：落在自身边界外的点返回 nil，让透明区域的点击穿透到下方窗口。
 final class NotchHostingView: NSHostingView<AnyView> {
     override var acceptsFirstResponder: Bool { true }
+
+    /// 岛是不激活的面板。不接受第一下的话，系统会把这次点击用来聚焦，手势要再点一次。
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         // 让点击穿过透明区域
@@ -65,6 +111,12 @@ private final class PassthroughView: NSView {
     }
 }
 
+/// 岛面玻璃不参与点击。交互玻璃会把第一下点击收走做高光，气泡就要再点一次才展开或收起。
+@available(macOS 26, *)
+private final class IslandGlassView: NSGlassEffectView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// 窗口的内容视图。一层被裁成灵动岛轮廓的岛底、一层在卡片展开时出现的玻璃
 /// （macOS 26+ 为 `NSGlassEffectView`，更早系统为 `NSVisualEffectView`）、
 /// 以及叠在最上的 SwiftUI 内容——全部裁切到随帧形变的轮廓内。
@@ -83,9 +135,12 @@ final class NotchCanvas: NSView {
     ///
     /// macOS 26+ 是系统液态玻璃（`NSGlassEffectView`）；更早系统仍是 `.hudWindow`
     /// 磨砂。只在展开卡片时显现，收起的细条保持纯色融入物理刘海。
-    /// 圆角由 `lensRadius` 按当前玻璃框实时计算：直线边几乎不折光，畸变要把
-    /// 左右收到胶囊才看得见。遮罩跟着这只圆角走，避免把侧棱切掉。
+    /// 圆角由 `lensRadius` 按肩线内侧的玻璃框计算。侧边折光在玻璃自己的左右边上，
+    /// 肩部遮罩若从玻璃内部切进来，这两条边就没了，只剩上下。透镜收到肩线后，
+    /// 左右边界和刘海侧边重合，折光留在轮廓上。
     private let glass: NSView
+    /// 肩线以上、耳朵里的那一块玻璃。主体透镜收到肩线内侧，耳朵靠它补上，避免穿帮。
+    private let earCap: NSView
     /// 覆在旧式磨砂上的一层暗色洗色。`.hudWindow` 会模糊窗口后面的内容，而屏幕顶部
     /// 往往是（偏亮的）菜单栏，会把整张卡片冲成浅灰。液态玻璃自己有对比度，这层关掉，
     /// 否则会把折射盖成一块灰膜。
@@ -131,8 +186,8 @@ final class NotchCanvas: NSView {
     private var morphToOpen: CGFloat = 0
     /// 投影跟随的轮廓。畸变开启时比遮罩更贴玻璃框，避免把透镜留白也投进去。
     private var shadowOutline: CGPath?
-    /// 畸变开启时遮罩比玻璃框再松出的宽度，盖住侧棱折光，又不切到玻璃自己的边上。
-    private static let distortLensPad: CGFloat = 14
+    /// 耳朵压住透镜顶边的重叠。只盖住接缝，别把侧边的圆角弧也盖住。
+    private static let earOverlap: CGFloat = 6
     private var trackingArea: NSTrackingArea?
     /// 羽化洗色的位图缓存。形变期间 `layout` 每帧都会进来，尺寸和圆角没变就直接复用。
     private var featherWashCache: (key: FeatherWashKey, image: CGImage)?
@@ -167,7 +222,7 @@ final class NotchCanvas: NSView {
     /// 构建展开卡片的玻璃层。macOS 26+ 用系统液态玻璃，否则退回 `.hudWindow` 磨砂。
     private static func makeGlass() -> NSView {
         if #available(macOS 26, *) {
-            let liquid = NSGlassEffectView()
+            let liquid = IslandGlassView()
             // clear 才能看见背后画面在棱边上的扭曲。regular 在这块透明高窗里
             // 会退成一块不透的深灰，边缘没有可折的光。
             liquid.style = .clear
@@ -209,6 +264,7 @@ final class NotchCanvas: NSView {
         host.autoresizingMask = []
         // 磨砂玻璃层须在 super.init 前完成初始化（let 属性）。
         glass = NotchCanvas.makeGlass()
+        earCap = NotchCanvas.makeGlass()
         super.init(frame: CGRect(origin: .zero, size: size))
         autoresizesSubviews = false
         wantsLayer = true
@@ -234,9 +290,14 @@ final class NotchCanvas: NSView {
         body.layer?.addSublayer(bubbleFill)
 
         // 磨砂玻璃淡入：仅展开卡片时可见（由 updateContrast 按 contentSize 控制 alpha）。
+        // 透镜和耳朵都在轮廓遮罩里。透镜收到肩线，遮罩贴着它的左右边，不再从内部切开。
         glass.alphaValue = 0
-        body.addSubview(glass, positioned: .below, relativeTo: host)
+        earCap.alphaValue = 0
+        earCap.isHidden = true
+        body.addSubview(glass)
+        body.addSubview(earCap)
         body.addSubview(host)
+        installEarFade()
 
         // 暗色洗色层：在玻璃之上、内容之下。液态玻璃自己提供对比度，洗色会把折射盖住。
         dim.wantsLayer = true
@@ -359,7 +420,7 @@ final class NotchCanvas: NSView {
 
     /// 透镜曲率、样式、染色和中心洗色都读设置，拖动滑块后下一次 layout 就生效。
     /// `moving` 为真时洗色用半分辨率、按约 24pt 量化，避免弹簧每帧重跑整张位图。
-    /// `radius` 来自可见玻璃框，不从已经上移过的 bounds 再算一遍。
+    /// `radius` 来自肩线内侧的可见玻璃框。
     private func updateLiquidCorner(moving: Bool, radius: CGFloat) {
         guard #available(macOS 26, *), let liquid = glass as? NSGlassEffectView else { return }
         if liquid.cornerRadius != radius {
@@ -385,18 +446,47 @@ final class NotchCanvas: NSView {
         guard let wash = liquid.contentView?.subviews.first(where: {
             $0.identifier == Self.washIdentifier
         }) else { return }
-        // 洗色只铺可见的那一段。上移出去的顶角不参与羽化，顶边按直角收到 0。
+        // 洗色只铺屏幕里看得到的那一段。上移出去的顶角不参与羽化，顶边按直角收到 0。
         let lift = min(max(0, radius), b.height)
         wash.frame = CGRect(x: 0, y: lift, width: b.width, height: max(0, b.height - lift))
         applyFeatheredWash(to: wash, radius: radius, moving: moving)
+        syncEarCap()
     }
 
-    /// 系统玻璃只有一只圆角，四角一起弯。顶边贴着屏幕，这两只外圆角会切进肩部，
-    /// 和肩部内圆角叠成两条线。上移一个圆角后，顶上的弯折落到屏幕外被裁掉，底角仍在卡片下沿。
-    private func liftedGlassFrame(_ rect: CGRect, radius: CGFloat) -> CGRect {
-        guard usesLiquidGlass, radius > 0.5 else { return rect }
-        return CGRect(x: rect.minX, y: rect.minY - radius,
-                      width: rect.width, height: rect.height + radius)
+    /// 耳朵盖在透镜上沿，底下渐隐，避免透镜顶边和耳朵底边各留一条横线。
+    private var earFade: CAGradientLayer?
+
+    private func installEarFade() {
+        guard earFade == nil else { return }
+        let fade = CAGradientLayer()
+        fade.colors = [NSColor.black.cgColor, NSColor.black.cgColor, NSColor.clear.cgColor]
+        fade.locations = [0, 0.45, 1]
+        // 图层 y 向上：起点在视图顶部，向底部淡出。
+        fade.startPoint = CGPoint(x: 0.5, y: 1)
+        fade.endPoint = CGPoint(x: 0.5, y: 0)
+        earCap.wantsLayer = true
+        earCap.layer?.mask = fade
+        earFade = fade
+    }
+
+    /// 耳朵只补材质，不要自己的圆角和羽化洗色，否则会在肩线里再切出一条棱。
+    private func syncEarCap() {
+        guard #available(macOS 26, *), let liquid = earCap as? NSGlassEffectView else { return }
+        if liquid.cornerRadius != 0 { liquid.cornerRadius = 0 }
+        let style: NSGlassEffectView.Style = Settings.shared.glassStyle == "regular" ? .regular : .clear
+        if liquid.style != style { liquid.style = style }
+        let amount = Settings.shared.glassTintAmount
+        if amount > 0.01 {
+            let c = Settings.parseRGB(Settings.shared.glassTint, fallback: (1, 1, 1))
+            liquid.tintColor = NSColor(srgbRed: CGFloat(c.r), green: CGFloat(c.g),
+                                       blue: CGFloat(c.b), alpha: CGFloat(min(1, amount)))
+        } else if liquid.tintColor != nil {
+            liquid.tintColor = nil
+        }
+        if #available(macOS 27, *) {
+            liquid.effectIsInteractive = false
+        }
+        liquid.contentView?.subviews.first { $0.identifier == Self.washIdentifier }?.isHidden = true
     }
 
     /// 把羽化洗色写进洗色视图的 `layer.contents`。
@@ -530,8 +620,8 @@ final class NotchCanvas: NSView {
 
     /// 把玻璃、遮罩、洗色和投影摆到「张开程度 `openness`」对应的样子。
     ///
-    /// `openness` 0 是收起气泡（无外缘、无透镜留白、玻璃藏起），1 是展开卡片
-    /// （外缘、畸变圆角和 14pt 留白都到位）。形变的每一帧和落定帧都走这里，
+    /// `openness` 0 是收起气泡（无外缘、玻璃藏起），1 是展开卡片
+    /// （外缘和畸变圆角都到位，透镜收到肩线）。形变的每一帧和落定帧都走这里，
     /// 所以最后一帧和 `settleMorph` 是同一套数，不会再跳一下。
     ///
     /// `placeHost == false` 时内容框保持目标尺寸，SwiftUI 不跟着弹簧重排，
@@ -540,7 +630,6 @@ final class NotchCanvas: NSView {
                               moving: Bool, placeHost: Bool) {
         let open = min(1, max(0, openness))
         let expanded = open > 0.999
-        let distortOn = usesLiquidGlass && Settings.shared.glassDistort > 0.001
         let closing = morphing && morphToOpen + 0.001 < morphFromOpen
         // 收向刘海气泡时，实心气泡钉死在目标尺寸。弹簧只推动卡片玻璃。
         // 岛底不能铺满整张遮罩，否则黑底会以卡片尺寸再缩一次。
@@ -549,32 +638,17 @@ final class NotchCanvas: NSView {
             ? CGSize(width: max(content.width, contentSize.width),
                      height: max(content.height, contentSize.height))
             : content
-        // 展开：刚离开气泡就换成透镜，之后只是同一块玻璃在变大。
-        // 收起且钉住气泡：卡片保持透镜往回收，最后一小段才并回刘海轮廓。
-        let lensBlend: CGFloat
-        if !distortOn {
-            lensBlend = 0
-        } else if pinBubble {
-            lensBlend = min(1, open / 0.15)
-        } else if closing {
-            lensBlend = open
-        } else {
-            lensBlend = min(1, open / 0.18)
-        }
-        // 外缘和透镜留白跟着张开程度从 0 长到落定值。收起气泡上两者都是 0，
-        // 不会留下一圈固定外缘把气泡撑大。钉住的气泡自己不加这圈留白。
+        // 外缘跟着张开程度从 0 长到落定值。收起气泡上是 0，不会把气泡撑大。
         let rim = rimAmount(expanded: true) * open
-        let pad = distortOn ? Self.distortLensPad * open : 0
         let island = islandRect(for: drawn)
         let glassRect = expandedGlassRect(island, rim: rim)
+        let metrics = lensMetrics(in: glassRect)
 
         if placeHost {
             host.frame = island
         }
         dim.frame = glassRect
-        // 圆角按可见玻璃框算，不能用上移之后的 bounds，否则半径会跟着被抬高的高度变大。
-        let glassRadius = lensRadius(in: glassRect.size)
-        glass.frame = liftedGlassFrame(glassRect, radius: glassRadius)
+        placeGlass(in: glassRect, metrics: metrics)
 
         let alpha: CGFloat
         if pinBubble {
@@ -587,13 +661,17 @@ final class NotchCanvas: NSView {
         glass.layer?.removeAnimation(forKey: "fade")
         glass.alphaValue = alpha
         glass.layer?.opacity = Float(alpha)
+        earCap.layer?.removeAnimation(forKey: "fade")
+        earCap.alphaValue = alpha
+        earCap.layer?.opacity = Float(alpha)
         // 玻璃还藏着时不重绘洗色。看得见的那一帧再铺，和透明度同一次提交。
-        updateLiquidCorner(moving: moving && alpha > 0.02, radius: glassRadius)
+        updateLiquidCorner(moving: moving && alpha > 0.02, radius: metrics.radius)
 
         if body.layer?.mask !== silhouette {
             body.layer?.mask = silhouette
         }
-        let cardPath = maskPath(glassRect: glassRect, lensBlend: lensBlend, pad: pad)
+        // 轮廓始终是带双肩的刘海。透镜已收到肩线，侧边和这条轮廓重合。
+        let cardPath = notchPath(in: glassRect)
         let path: CGPath
         if pinBubble {
             let bubblePath = notchPath(in: islandRect(for: contentSize))
@@ -608,16 +686,9 @@ final class NotchCanvas: NSView {
         }
         silhouette.path = path
         edge.path = path
-        if lensBlend > 0.999 {
-            let tightR = min(glassRadius, min(glassRect.width, glassRect.height) / 2)
-            let side = NotchLayout.shoulder(height: glassRect.height)
-            shadowOutline = contourPath(in: glassRect, topRadius: 0,
-                                       bottomRadius: tightR, shoulder: side)
-            host.layer?.masksToBounds = false
-        } else {
-            shadowOutline = path
-            host.layer?.masksToBounds = true
-        }
+        // 投影贴着肩线里的实体，不把侧棱外面那圈透明留白投出去。
+        shadowOutline = notchPath(in: glassRect)
+        host.layer?.masksToBounds = true
 
         // 边缘高光：旧式磨砂才需要自绘发丝描边。液态玻璃自带折射棱边，再描一条会成双轮廓。
         let showEdge = expanded && !usesLiquidGlass
@@ -684,127 +755,38 @@ final class NotchCanvas: NSView {
         return t * t * (3 - 2 * t)
     }
 
-    /// 遮罩。`lensBlend == 0` 是刘海轮廓；`== 1` 时底角收到透镜半径，再向外松 `pad`。
-    /// 顶边始终不圆：玻璃的外圆角如果弯到顶上，会和双肩内圆角叠成两条线。
-    /// 肩部不跟着 blend 收掉。中间帧仍是同一族三次曲线，避免切换时跳。
-    private func maskPath(glassRect: CGRect, lensBlend: CGFloat, pad: CGFloat) -> CGPath {
-        let u = min(1, max(0, lensBlend))
-        if u <= 0.0001 {
-            return notchPath(in: glassRect)
-        }
-        if u >= 0.999 {
-            return lensMaskPath(glassRect: glassRect, pad: pad)
-        }
-        return blendedContour(glassRect: glassRect, blend: u, pad: pad)
-    }
-
     private func notchPath(in rect: CGRect) -> CGPath {
         NotchShape(attached: true,
                    radius: NotchLayout.surfaceRadius(height: rect.height),
                    floatingGap: nil).path(in: rect).cgPath
     }
 
-    /// 畸变落定形态：玻璃框向左右和下方松出 `pad`，底角比玻璃自己的再大 `pad`，
-    /// 侧棱折光留在遮罩内，又不会切到玻璃边上。顶边不外扩、不圆角，肩部保留。
-    private func lensMaskPath(glassRect: CGRect, pad: CGFloat) -> CGPath {
-        var loose = glassRect
-        loose.origin.x -= pad
-        loose.size.width += pad * 2
-        loose.size.height += pad
-        let glassR = lensRadius(in: glassRect.size)
-        let looseR = min(glassR + pad, min(loose.width, loose.height) / 2)
-        let side = NotchLayout.shoulder(height: glassRect.height)
-        return contourPath(in: loose, topRadius: 0, bottomRadius: looseR, shoulder: side)
+    /// 肩宽和透镜圆角。液态玻璃收到肩线，左右边界正好落在刘海侧边上。
+    private func lensMetrics(in rect: CGRect) -> (inset: CGFloat, radius: CGFloat) {
+        let shoulder = min(NotchLayout.shoulder(height: rect.height), rect.width / 2)
+        let inset = usesLiquidGlass ? shoulder : 0
+        let lensSize = CGSize(width: max(1, rect.width - inset * 2), height: max(1, rect.height))
+        return (inset, lensRadius(in: lensSize))
     }
 
-    /// 刘海轮廓收到「顶边直角、底角为透镜」的中间态。`blend` 为 0 时几何上回到 NotchShape，
-    /// 为 1 时肩部仍在、底角等于玻璃圆角加 `pad`。顶角半径始终为 0。
-    private func blendedContour(glassRect: CGRect, blend: CGFloat, pad: CGFloat) -> CGPath {
-        let u = min(1, max(0, blend))
-        var loose = glassRect
-        loose.origin.x -= pad
-        loose.size.width += pad * 2
-        loose.size.height += pad
-        let glassR = lensRadius(in: glassRect.size)
-        let notchBottom = NotchLayout.surfaceRadius(height: glassRect.height)
-        let notchSide = NotchLayout.shoulder(height: glassRect.height)
-        let botR = notchBottom * (1 - u) + (glassR + pad) * u
-        return contourPath(in: loose, topRadius: 0, bottomRadius: botR, shoulder: notchSide)
-    }
-
-    /// 顶边贴屏的轮廓。`shoulder == 0` 且上下半径相等时是圆角矩形；
-    /// `topRadius == 0` 时控制点与 NotchShape 的肩部、底角一致。
-    private func contourPath(in rect: CGRect, topRadius: CGFloat, bottomRadius: CGFloat,
-                             shoulder: CGFloat) -> CGPath {
-        let width = max(0, rect.width)
-        let height = max(0, rect.height)
-        guard width > 1, height > 1 else {
-            return CGPath(rect: rect, transform: nil)
-        }
-        let tangent: CGFloat = 0.55228475
-        var side = min(max(0, shoulder), width / 2)
-        var topR = max(0, topRadius)
-        var botR = max(0, bottomRadius)
-        topR = min(topR, max(0, width / 2 - side), height / 2)
-        botR = min(botR, max(0, width / 2 - side), height / 2)
-        if side + topR + botR > height, side + topR + botR > 0 {
-            let scale = height / (side + topR + botR)
-            side *= scale
-            topR *= scale
-            botR *= scale
-        }
-
-        let left = rect.minX
-        let right = rect.maxX
-        let top = rect.minY
-        let bottom = rect.maxY
-        let path = CGMutablePath()
-
-        path.move(to: CGPoint(x: left + topR, y: top))
-        path.addLine(to: CGPoint(x: right - topR, y: top))
-
-        let trFrom = CGPoint(x: right - topR, y: top)
-        let trTo = CGPoint(x: right - side, y: top + side + topR)
-        addCorner(path, from: trFrom, to: trTo, tangent: tangent, verticalFirst: false)
-
-        path.addLine(to: CGPoint(x: right - side, y: bottom - botR))
-
-        let brFrom = CGPoint(x: right - side, y: bottom - botR)
-        let brTo = CGPoint(x: right - side - botR, y: bottom)
-        addCorner(path, from: brFrom, to: brTo, tangent: tangent, verticalFirst: true)
-
-        path.addLine(to: CGPoint(x: left + side + botR, y: bottom))
-
-        let blFrom = CGPoint(x: left + side + botR, y: bottom)
-        let blTo = CGPoint(x: left + side, y: bottom - botR)
-        addCorner(path, from: blFrom, to: blTo, tangent: tangent, verticalFirst: false)
-
-        path.addLine(to: CGPoint(x: left + side, y: top + side + topR))
-
-        let tlFrom = CGPoint(x: left + side, y: top + side + topR)
-        let tlTo = CGPoint(x: left + topR, y: top)
-        addCorner(path, from: tlFrom, to: tlTo, tangent: tangent, verticalFirst: true)
-
-        path.closeSubpath()
-        return path
-    }
-
-    /// 圆角的三次近似。`verticalFirst` 表示离开起点时沿垂直方向（底角、左上角），
-    /// 否则沿水平方向（右上角）。到达时换到另一条轴。κ = 0.55228475。
-    private func addCorner(_ path: CGMutablePath, from: CGPoint, to: CGPoint,
-                           tangent: CGFloat, verticalFirst: Bool) {
-        let dx = to.x - from.x
-        let dy = to.y - from.y
-        let c1: CGPoint
-        let c2: CGPoint
-        if verticalFirst {
-            c1 = CGPoint(x: from.x, y: from.y + dy * tangent)
-            c2 = CGPoint(x: to.x - dx * tangent, y: to.y)
-        } else {
-            c1 = CGPoint(x: from.x + dx * tangent, y: from.y)
-            c2 = CGPoint(x: to.x, y: to.y - dy * tangent)
-        }
-        path.addCurve(to: to, control1: c1, control2: c2)
+    /// 主体透镜收到肩线，顶角抬出屏幕；耳朵玻璃铺满顶宽，盖住肩部。
+    ///
+    /// 系统玻璃只有一只圆角，四角一起弯。顶上那两只落在肩部里，会变成向内收的
+    /// 外圆角，和耳朵叠成两条线。上移一个圆角后，这两只落到屏幕外被裁掉，
+    /// 底角和左右棱边仍留在卡片上。耳朵负责肩部，不再靠透镜的顶角去填。
+    private func placeGlass(in rect: CGRect, metrics: (inset: CGFloat, radius: CGFloat)) {
+        let inset = metrics.inset
+        let lift = usesLiquidGlass ? max(0, metrics.radius) : 0
+        let lensWidth = max(1, rect.width - inset * 2)
+        glass.frame = CGRect(x: rect.minX + inset,
+                             y: rect.minY - lift,
+                             width: lensWidth,
+                             height: rect.height + lift)
+        let capHeight = min(rect.height, max(0, inset + Self.earOverlap))
+        earCap.isHidden = !usesLiquidGlass || inset < 0.5 || capHeight < 1
+        earCap.frame = CGRect(x: rect.minX, y: rect.minY,
+                              width: rect.width, height: max(1, capHeight))
+        earFade?.frame = CGRect(origin: .zero, size: earCap.bounds.size)
     }
 
     /// 弹簧采样在起点和终点之间的进度，按有位移的轴平均。超调钳在 0...1，
