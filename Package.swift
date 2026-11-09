@@ -1,12 +1,15 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.0
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 BetterFocusIDE
 
 import PackageDescription
 
+// 部署目标是 macOS 15。语言模式保持 Swift 5，避免整包切到 Swift 6 并发检查。
+let swift5 = [SwiftSetting.swiftLanguageMode(.v5)]
+
 let package = Package(
     name: "BetterFocusIDE",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         // 库产品：供 SwiftUI Preview 使用（Xcode Canvas 要求 library 目标）。
         .library(name: "BetterFocusIDE", targets: ["BetterFocusIDE"]),
@@ -22,7 +25,8 @@ let package = Package(
             resources: [
                 // IDE 图标资源（用于徽章显示真实 IDE 图标）
                 .copy("Resources/IDE-Icons")
-            ]
+            ],
+            swiftSettings: swift5
         ),
         // 瘦 Executable 目标：仅编译 App/main.swift，依赖 library。
         // 该目标映射为 productType=com.apple.product-type.tool（二进制名 BetterFocusIDEApp）。
@@ -30,13 +34,15 @@ let package = Package(
             name: "BetterFocusIDEApp",
             dependencies: ["BetterFocusIDE"],
             path: "Sources/BetterFocusIDE/App",
-            sources: ["main.swift"]
+            sources: ["main.swift"],
+            swiftSettings: swift5
         ),
         // 测试目标：验证设置系统、控制器逻辑等核心功能。
         .testTarget(
             name: "BetterFocusIDETests",
             dependencies: ["BetterFocusIDE"],
-            path: "Tests/BetterFocusIDETests"
+            path: "Tests/BetterFocusIDETests",
+            swiftSettings: swift5
         ),
     ]
 )

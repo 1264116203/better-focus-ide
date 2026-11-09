@@ -2,6 +2,7 @@
 // Copyright (C) 2026 BetterFocusIDE
 
 import AppKit
+import Combine
 import SwiftUI
 
 /// 应用生命周期代理。
@@ -9,8 +10,9 @@ import SwiftUI
 /// 负责：单实例互斥锁校验、状态栏菜单搭建、灵动岛服务初始化、
 /// 键盘应答与设置/自检辅助窗口的呈现。
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    /// 状态栏图标项（菜单栏常驻入口）。
-    private var statusItem: NSStatusItem!
+    /// 状态栏图标项。关掉「显示状态栏图标」后为 nil。
+    private var statusItem: NSStatusItem?
+    private var settingsObserver: AnyCancellable?
     /// 灵动岛中央编排服务（单例）。
     private var notchService: NotchService!
 
@@ -26,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch notchService.startSocket() {
         case .started:
             CrashLog.noteSessionStart()
+            LoginItem.applyStoredPreference()
         case .alreadyRunning:
             Log.info("另一实例已持有 socket；退出。", topic: "app")
             NSApp.terminate(nil)
@@ -36,13 +39,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // 搭建带菜单的状态栏图标。
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            button.image = StatusBarIcon.make()
-            button.toolTip = "BetterFocusIDE"
-        }
-        statusItem.menu = buildMenu()
+        // 状态栏图标跟随「通用」里的开关和样式，改完立刻换上或收起。
+        settingsObserver = Settings.shared.changes
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.applyStatusItem() }
+        applyStatusItem()
 
         // 初次显示灵动岛。
         notchService.show()
@@ -54,6 +55,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 键盘应答 + 设置快捷键接线。
         notchService.onOpenSettings = { [weak self] in self?.openSettings() }
         notchService.startKeyboard()
+    }
+
+    /// 按当前设置显示或收起菜单栏图标，并换上选中的样式。
+    private func applyStatusItem() {
+        let settings = Settings.shared
+        guard settings.showStatusBarIcon else {
+            if let statusItem {
+                NSStatusBar.system.removeStatusItem(statusItem)
+                self.statusItem = nil
+            }
+            return
+        }
+        if statusItem == nil {
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+            item.menu = buildMenu()
+            statusItem = item
+        }
+        if let button = statusItem?.button {
+            button.image = StatusBarIcon.make(style: settings.statusBarIcon)
+            button.toolTip = "BetterFocusIDE"
+        }
     }
 
     /// 构建状态栏下拉菜单，并把菜单项的 target 绑定到 self。
