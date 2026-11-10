@@ -155,7 +155,7 @@ final class HostHookTemplateTests: XCTestCase {
     func testCursorRegistersObserveOnlyEvents() {
         XCTAssertEqual(CursorHookInstaller.events, [
             "beforeSubmitPrompt", "stop", "sessionEnd",
-            "postToolUseFailure", "subagentStop", "preCompact",
+            "subagentStop", "preCompact",
         ])
     }
 
@@ -165,7 +165,7 @@ final class HostHookTemplateTests: XCTestCase {
         let events = WorkBuddyHookInstaller.specs.map(\.event)
         XCTAssertEqual(events, ["PreToolUse", "Notification", "PermissionRequest",
                                "PostToolUse", "UserPromptSubmit", "Stop", "SessionEnd",
-                               "StopFailure", "PermissionDenied", "PostToolUseFailure",
+                               "StopFailure", "PermissionDenied",
                                "SubagentStop", "PostCompact", "Elicitation"])
         let question = WorkBuddyHookInstaller.specs.first { $0.event == "PreToolUse" }
         XCTAssertEqual(question?.matcher, "AskUserQuestion")

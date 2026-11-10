@@ -32,7 +32,6 @@ enum QoderCnHookInstaller {
             HookGroupSpec("PermissionRequest", matcher: "*", timeout: InstallerPaths.hookTimeoutSeconds),
             HookGroupSpec("SessionEnd", matcher: "*", timeout: 5),
             HookGroupSpec("Stop", matcher: "*", timeout: 5),
-            HookGroupSpec("PostToolUseFailure", matcher: "*", timeout: 5),
             HookGroupSpec("SubagentStop", matcher: "*", timeout: 5),
             HookGroupSpec("PreCompact", matcher: "*", timeout: 5),
             HookGroupSpec("Notification", matcher: InstallerPaths.attentionNotificationMatcher, timeout: 5),

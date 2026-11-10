@@ -622,12 +622,12 @@ enum HelperTemplate {
             product = _identify_product()
             _merge_state(session_id, product)
 
-            if event in ("PostToolUseFailure", "StopFailure", "PermissionDenied"):
-                tool = str(payload.get("tool_name") or "")
-                detail = str(payload.get("error") or payload.get("message") or tool)
-                title = "自动模式拒绝了这次操作" if event == "PermissionDenied" else "工具没有跑成"
-                if event == "StopFailure":
-                    title = "这一轮没有完成"
+            # 工具调用失败不通知。旧安装里这条 hook 可能还在，进来就退出。
+            if event == "PostToolUseFailure":
+                return
+            if event in ("StopFailure", "PermissionDenied"):
+                detail = str(payload.get("error") or payload.get("message") or "")
+                title = "自动模式拒绝了这次操作" if event == "PermissionDenied" else "这一轮没有完成"
                 emit_status(session_id, "failure_notice", title, detail, payload)
                 return
             if event == "SubagentStop":

@@ -22,6 +22,54 @@ BetterFocusIDE is a native macOS menu-bar accessory app (no Dock icon) that surf
 
 ---
 
+## 实拍
+
+下面都是刘海上的真实卡片，从设置里的「调试」页打出来，和 hook 走的是同一条链路。
+
+<p align="center">
+<img src="docs/readme/idle.png" width="360" alt="收起后的黑胶囊融在刘海里">
+</p>
+
+平时只剩一枚黑胶囊，贴着物理刘海。没有要处理的事情时它就停在这里；有未读通知时，边缘会轻轻呼吸。
+
+<p align="center">
+<img src="docs/readme/expand.gif" width="480" alt="胶囊展开成一张提问卡片">
+</p>
+
+智能体抛来问题时，胶囊涨成一张卡片，而不是突然弹出一个窗口。
+
+<p align="center">
+<img src="docs/readme/question.png" width="440" alt="带三个选项的提问卡片">
+</p>
+
+提问卡片可以单选、多选，也可以选「其他…」自己写一句。卡片成为焦点后，`1`–`9` 选第几项，`Enter` 把答案送回智能体。一次带来多道题时，答完自动翻到下一题。
+
+<p align="center">
+<img src="docs/readme/permission.png" width="440" alt="终端命令的权限卡片">
+</p>
+
+权限卡片给出这次要执行的命令或文件，三个按钮是「允许」「始终允许」「拒绝」。这里故意不认 `Enter`，避免误批。
+
+<p align="center">
+<img src="docs/readme/notice.png" width="440" alt="一轮结束后的完成横幅">
+</p>
+
+一轮做完会落下横幅，正文取自这次会话里的原话，下面标着项目名。点一下横幅，跳回发出这条通知的 IDE 窗口。
+
+<p align="center">
+<img src="docs/readme/todo.png" width="440" alt="六步任务里已完成三步的进度卡">
+</p>
+
+待办会收成一条分段进度。当前在做哪一步、下一步是什么，都写在卡上；收起之后，胶囊下沿还留着这条进度线。
+
+<p align="center">
+<img src="docs/readme/history.png" width="440" alt="最近五条通知">
+</p>
+
+点一下空闲的胶囊，可以回看最近几条：待回答的提问、待审批的权限，以及已经完成的回合。
+
+---
+
 ## ✨ Features
 
 - 🫧 **灵动岛动画** — 弹簧逐帧形变，展开/收起是「液态」刘海轮廓，不是硬弹
@@ -38,7 +86,7 @@ BetterFocusIDE is a native macOS menu-bar accessory app (no Dock icon) that surf
 - 🖥️ **刘海屏优先** — 固定钉在内置刘海屏，不随焦点在两屏间跳
 - 🩺 **Doctor 自检** — 一键排查 socket / hook 注册 / 答案目录是否就绪
 
-> 🖼️ **截图**：项目运行截图待补充。欢迎 PR 提交你的实拍图（`design/` 目录下现有 App 图标设计稿可参考）。
+画面见上面的 [实拍](#实拍)。
 
 ---
 

@@ -107,7 +107,7 @@ enum Doctor {
             ? DoctorCheck(ok: true, label: "\(label) Hook 开关", detail: registeredDetail, hint: nil)
             : DoctorCheck(ok: false, label: "\(label) Hook 开关",
                           detail: "未在宿主配置中登记",
-                          hint: "菜单 → 一键安装 Hook / Plugin"))
+                          hint: "菜单 → 安装 Hook / Plugin…"))
         return checks
     }
 
@@ -137,13 +137,13 @@ enum Doctor {
     static func installedFile(label: String, path: String) -> DoctorCheck {
         if !FileManager.default.fileExists(atPath: path) {
             return DoctorCheck(ok: false, label: label, detail: "未安装",
-                               hint: "菜单 → 一键安装 Hook / Plugin")
+                               hint: "菜单 → 安装 Hook / Plugin…")
         }
         if let _ = try? String(contentsOfFile: path, encoding: .utf8) {
             return DoctorCheck(ok: true, label: label, detail: "已安装", hint: nil)
         }
         return DoctorCheck(ok: false, label: label, detail: "读不出来",
-                           hint: "菜单 → 一键安装 Hook / Plugin")
+                           hint: "菜单 → 安装 Hook / Plugin…")
     }
 
     /// Qoder settings.json 的 PermissionRequest 是否登记了带我们标记的分组。

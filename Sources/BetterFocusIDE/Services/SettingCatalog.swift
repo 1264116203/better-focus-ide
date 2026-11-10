@@ -122,11 +122,11 @@ enum SettingCatalog {
     ]
 
     /// 每个分组的 SF Symbol 图标名。
-    /// 末尾的「调试」不是设置分组（见 `SettingsView.debugPage`），仅在此登记图标。
+    /// 「权限」「调试」不是设置分组（见 `SettingsView`），仅在此登记图标。
     static let groupSymbols: [String: String] = [
         "通用": "gearshape", "提醒": "bell", "外观": "paintpalette",
         "声音与触感": "speaker.wave.2", "行为": "hand.tap", "超时与排队": "clock",
-        "调试": "ladybug",
+        "权限": "lock.shield", "调试": "ladybug",
     ]
 
     /// 所有设置项的定义列表（声明式；面板据此渲染，不硬编码 UI 行）。

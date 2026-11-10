@@ -58,7 +58,6 @@ enum KimiHookInstaller {
             // Notification 的官方 matcher 是 `task.completed` 这类任务状态，
             // 不是权限提醒。权限走 PermissionRequest，这条不再登记。
             HookGroupSpec("PostToolUse", matcher: InstallerPaths.todoToolMatcher, timeout: 5),
-            HookGroupSpec("PostToolUseFailure", matcher: "", timeout: 5),
             HookGroupSpec("Stop", matcher: "", timeout: 5),
             HookGroupSpec("SessionEnd", matcher: "", timeout: 5),
         ]

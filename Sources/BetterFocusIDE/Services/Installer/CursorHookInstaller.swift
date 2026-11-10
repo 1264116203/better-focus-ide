@@ -6,8 +6,8 @@ import Foundation
 /// 安装 / 卸载 Cursor 用户级 hook（`~/.cursor/hooks.json`）。
 ///
 /// 只注册**观测型**事件，且一律回合法空对象（`beforeSubmitPrompt` 回
-/// `{"continue": true}`）。新增的 `postToolUseFailure`、`subagentStop`、
-/// `preCompact` 也只发横幅。权限类 hook（`preToolUse` /
+/// `{"continue": true}`）。`subagentStop`、`preCompact` 只发横幅。
+/// 工具调用失败不通知。权限类 hook（`preToolUse` /
 /// `beforeShellExecution` 等）要求返回 `allow` / `deny`，那会替用户改变
 /// 审批流程；输出非法 JSON 甚至会直接阻塞工具调用。因此 Cursor 侧不做提问与权限。
 ///
@@ -20,7 +20,7 @@ enum CursorHookInstaller {
 
     /// 我们注册的事件；顺序固定，便于自检比对。
     static let events = ["beforeSubmitPrompt", "stop", "sessionEnd",
-                         "postToolUseFailure", "subagentStop", "preCompact"]
+                         "subagentStop", "preCompact"]
 
     // MARK: - 生命周期
 

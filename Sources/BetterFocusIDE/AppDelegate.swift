@@ -52,9 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 就重写回去，避免宿主整份拒绝加载后「已安装但一条通知都没有」。
         notchService.repairInstalledIntegrations()
 
-        // 键盘应答 + 设置快捷键接线。
+        // 键盘应答 + 设置快捷键接线。气泡右键与菜单栏图标共用 buildMenu()。
         notchService.onOpenSettings = { [weak self] in self?.openSettings() }
+        notchService.makeContextMenu = { [weak self] in self?.buildMenu() ?? NSMenu() }
         notchService.startKeyboard()
+        presentOnboardingIfNeeded()
     }
 
     /// 按当前设置显示或收起菜单栏图标，并换上选中的样式。
@@ -78,17 +80,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// 构建状态栏下拉菜单，并把菜单项的 target 绑定到 self。
-    ///
-    /// 菜单项：展开/收起、最近通知、安装/卸载 Hook、自检、设置、退出。
+    /// 菜单栏图标和气泡右键共用的菜单。每次现建一份，避免同一个 NSMenu 被两处同时持有。
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
+        // 气泡所在窗口不是 key window，默认校验会把条目置灰。
+        menu.autoenablesItems = false
         menu.addItem(NSMenuItem(title: "展开 / 收起灵动岛",
                                 action: #selector(toggleNotch), keyEquivalent: "t"))
         menu.addItem(NSMenuItem(title: "最近通知",
                                 action: #selector(showHistory), keyEquivalent: "h"))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "一键安装 Hook / Plugin",
+        menu.addItem(NSMenuItem(title: "安装 Hook / Plugin…",
                                 action: #selector(installAll), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "卸载 Hook / Plugin",
                                 action: #selector(uninstallAll), keyEquivalent: ""))
@@ -124,10 +126,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchService.showHistory()
     }
 
-    /// 一键安装 Qoder / OpenCode / Cursor / WorkBuddy 四处集成，完成后弹窗汇总结果。
+    private let hookPicker = HookInstallPickerModel()
+    private let onboardingHooks = HookInstallPickerModel()
+
+    /// 先列出本机已安装的受支持宿主，默认全选，只安装勾中的。
     @objc private func installAll() {
-        let summary = notchService.installAll()
+        hookPicker.reload()
+        guard !hookPicker.items.isEmpty else {
+            showAlert(title: "没有可安装的宿主",
+                      message: "这台 Mac 上没有检测到受支持的 IDE。")
+            return
+        }
+        presentWindow(title: "安装 Hook / Plugin",
+                      rootView: HookInstallPickerView(
+                        model: hookPicker,
+                        onInstall: { [weak self] in self?.installSelectedHooks() },
+                        onCancel: { [weak self] in self?.closeAuxiliaryWindow("安装 Hook / Plugin") }),
+                      size: CGSize(width: 400, height: 460))
+    }
+
+    private func installSelectedHooks() {
+        let ids = hookPicker.selectedIDs
+        closeAuxiliaryWindow("安装 Hook / Plugin")
+        let summary = notchService.installHooks(ids)
         showAlert(title: "安装完成", message: summary)
+    }
+
+    private func closeAuxiliaryWindow(_ title: String) {
+        auxiliaryWindows[title]?.orderOut(nil)
     }
 
     /// 卸载四个宿主的 Hook / Plugin。
@@ -197,10 +223,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    /// 第一次成功启动时弹出引导。关掉窗口后不再出现。
+    private func presentOnboardingIfNeeded() {
+        guard OnboardingGate.shouldPresent() else { return }
+        onboardingHooks.reload()
+        let title = OnboardingGate.windowTitle
+        let size = CGSize(width: 680, height: 520)
+        let hosting = NSHostingView(rootView: OnboardingView(
+            hooks: onboardingHooks,
+            onInstall: { [weak self] in self?.finishOnboarding(install: true) },
+            onSkip: { [weak self] in self?.finishOnboarding(install: false) }))
+        hosting.frame = NSRect(origin: .zero, size: size)
+        hosting.sizingOptions = []
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false)
+        window.contentView = hosting
+        window.title = title
+        window.isReleasedWhenClosed = false
+        window.setContentSize(size)
+        window.center()
+        window.delegate = self
+        auxiliaryWindows[title] = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async {
+            window.setContentSize(size)
+            window.center()
+        }
+    }
+
+    private func finishOnboarding(install: Bool) {
+        let ids = onboardingHooks.selectedIDs
+        auxiliaryWindows[OnboardingGate.windowTitle]?.close()
+        guard install, !ids.isEmpty else { return }
+        let summary = notchService.installHooks(ids)
+        showAlert(title: "安装完成", message: summary)
+    }
+
     /// 应用退出前收尾：停止 socket 监听、持久化设置。
     func applicationWillTerminate(_ notification: Notification) {
         notchService.stopSocket()
         Settings.shared.save()
         CrashLog.markCleanExit()
+    }
+}
+
+extension AppDelegate: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window.title == OnboardingGate.windowTitle else { return }
+        OnboardingGate.markCompleted()
     }
 }

@@ -72,7 +72,6 @@ enum QoderHookInstaller {
             ("PostToolUse", InstallerPaths.todoToolMatcher, 5),
             ("SessionEnd", "*", 5),
             ("Stop", "*", 5),
-            ("PostToolUseFailure", "*", 5),
             ("SubagentStop", "*", 5),
             ("PreCompact", "*", 5),
             ("Notification", InstallerPaths.attentionNotificationMatcher, 5),
@@ -94,6 +93,7 @@ enum QoderHookInstaller {
     /// 从各事件中剔除属于我们的分组；某事件剔空后连键一起移除。
     static func hooksAfterRemoval(_ hooks: [String: Any]) -> [String: Any] {
         var hooks = hooks
+        // PostToolUseFailure 不再注册，仍留在扫描表里，安装时把旧条目清掉。
         for event in ["PreToolUse", "PostToolUse", "PermissionRequest", "SessionEnd", "Stop",
                       "PostToolUseFailure", "SubagentStop", "PreCompact", "Notification"] {
             guard var groups = hooks[event] as? [[String: Any]] else { continue }
