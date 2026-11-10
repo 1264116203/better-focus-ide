@@ -25,6 +25,8 @@ enum Transcript {
     // 展示长度上限（字符），与 Python config 对齐。
     static let titleLimit = 40
     static let bodyLimit = 56
+    /// 卡片详情展开后能看到的正文上限。折叠态仍只显示 `bodyLimit`。
+    static let detailLimit = 480
     // 读取字节预算。
     static let headBytes = 256 * 1024
     static let tailBytes = 4 * 1024 * 1024
@@ -36,6 +38,8 @@ enum Transcript {
     struct Session {
         let title: String
         let latest: String
+        /// 最近一轮用户输入的较长版本，供通知详情展开。单行标题仍用 `latest`。
+        let latestDetail: String
         let entrypoint: String
         /// 首条人类发言记录是否带 `humanInput` 标记（真人 UI 输入，含粘贴）。
         let hasHumanInput: Bool
@@ -44,7 +48,8 @@ enum Transcript {
         /// 新版 Qoder 内核对 GUI 会话也写 `entrypoint: "cli"`，但真人 UI 输入的记录
         /// 带 `humanInput` 标记；只有 entrypoint=cli 且无该标记的才是真正的管道会话。
         var fromCLI: Bool { entrypoint == entrypointCLI && !hasHumanInput }
-        static let empty = Session(title: "", latest: "", entrypoint: "", hasHumanInput: false)
+        static let empty = Session(title: "", latest: "", latestDetail: "",
+                                   entrypoint: "", hasHumanInput: false)
     }
 
     /// 打开文件一次，返回标题 + 最新轮次 + entrypoint + 人类输入标记。
@@ -56,8 +61,10 @@ enum Transcript {
               let handle = FileHandle(forReadingAtPath: path) else { return .empty }
         defer { try? handle.close() }
         let (title, entrypoint, human) = first(handle: handle, limit: titleLimit, provider: provider)
-        let latest = last(handle: handle, limit: bodyLimit, provider: provider)
-        return Session(title: title, latest: latest, entrypoint: entrypoint, hasHumanInput: human)
+        let latestDetail = last(handle: handle, limit: detailLimit, provider: provider)
+        let latest = shorten(latestDetail, limit: bodyLimit)
+        return Session(title: title, latest: latest, latestDetail: latestDetail,
+                       entrypoint: entrypoint, hasHumanInput: human)
     }
 
     // MARK: - 空白折叠 / 截断

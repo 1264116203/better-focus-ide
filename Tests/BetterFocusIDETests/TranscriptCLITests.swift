@@ -91,6 +91,20 @@ final class TranscriptCLITests: XCTestCase {
         let s = Transcript.sessionSummary(path: path, provider: "qoder")
         XCTAssertEqual(s.title, "第一个问题")
         XCTAssertEqual(s.latest, "第二个问题")
+        XCTAssertEqual(s.latestDetail, "第二个问题")
+    }
+
+    /// 单行横幅仍截到 56 字，展开用的详情保留后半段。
+    func testDetailKeepsTextBeyondTheSingleLineLimit() {
+        let long = String(repeating: "详细", count: 40)
+        let path = writeFixture([
+            #"{"type":"user","message":{"content":"标题"}}"#,
+            #"{"type":"user","message":{"content":"\#(long)"}}"#,
+        ])
+        let s = Transcript.sessionSummary(path: path, provider: "qoder")
+        XCTAssertEqual(s.latest.count, Transcript.bodyLimit)
+        XCTAssertTrue(s.latest.hasSuffix("…"))
+        XCTAssertEqual(s.latestDetail, long)
     }
 
     /// 测试：文件缺失时坍缩为空会话（不抑制、不崩溃）。

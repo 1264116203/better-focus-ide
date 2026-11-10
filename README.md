@@ -70,6 +70,36 @@ BetterFocusIDE is a native macOS menu-bar accessory app (no Dock icon) that surf
 
 ---
 
+## 各 IDE 能做什么
+
+「作答」是在岛上选完，答案写回宿主。「提醒」只出横幅，批准或作答仍在宿主自己的界面里。「—」是这个宿主的事件里没有这一项，岛上不会出现。
+
+| | 宿主 | 提问 | 权限 | 回合完成 | 会话结束 | 待办 |
+|---|---|:---:|:---:|:---:|:---:|:---:|
+| <img src="docs/readme/icons/qoder-ide.png" width="20" height="20" alt=""> <img src="docs/readme/icons/qoder-cn-ide.png" width="20" height="20" alt=""> | Qoder / Qoder CN | 作答 | 提醒 | ✓ | ✓ | ✓ |
+| <img src="docs/readme/icons/opencode.png" width="20" height="20" alt=""> | OpenCode | 作答 | — | ✓ | — | ✓ |
+| <img src="docs/readme/icons/cursor.png" width="20" height="20" alt=""> | Cursor | — | 提醒 | ✓ | ✓ | — |
+| <img src="docs/readme/icons/workbuddy.png" width="20" height="20" alt=""> | WorkBuddy | 提醒 | 提醒 | ✓ | ✓ | ✓ |
+| <img src="docs/readme/icons/claude.png" width="20" height="20" alt=""> | Claude Code | 作答 | 提醒 | ✓ | ✓ | ✓ |
+| <img src="docs/readme/icons/trae.png" width="20" height="20" alt=""> <img src="docs/readme/icons/trae-cn.png" width="20" height="20" alt=""> | Trae / Trae CN | 作答 | 提醒 | ✓ | — | — |
+| <img src="docs/readme/icons/kimi.png" width="20" height="20" alt=""> | Kimi | 作答 | 提醒 | ✓ | ✓ | ✓ |
+| <img src="docs/readme/icons/chatgpt.png" width="20" height="20" alt=""> | ChatGPT | — | 提醒 | ✓ | ✓ | — |
+| <img src="docs/readme/icons/copilot.png" width="20" height="20" alt=""> | GitHub Copilot | 作答 | 提醒 | ✓ | ✓ | ✓ |
+
+Qoder 的 IDE、CLI 和 JetBrains 插件共用这一行，国内版写在 `~/.qoder-cn`。改完 hook 要重启 IDE 才生效。
+
+几处和表上的字不一样的地方：
+
+- **Cursor** 的权限只提醒：终端命令和 MCP 调用会在岛上亮一条通知，点一下跳回去，批准仍在 Cursor 自己的对话框里。没有提问卡，也没有待办。读文件和通用工具调用不接，那些事件没有「交给用户审批」的答复。
+- **WorkBuddy** 的提问不在岛上作答。宿主自己的问卷会先出现，岛上只亮一条提醒，点一下跳回去答。权限同样只提醒。`settings.json` 改完不会热加载，要重开当前会话。
+- **Trae / Trae CN** 没有会话结束事件。待办工具虽然在对话里看得到，hook 收不到，所以没有进度卡。
+- **ChatGPT**（原 Codex）的工具名里没有 `AskUserQuestion`，也没有能对上的待办事件，所以这两张卡不出。装好之后还要在 ChatGPT 里把 hook 信任一次，改过脚本要重新信任。
+- **OpenCode** 没有权限提醒，也没有会话结束。
+
+部分宿主还会多几张横幅：子任务完成、文档或浏览器待审、上下文即将压缩或已经压缩、这一轮没有完成、额度或登录失效。点一下同样跳回原来的窗口。工具调用失败不通知。
+
+---
+
 ## ✨ Features
 
 - 🫧 **灵动岛动画** — 弹簧逐帧形变，展开/收起是「液态」刘海轮廓，不是硬弹
@@ -81,7 +111,7 @@ BetterFocusIDE is a native macOS menu-bar accessory app (no Dock icon) that surf
 - 📌 **图钉固定** — 固定保持展开 ⇄ 按需自动收起
 - 🕘 **通知历史** — 点空闲的岛回顾最近 5 条通知
 - ⚙️ **设置面板** — 通知开关、声音/震动、卡片行为偏好
-- 🔌 **一键接入** — 幂等安装 Qoder / OpenCode / Cursor / WorkBuddy 四处 hook
+- 🔌 **按需接入** — 勾选这台 Mac 上已安装的 IDE，只给选中的写入 hook
 - 🛡️ **单实例互斥** — `flock` 启动锁，防止重复启动
 - 🖥️ **刘海屏优先** — 固定钉在内置刘海屏，不随焦点在两屏间跳
 - 🩺 **Doctor 自检** — 一键排查 socket / hook 注册 / 答案目录是否就绪
@@ -125,20 +155,11 @@ open /Applications/BetterFocusIDE.app
 
 ### 接入你的 AI 编码工具
 
-点状态栏图标 → **一键安装 Hook / Plugin**，自动写入四组集成（幂等、只增删自己的条目，绝不碰你已有的其它 hook）：
+点状态栏图标 → **安装 Hook / Plugin…**。先列出这台 Mac 上已经安装、而且受支持的 IDE，默认全部勾选，只给勾中的写入 hook。安装是幂等的，只增删自己的条目。
 
-| 宿主 | 写入位置 | 注册的事件 |
-|---|---|---|
-| **Qoder** | `~/.qoder/` | `PreToolUse` / `PermissionRequest` / `SessionEnd` / `Stop` |
-| **OpenCode** | `~/.config/opencode/plugins/` | `question` 工具 + `session.idle` |
-| **Cursor** | `~/.cursor/` | `stop` / `sessionEnd`（观测型，恒回 `{}`） |
-| **WorkBuddy** | `~/.workbuddy/` | `PreToolUse` / `Notification` + `PermissionRequest` / `Stop` / `SessionEnd` |
+每个宿主能弹出哪些卡片，见 [各 IDE 能做什么](#各-ide-能做什么)。
 
-> **宿主的差异**
-> - **Cursor 只做「完成/结束」通知**：它的权限类 hook 必须在 stdout 返回 `allow`/`deny`，那等于替你拍板或拦工具，所以审批仍留在 Cursor 自己的界面。
-> - **WorkBuddy 的 hook 改动不热加载**：装完需新开一个会话才生效；权限提醒只弹横幅，审批在 WorkBuddy 原生对话框完成。
-
-**接入后验证**：在宿主里让 Agent 提一个选择题，刘海应弹出提问卡片；让它跑完一轮，应弹完成横幅。没反应就用下面的 [Doctor 自检](#doctor-自检)。
+**接入后验证**：在宿主里让 Agent 提一个选择题，刘海应弹出提问卡片（Cursor、ChatGPT 没有这张卡，改看完成横幅）；让它跑完一轮，应弹完成横幅。没反应就用下面的 [Doctor 自检](#doctor-自检)。
 
 ---
 

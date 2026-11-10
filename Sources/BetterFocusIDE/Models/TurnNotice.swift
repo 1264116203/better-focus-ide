@@ -82,8 +82,9 @@ struct TurnNotice: Equatable, Identifiable {
         // 最近一次用户输入，随 payload 一起上报（`title` / `prompt`）。
         let payloadTitle = Transcript.shorten(
             message.payload?["title"]?.stringValue ?? "", limit: Transcript.titleLimit)
-        let payloadPrompt = Transcript.shorten(
-            message.payload?["prompt"]?.stringValue ?? "", limit: Transcript.bodyLimit)
+        let rawPrompt = message.payload?["prompt"]?.stringValue ?? ""
+        let payloadPrompt = Transcript.shorten(rawPrompt, limit: Transcript.bodyLimit)
+        let payloadDetail = Transcript.shorten(rawPrompt, limit: Transcript.detailLimit)
 
         // 标题优先级：会话真实标题 → hook 直报的标题 → 用户这一轮的输入 →
         // 中性兜底。第三档很重要：WorkBuddy 这类宿主不给 transcript 路径时，
@@ -104,11 +105,11 @@ struct TurnNotice: Equatable, Identifiable {
 
         let resolvedBody: String
         let bodyIsFallback: Bool
-        if !summary.latest.isEmpty {
-            resolvedBody = summary.latest
+        if !summary.latestDetail.isEmpty {
+            resolvedBody = summary.latestDetail
             bodyIsFallback = false
-        } else if !payloadPrompt.isEmpty {
-            resolvedBody = payloadPrompt
+        } else if !payloadDetail.isEmpty {
+            resolvedBody = payloadDetail
             bodyIsFallback = false
         } else {
             resolvedBody = "\(Self.jumpHintPrefix) \(name)"

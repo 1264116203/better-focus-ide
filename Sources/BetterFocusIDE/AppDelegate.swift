@@ -142,7 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         model: hookPicker,
                         onInstall: { [weak self] in self?.installSelectedHooks() },
                         onCancel: { [weak self] in self?.closeAuxiliaryWindow("安装 Hook / Plugin") }),
-                      size: CGSize(width: 400, height: 460))
+                      size: CGSize(width: 460, height: 520))
     }
 
     private func installSelectedHooks() {
@@ -226,27 +226,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 第一次成功启动时弹出引导。关掉窗口后不再出现。
     private func presentOnboardingIfNeeded() {
         guard OnboardingGate.shouldPresent() else { return }
-        onboardingHooks.reload()
+        presentOnboarding()
+    }
+
+    /// 打开引导窗口，并从第一页开始。调试页用来反复看版式，不改「下次还要不要自动出现」。
+    func presentOnboarding() {
+        onboardingHooks.reloadForGuide()
         let title = OnboardingGate.windowTitle
-        let size = CGSize(width: 680, height: 520)
+        let size = CGSize(width: 760, height: 640)
         let hosting = NSHostingView(rootView: OnboardingView(
             hooks: onboardingHooks,
             onInstall: { [weak self] in self?.finishOnboarding(install: true) },
             onSkip: { [weak self] in self?.finishOnboarding(install: false) }))
         hosting.frame = NSRect(origin: .zero, size: size)
         hosting.sizingOptions = []
-        let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false)
-        window.contentView = hosting
-        window.title = title
-        window.isReleasedWhenClosed = false
+        let window: NSWindow
+        if let existing = auxiliaryWindows[title] {
+            window = existing
+            window.contentView = hosting
+        } else {
+            window = NSWindow(
+                contentRect: NSRect(origin: .zero, size: size),
+                styleMask: [.titled, .closable],
+                backing: .buffered,
+                defer: false)
+            window.contentView = hosting
+            window.title = title
+            window.isReleasedWhenClosed = false
+            window.delegate = self
+            auxiliaryWindows[title] = window
+        }
         window.setContentSize(size)
         window.center()
-        window.delegate = self
-        auxiliaryWindows[title] = window
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         DispatchQueue.main.async {

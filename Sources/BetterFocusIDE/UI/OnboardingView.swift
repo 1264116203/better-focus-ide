@@ -26,7 +26,7 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             footer
         }
-        .frame(width: 680, height: 520)
+        .frame(width: 760, height: 640)
         .onAppear(perform: armAutoAdvance)
         .onChange(of: page) { _, _ in armAutoAdvance() }
         .onReceive(clock.ticker) { now in
@@ -103,22 +103,9 @@ struct OnboardingView: View {
     private func pageBody(_ item: OnboardingGate.Page) -> some View {
         switch item {
         case .welcome:
-            textPage(
-                symbol: "macbook",
-                title: "刘海里的编码助手",
-                paragraphs: [
-                    "BetterFocusIDE 挂在 MacBook 的刘海上，没有 Dock 图标。",
-                    "智能体提问、请求权限、做完一轮时，卡片出现在刘海旁边。你可以就地回答，也可以点一下跳回原来的窗口。",
-                ])
+            welcomePage
         case .features:
-            pointsPage(
-                title: "它会做这些事",
-                points: [
-                    ("text.bubble", "提问", "选项和补充说明写在岛上，答案回到发起请求的智能体。"),
-                    ("lock.shield", "权限提醒", "IDE 要你审批时，岛上亮起提醒。批准仍在 IDE 自己的对话框里完成。"),
-                    ("checkmark.circle", "回合完成", "这一轮结束后弹出横幅，点击后聚焦到对应的项目窗口。"),
-                    ("clock.arrow.circlepath", "最近通知", "刚出现过的几条可以再打开看一眼。"),
-                ])
+            featuresPage
         case .notes:
             pointsPage(
                 title: "用之前先知道",
@@ -133,23 +120,74 @@ struct OnboardingView: View {
         }
     }
 
+    private var welcomePage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("刘海里的编码助手")
+                .font(.system(size: 22, weight: .semibold))
+            Text("提问、权限和每轮任务结束时，卡片在刘海下展开。")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                OnboardingShot(name: "idle", height: 88)
+                Text("通知自己收起、你还没看过时，胶囊外圈会亮起呼吸灯。这是未读提示，点一下就能把那条展开。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            OnboardingShot(name: "question", height: 248)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var featuresPage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("它会做这些事")
+                .font(.system(size: 22, weight: .semibold))
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12),
+                                GridItem(.flexible(), spacing: 12)],
+                      spacing: 12) {
+                featureShot("提问", "在岛上选完，答案写回智能体", "question")
+                featureShot("权限提醒", "亮起提醒，批准仍在 IDE 里", "permission")
+                featureShot("回合完成", "点一下跳回对应的项目窗口", "notice")
+                featureShot("最近通知", "点空闲的胶囊，回看刚出现的几条", "history")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func featureShot(_ title: String, _ caption: String, _ image: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            OnboardingShot(name: image, height: 148)
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+            Text(caption)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     private var installPage: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("接上你的 IDE")
                 .font(.system(size: 22, weight: .semibold))
-            Text(hooks.items.isEmpty
-                 ? "这台 Mac 上还没有检测到受支持的 IDE。装好之后，可以从菜单栏图标的「安装 Hook / Plugin…」再装。"
-                 : "已检测到这些受支持的 IDE，默认全部勾选。取消勾选的不会安装。")
+            Text("下面是受支持的 IDE。本机已经安装的默认勾选，没安装的只展示、不勾选。")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if !hooks.items.isEmpty {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 10) {
                         ForEach($hooks.items) { $item in
-                            Toggle(item.label, isOn: $item.selected)
-                                .toggleStyle(.checkbox)
-                                .font(.system(size: 13))
+                            HookInstallRow(item: $item)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -159,26 +197,6 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 36)
         .padding(.top, 36)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func textPage(symbol: String, title: String, paragraphs: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Image(systemName: symbol)
-                .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text(title)
-                .font(.system(size: 22, weight: .semibold))
-            ForEach(paragraphs, id: \.self) { paragraph in
-                Text(paragraph)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 36)
-        .padding(.top, 48)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 

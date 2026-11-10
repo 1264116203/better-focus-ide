@@ -132,6 +132,26 @@ final class QuestionCardLayoutTests: XCTestCase {
         XCTAssertEqual(h, 12 * 1.3, accuracy: 0.01)
     }
 
+    /// 正文超过两行时，折叠高度只留两行并加上展开按钮；展开后按全文加高。
+    func testCollapsedDetailIsShorterAndKeepsTheButton() {
+        let question = AgentQuestion(
+            id: "q1", header: "h",
+            question: String(repeating: "这是一段需要展开才能看完的提问正文。", count: 8),
+            options: [AgentQuestionOption(label: "继续", description: "")])
+        let collapsed = QuestionCardLayout.contentHeight(
+            question: question, hasProject: false, metrics: metrics,
+            detail: .question(expanded: false))
+        let expanded = QuestionCardLayout.contentHeight(
+            question: question, hasProject: false, metrics: metrics,
+            detail: .question(expanded: true))
+        XCTAssertGreaterThan(expanded, collapsed)
+        let textW = metrics.cardWidth - metrics.cardInset * 2
+        let full = QuestionCardLayout.textHeight(question.question, width: textW, font: 12)
+        let folded = DetailText.measure(fullHeight: full, font: 12, collapsedLines: 2, expanded: false)
+        XCTAssertTrue(folded.showsControl)
+        XCTAssertEqual(folded.shownLines, 2)
+    }
+
     /// 空文本按单行处理（避免 0 高度让布局塌陷）。
     func testEmptyTextCountsAsOneLine() {
         let h = QuestionCardLayout.textHeight("", width: 100, font: 12)

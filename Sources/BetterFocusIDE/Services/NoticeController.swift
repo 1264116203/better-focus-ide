@@ -5,6 +5,9 @@ import Foundation
 import Combine
 
 /// 管理瞬态的"轮次完成"横幅：按会话去抖重复、在有卡片等待用户时跳过、超时后自动消失。
+///
+/// 同一会话只留最新一条未读。更新的通知到达时，这条会话里更早的（正在展示、
+/// 排在后面、以及收起后还能点开的）都视为已读，不再要求逐条点掉。
 final class NoticeController: ObservableObject {
     @Published private(set) var notice: TurnNotice?
 
@@ -14,6 +17,10 @@ final class NoticeController: ObservableObject {
     /// 每个完成的轮次都回调一次以记入历史——即便是弹不出横幅的 CLI 会话，
     /// 也要留下痕迹供日后回顾。
     var onRemember: ((TurnNotice) -> Void)?
+    /// 队列条数变了、但没有换上屏通知时刷新待处理计数。
+    var onQueueChanged: (() -> Void)?
+    /// 收起后待恢复的那条被同一会话的更新顶掉，呼吸灯应熄灭。
+    var onSupersededResting: (() -> Void)?
 
     /// 有交互式卡片在屏上时抑制横幅。
     var hasPendingCard: () -> Bool = { false }
@@ -26,9 +33,10 @@ final class NoticeController: ObservableObject {
     /// 正常 socket 分发恒为 false。见 `NotchService.injectDebugMessage`。
     var bypassGates = false
 
-    /// 每个会话上次横幅的时间，用于去抖。
+    /// 每个去抖键上次横幅的时间与内容指纹，用于丢掉背靠背的重复上报。
     private var lastNoticeAt: [String: Date] = [:]
-    /// 等待展示的通知队列；当前通知展示期间新到的通知排入此队列。
+    private var lastFingerprint: [String: String] = [:]
+    /// 等待展示的通知队列。同一会话在队列里至多一条，后来的顶掉更早的。
     private var queue: [TurnNotice] = []
     /// 自动收起时保存的通知，供用户点击气泡时重新展示（而非直接打开历史）。
     private var lastDismissedNotice: TurnNotice?
@@ -55,29 +63,16 @@ final class NoticeController: ObservableObject {
         let settings = Settings.shared
         guard settings.turnNotifyEnabled || bypassGates else { return }
 
-        let sessionID = message.sessionID
-        let now = Date()
-        // 去抖：多个子会话会背靠背上报 idle。
-        if let last = lastNoticeAt[sessionID],
-           now.timeIntervalSince(last) < settings.notifyBannerDuration * 0.4 {
-            return
-        }
-
         guard let parsed = TurnNotice.parse(message: message) else { return }
-        if lastNoticeAt.count > 32 { lastNoticeAt.removeAll() }
-        lastNoticeAt[sessionID] = now
+        // 去抖只丢掉内容相同的背靠背上报。同一会话内容变了，是更新的一轮，要留下。
+        if isRepeat(parsed, key: message.sessionID, now: Date()) { return }
 
         // 每个完成的轮次先记入历史。`qodercli` 会话（无头 autocommit 式脚本）留痕
         // 但不抢占屏幕——它的"用户输入"是被管道进来的 diff，而非用户正在等待的内容。
         onRemember?(parsed)
         if parsed.fromCLI { return }
 
-        // 已有通知在屏或有交互卡片等待用户时，入队而非替换。
-        if hasActiveNotice || hasPendingCard() {
-            queue.append(parsed)
-            return
-        }
-        show(parsed)
+        deliver(parsed)
     }
 
     /// 处理一条 `permission_notice` 消息：权限申请只通知不拦截，以横幅形式展示。
@@ -89,14 +84,6 @@ final class NoticeController: ObservableObject {
             return
         }
 
-        let sessionID = message.sessionID
-        let now = Date()
-        // 去抖
-        if let last = lastNoticeAt[sessionID],
-           now.timeIntervalSince(last) < settings.notifyBannerDuration * 0.4 {
-            Log.debug("handlePermissionNotice: debounced (interval=\(now.timeIntervalSince(last))s)", topic: "permission")
-            return
-        }
         if hasPendingCard() {
             Log.debug("handlePermissionNotice: queuing (hasPendingCard=true)", topic: "permission")
         }
@@ -132,7 +119,7 @@ final class NoticeController: ObservableObject {
         let notice = TurnNotice(
             provider: provider,
             providerName: host.name.isEmpty ? name : host.name,
-            sessionID: sessionID,
+            sessionID: message.sessionID,
             title: title,
             body: body,
             bodyIsFallback: false,
@@ -144,28 +131,19 @@ final class NoticeController: ObservableObject {
             fromCLI: false
         )
 
-        if lastNoticeAt.count > 32 { lastNoticeAt.removeAll() }
-        lastNoticeAt[sessionID] = now
-
-        onRemember?(notice)
-        // 已有通知在屏或有交互卡片时，入队而非替换。
-        if hasActiveNotice || hasPendingCard() {
-            queue.append(notice)
+        if isRepeat(notice, key: message.sessionID, now: Date()) {
+            Log.debug("handlePermissionNotice: 内容相同，去抖丢弃", topic: "permission")
             return
         }
-        show(notice)
+
+        onRemember?(notice)
+        deliver(notice)
     }
 
     /// WorkBuddy 提问：不接管作答，只留一张可点的通知，点一下跳回宿主。
     func handleQuestionNotice(message: AgentSocketMessage) {
         guard Settings.shared.questionEnabled || bypassGates else { return }
         let sessionID = message.sessionID
-        let now = Date()
-        let debounceKey = sessionID + ":question"
-        if let last = lastNoticeAt[debounceKey],
-           now.timeIntervalSince(last) < Settings.shared.notifyBannerDuration * 0.4 {
-            return
-        }
         let providerEnum = message.resolvedProvider
         let host = HostInfo(from: message.host, cwd: message.cwd)
         let name = AgentProvider.label(provider: providerEnum,
@@ -188,18 +166,13 @@ final class NoticeController: ObservableObject {
             kind: .question,
             project: project,
             host: host.isEmpty ? nil : host,
-            arrivedAt: now,
+            arrivedAt: Date(),
             jumpEnabled: true,
             fromCLI: false
         )
-        if lastNoticeAt.count > 32 { lastNoticeAt.removeAll() }
-        lastNoticeAt[debounceKey] = now
+        if isRepeat(notice, key: sessionID + ":question", now: Date()) { return }
         onRemember?(notice)
-        if hasActiveNotice || hasPendingCard() {
-            queue.append(notice)
-            return
-        }
-        show(notice)
+        deliver(notice)
     }
 
     /// 失败、子任务、待审阅、上下文压缩。都是横幅，不拦截宿主。
@@ -209,11 +182,6 @@ final class NoticeController: ObservableObject {
         guard Settings.shared.turnNotifyEnabled || bypassGates else { return }
         let sessionID = message.sessionID
         let now = Date()
-        let debounceKey = sessionID + ":" + kind.rawValue
-        if let last = lastNoticeAt[debounceKey],
-           now.timeIntervalSince(last) < Settings.shared.notifyBannerDuration * 0.4 {
-            return
-        }
         let providerEnum = message.resolvedProvider
         let host = HostInfo(from: message.host, cwd: message.cwd)
         let name = AgentProvider.label(provider: providerEnum,
@@ -249,30 +217,116 @@ final class NoticeController: ObservableObject {
             jumpEnabled: Settings.shared.turnNotifyJump,
             fromCLI: false
         )
-        if lastNoticeAt.count > 32 { lastNoticeAt.removeAll() }
-        lastNoticeAt[debounceKey] = now
+        if isRepeat(notice, key: sessionID + ":" + kind.rawValue, now: now) { return }
         onRemember?(notice)
-        if hasActiveNotice || hasPendingCard() {
-            queue.append(notice)
-            return
+        deliver(notice)
+    }
+
+    // MARK: - 同一会话只留最新
+
+    /// 一条通知在未读队列里的位置。
+    struct Slot {
+        var current: TurnNotice?
+        var queued: [TurnNotice]
+        var resting: TurnNotice?
+    }
+
+    /// `admit` 对屏上内容做的事。
+    enum AdmitEffect: Equatable {
+        /// 没有别的通知挡着，这条直接上屏。
+        case present
+        /// 屏上就是同一会话的旧通知，就地换成这条，不收起再展开。
+        case replace
+        /// 屏上是别的会话，或提问/权限卡还在等用户。这条只排队。
+        /// `retiredResting`：收起后还能点开的那条属于本会话，已经被顶掉。
+        case enqueue(retiredResting: Bool)
+    }
+
+    /// 收下一条通知。同一会话只留最新一条：正在展示、排队、以及收起待恢复的旧通知都视为已读。
+    ///
+    /// 提问或权限卡还占着岛时（`blocked`），不把横幅抢到前台。同会话正在垫着的那条
+    /// 也清掉，只把最新的留在队列里，等卡片撤下再弹出。
+    static func admit(_ incoming: TurnNotice, into slot: Slot, blocked: Bool) -> (slot: Slot, effect: AdmitEffect) {
+        var slot = slot
+        let session = incoming.sessionID
+        var retiredResting = false
+        if !session.isEmpty {
+            slot.queued.removeAll { $0.sessionID == session }
+            if slot.resting?.sessionID == session {
+                slot.resting = nil
+                retiredResting = true
+            }
         }
-        show(notice)
+        if !session.isEmpty, slot.current?.sessionID == session {
+            if blocked {
+                slot.current = nil
+                slot.queued.append(incoming)
+                return (slot, .enqueue(retiredResting: retiredResting))
+            }
+            slot.current = incoming
+            slot.resting = nil
+            return (slot, .replace)
+        }
+        if slot.current != nil || blocked {
+            slot.queued.append(incoming)
+            return (slot, .enqueue(retiredResting: retiredResting))
+        }
+        slot.current = incoming
+        slot.resting = nil
+        return (slot, .present)
+    }
+
+    /// 内容相同且间隔太短：子会话会把同一轮 idle 连报两次，丢掉后到的那次。
+    private func isRepeat(_ notice: TurnNotice, key: String, now: Date) -> Bool {
+        let fingerprint = "\(notice.kind.rawValue)\u{1f}\(notice.title)\u{1f}\(notice.body)"
+        let window = Settings.shared.notifyBannerDuration * 0.4
+        if let last = lastNoticeAt[key],
+           now.timeIntervalSince(last) < window,
+           lastFingerprint[key] == fingerprint {
+            return true
+        }
+        if lastNoticeAt.count > 32 {
+            lastNoticeAt.removeAll()
+            lastFingerprint.removeAll()
+        }
+        lastNoticeAt[key] = now
+        lastFingerprint[key] = fingerprint
+        return false
+    }
+
+    /// 把一条通知放进未读集合，并按 `admit` 的结果上屏或排队。
+    private func deliver(_ incoming: TurnNotice) {
+        let before = Slot(current: notice, queued: queue, resting: lastDismissedNotice)
+        let result = Self.admit(incoming, into: before, blocked: hasPendingCard())
+        if !incoming.sessionID.isEmpty,
+           before.current?.sessionID == incoming.sessionID
+            || before.queued.contains(where: { $0.sessionID == incoming.sessionID })
+            || before.resting?.sessionID == incoming.sessionID {
+            Log.info("会话 \(incoming.sessionID) 有更新的通知，更早的未读已自动标为已读", topic: "notice")
+        }
+        objectWillChange.send()
+        notice = result.slot.current
+        queue = result.slot.queued
+        lastDismissedNotice = result.slot.resting
+        switch result.effect {
+        case .present, .replace:
+            onPresent?()
+            FeedbackService.onArrive()
+        case .enqueue(let retiredResting):
+            onQueueChanged?()
+            if retiredResting { onSupersededResting?() }
+        }
     }
 
     // MARK: - 展示 / 消失
 
-    /// 展示一条通知：设置 notice 并触发 onPresent 回调。
+    /// 把一条已经决定要看的通知放到屏上。收起后点气泡恢复走这里。
     func show(_ newNotice: TurnNotice) {
-        // 已有通知在屏时，新通知入队等待。
-        if notice != nil {
-            queue.append(newNotice)
-            return
-        }
+        objectWillChange.send()
         notice = newNotice
-        lastDismissedNotice = nil  // 新通知取代旧的未恢复通知
+        lastDismissedNotice = nil
         onPresent?()
         FeedbackService.onArrive()
-        // 自动收起由 NotchService 的悬停计时器统一管理。
     }
 
     /// 当前通知被处理（点击/自动收起）后，从队列中弹出下一条。

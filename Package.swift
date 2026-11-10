@@ -24,7 +24,9 @@ let package = Package(
             exclude: ["App/main.swift"],
             resources: [
                 // IDE 图标资源（用于徽章显示真实 IDE 图标）
-                .copy("Resources/IDE-Icons")
+                .copy("Resources/IDE-Icons"),
+                // 首次引导页的实拍
+                .copy("Resources/Onboarding")
             ],
             swiftSettings: swift5
         ),

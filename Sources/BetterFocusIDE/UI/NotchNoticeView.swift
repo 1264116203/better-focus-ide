@@ -11,6 +11,8 @@ struct NotchNoticeView: View {
     var pinned = false
     var onTogglePin: () -> Void = {}
     let onTap: () -> Void
+    var detailExpanded = false
+    var onToggleDetail: () -> Void = {}
     /// 点击"已读"按钮的回调（不跳转 IDE，直接标记已读并关闭）。
     var onMarkRead: () -> Void = {}
     /// 有值时触发提供方徽章上的铃铛摆动动画。
@@ -24,6 +26,25 @@ struct NotchNoticeView: View {
     @State private var drawerOffset: CGFloat = 0
     /// 抽屉效果：可见宽度（从卡片满宽逐渐缩小到 0，模拟收入右侧抽屉）。
     @State private var drawerVisibleWidth: CGFloat? = nil
+
+    private var noticeBody: some View {
+        let width = max(40, NotchLayout.expandedWidth - inset * 2 - 36 - 10)
+        let measured = DetailText.measure(notice.body, width: width, font: 12,
+                                          collapsedLines: 1, expanded: detailExpanded)
+        return VStack(alignment: .trailing, spacing: DetailText.controlSpacing) {
+            DetailTextBlock(
+                text: notice.body,
+                fontSize: 12,
+                color: .white.opacity(0.75),
+                collapsedLines: 1,
+                expanded: detailExpanded,
+                measure: measured)
+                .allowsHitTesting(false)
+            if measured.showsControl {
+                DetailDisclosure(expanded: detailExpanded, action: onToggleDetail)
+            }
+        }
+    }
 
     /// 拖动关闭触发阈值（点）。
     private let swipeDismissThreshold: CGFloat = 80
@@ -48,8 +69,17 @@ struct NotchNoticeView: View {
             let visW = drawerVisibleWidth ?? fullW
 
             ZStack(alignment: .topTrailing) {
+                // 整卡点击放在底层按钮上。详情「收起」若和祖先 onTapGesture 叠在一起，
+                // 点文字折叠会把这次点击当成点横幅：跳回 IDE 并把整张卡片收掉。
                 Button(action: onTap) {
-                    HStack(spacing: 10) {
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("打开这条通知的来源")
+
+                HStack(spacing: 10) {
                         // 提供方徽章：优先使用真实 IDE 图标，回退到文字徽章。
                         // host 缺失时（如 CLI 直发的测试消息）用 providerName 兜底，
                         // 使 opencode / qoder 等提供方仍能匹配到真实图标。
@@ -68,21 +98,21 @@ struct NotchNoticeView: View {
                         )
                         .rotationEffect(.degrees(bellAngle))
                         .scaleEffect(bellScale)
+                        .allowsHitTesting(false)
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text(notice.kind == .turn ? "任务完成" : notice.title)
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.95))
                                 .lineLimit(1)
-                            Text(notice.body)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.white.opacity(0.75))
-                                .lineLimit(1)
+                                .allowsHitTesting(false)
+                            noticeBody
                             if !notice.project.isEmpty {
                                 Text(notice.project)
                                     .font(.system(size: 11))
                                     .foregroundStyle(.white.opacity(0.45))
                                     .lineLimit(1)
+                                    .allowsHitTesting(false)
                             }
                         }
                         Spacer(minLength: 0)
@@ -94,13 +124,11 @@ struct NotchNoticeView: View {
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 2)
                                 .liquidGlass(.capsule, fallback: Color.white.opacity(0.15))
+                                .allowsHitTesting(false)
                         }
                     }
                     .padding(.horizontal, inset)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
 
                 // 右上角工具栏：已读按钮 + 钉住开关
                 HStack(spacing: 8) {

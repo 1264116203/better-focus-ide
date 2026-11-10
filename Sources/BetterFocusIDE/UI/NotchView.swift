@@ -114,11 +114,15 @@ struct NotchView: View {
             case .question:
                 NotchAgentQuestionView(controller: service.questionController,
                                        pinned: service.pinned,
-                                       onTogglePin: { service.togglePin() })
+                                       onTogglePin: { service.togglePin() },
+                                       detailExpanded: service.detailExpanded,
+                                       onToggleDetail: { service.toggleDetailExpanded() })
             case .permission:
                 NotchPermissionView(controller: service.permissionController,
                                     pinned: service.pinned,
-                                    onTogglePin: { service.togglePin() })
+                                    onTogglePin: { service.togglePin() },
+                                    detailExpanded: service.detailExpanded,
+                                    onToggleDetail: { service.toggleDetailExpanded() })
             case .notice:
                 if let notice = service.noticeController.notice {
                     NotchNoticeView(controller: service.noticeController,
@@ -126,6 +130,8 @@ struct NotchView: View {
                                     pinned: service.pinned,
                                     onTogglePin: { service.togglePin() },
                                     onTap: { service.noticeController.tapped() },
+                                    detailExpanded: service.detailExpanded,
+                                    onToggleDetail: { service.toggleDetailExpanded() },
                                     onMarkRead: { service.noticeController.markRead() },
                                     bellSwingStart: service.bellSwingStart)
                 }

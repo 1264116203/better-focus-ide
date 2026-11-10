@@ -10,6 +10,9 @@ struct NotchAgentQuestionView: View {
     @ObservedObject private var settings = Settings.shared
     var pinned = false
     var onTogglePin: () -> Void = {}
+    /// 正文和选项说明是否已展开。放不下时才出现按钮。
+    var detailExpanded = false
+    var onToggleDetail: () -> Void = {}
     @FocusState private var otherFocused: Bool
 
     private var prompt: AgentQuestionPrompt? { controller.prompt }
@@ -52,12 +55,7 @@ struct NotchAgentQuestionView: View {
                         .foregroundStyle(.white.opacity(0.45))
                         .lineLimit(1)
                 }
-                if !question.question.isEmpty {
-                    Text(question.question)
-                        .font(.system(size: bodyFontSize))
-                        .foregroundStyle(.white.opacity(0.92))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                detailSection(question)
                 // 选项列表直接展开（不再套 ScrollView），所有选项一次性可见；
                 // 卡片高度由 NotchService.questionCardHeight() 按内容自适应。
                 VStack(spacing: 6) {
@@ -68,6 +66,65 @@ struct NotchAgentQuestionView: View {
             }
             .padding(.horizontal, inset)
             .padding(.vertical, 10)
+        }
+    }
+
+    // MARK: - 详情
+
+    private var questionTextWidth: CGFloat {
+        max(80, NotchLayout.questionCardWidth - inset * 2)
+    }
+
+    private var optionTextWidth: CGFloat {
+        max(40, questionTextWidth - QuestionCardLayout.rowTextInset)
+    }
+
+    private var detailStyle: DetailText.Style {
+        .question(expanded: detailExpanded)
+    }
+
+    /// 正文或任一选项说明超过折叠行数。
+    private func showsDetailControl(_ question: AgentQuestion) -> Bool {
+        let metrics = QuestionCardLayout.Metrics(
+            cardWidth: NotchLayout.questionCardWidth,
+            cardInset: inset,
+            badgeSize: IDEIconProvider.badgeSize,
+            bodyFont: bodyFontSize,
+            optionFont: optionFontSize,
+            descFont: descFontSize,
+            optionRowMin: NotchLayout.questionOptionRowMin,
+            sendHeight: NotchLayout.questionSendHeight,
+            minHeight: 0)
+        return QuestionCardLayout.detailOverflow(
+            question: question,
+            textWidth: questionTextWidth,
+            optionTextWidth: optionTextWidth,
+            metrics: metrics,
+            detail: detailStyle)
+    }
+
+    @ViewBuilder
+    private func detailSection(_ question: AgentQuestion) -> some View {
+        let showsControl = showsDetailControl(question)
+        if !question.question.isEmpty || showsControl {
+            VStack(alignment: .trailing, spacing: DetailText.controlSpacing) {
+                if !question.question.isEmpty {
+                    DetailTextBlock(
+                        text: question.question,
+                        fontSize: bodyFontSize,
+                        collapsedLines: detailStyle.bodyCollapsedLines,
+                        expanded: detailExpanded,
+                        measure: DetailText.measure(
+                            question.question,
+                            width: questionTextWidth,
+                            font: bodyFontSize,
+                            collapsedLines: detailStyle.bodyCollapsedLines,
+                            expanded: detailExpanded))
+                }
+                if showsControl {
+                    DetailDisclosure(expanded: detailExpanded, action: onToggleDetail)
+                }
+            }
         }
     }
 
@@ -160,10 +217,18 @@ struct NotchAgentQuestionView: View {
                         .foregroundStyle(.white.opacity(0.95))
                         .fixedSize(horizontal: false, vertical: true)
                     if !option.description.isEmpty {
-                        Text(option.description)
-                            .font(.system(size: descFontSize))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        DetailTextBlock(
+                            text: option.description,
+                            fontSize: descFontSize,
+                            color: .secondary,
+                            collapsedLines: DetailText.Style.question(expanded: false).descriptionCollapsedLines,
+                            expanded: detailExpanded,
+                            measure: DetailText.measure(
+                                option.description,
+                                width: optionTextWidth,
+                                font: descFontSize,
+                                collapsedLines: DetailText.Style.question(expanded: false).descriptionCollapsedLines,
+                                expanded: detailExpanded))
                     }
                 }
                 Spacer(minLength: 0)

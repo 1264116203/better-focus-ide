@@ -151,12 +151,16 @@ final class HostHookTemplateTests: XCTestCase {
 
     // MARK: - 注册表
 
-    /// Cursor 只注册观测型事件：权限类事件会强制 allow/deny，绝不碰。
+    /// Cursor 的权限只接能回 ask 的事件，让原生审批框继续出现。
     func testCursorRegistersObserveOnlyEvents() {
         XCTAssertEqual(CursorHookInstaller.events, [
             "beforeSubmitPrompt", "stop", "sessionEnd",
             "subagentStop", "preCompact",
+            "beforeShellExecution", "beforeMCPExecution",
         ])
+        let cursor = CursorHookInstaller.helperContent
+        XCTAssertTrue(cursor.contains(#"{"permission": "ask"}"#))
+        XCTAssertFalse(cursor.contains("beforeReadFile"))
     }
 
     /// WorkBuddy 的提问必须挂在 PreToolUse + AskUserQuestion 上，

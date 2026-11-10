@@ -35,6 +35,7 @@ struct DebugPanelView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Metric.rowGap) {
                 header
+                guideSection
                 todoQuickSection
                 ForEach(DebugCatalog.groups, id: \.self) { group in
                     Text(group)
@@ -103,6 +104,26 @@ struct DebugPanelView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.primary.opacity(0.04))
         )
+    }
+
+    // MARK: - 引导页
+
+    /// 再打开首次启动的引导，方便对照实拍和版式。关掉窗口不会让它在下次启动时重来。
+    private var guideSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("引导页")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 4)
+            Text("打开首次启动时的引导，从第一页看实拍和安装列表。")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Button("展示引导页") {
+                (NSApp.delegate as? AppDelegate)?.presentOnboarding()
+                status = "已打开引导页"
+            }
+            .controlSize(.small)
+        }
     }
 
     // MARK: - 场景行

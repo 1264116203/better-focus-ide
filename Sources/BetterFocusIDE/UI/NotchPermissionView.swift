@@ -10,6 +10,8 @@ struct NotchPermissionView: View {
     @ObservedObject private var settings = Settings.shared
     var pinned = false
     var onTogglePin: () -> Void = {}
+    var detailExpanded = false
+    var onToggleDetail: () -> Void = {}
 
     private var request: PermissionRequest? { controller.request }
 
@@ -100,19 +102,33 @@ struct NotchPermissionView: View {
 
     // MARK: - 详情
 
-    /// 详情块：等宽字体展示命令/路径，最多 4 行，带半透明圆角底。
+    /// 详情块：等宽字体展示命令/路径。默认 4 行，放不下时可以展开。
     private func detailBlock(_ req: PermissionRequest) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(req.detail)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.75))
-                .lineLimit(4)
-                .fixedSize(horizontal: false, vertical: true)
+        let measured = detailMeasure(req.detail)
+        return VStack(alignment: .trailing, spacing: DetailText.controlSpacing) {
+            DetailTextBlock(
+                text: req.detail,
+                fontSize: 10,
+                monospaced: true,
+                color: .white.opacity(0.75),
+                collapsedLines: 4,
+                expanded: detailExpanded,
+                measure: measured)
+            if measured.showsControl {
+                DetailDisclosure(expanded: detailExpanded, action: onToggleDetail)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .liquidGlass(.rounded(14), fallback: Color.white.opacity(0.06))
+    }
+
+    private func detailMeasure(_ detail: String) -> DetailText.Measure {
+        let width = max(40, NotchLayout.questionCardWidth - inset * 2 - 16)
+        let full = QuestionCardLayout.textHeight(detail, width: width, font: 10)
+        return DetailText.measure(fullHeight: full, font: 10,
+                                  collapsedLines: 4, expanded: detailExpanded)
     }
 
     // MARK: - 按钮

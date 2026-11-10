@@ -5,11 +5,14 @@ import Foundation
 
 /// 安装 / 卸载 Cursor 用户级 hook（`~/.cursor/hooks.json`）。
 ///
-/// 只注册**观测型**事件，且一律回合法空对象（`beforeSubmitPrompt` 回
-/// `{"continue": true}`）。`subagentStop`、`preCompact` 只发横幅。
-/// 工具调用失败不通知。权限类 hook（`preToolUse` /
-/// `beforeShellExecution` 等）要求返回 `allow` / `deny`，那会替用户改变
-/// 审批流程；输出非法 JSON 甚至会直接阻塞工具调用。因此 Cursor 侧不做提问与权限。
+/// 只注册不替用户拍板的事件。`beforeSubmitPrompt` 回 `{"continue": true}`，
+/// 其余观测事件回 `{}`。`subagentStop`、`preCompact` 只发横幅。
+/// 工具调用失败不通知。
+///
+/// 权限只接 `beforeShellExecution` / `beforeMCPExecution`：回
+/// `{"permission":"ask"}`，Cursor 仍弹出自己的审批框。岛上只出一条可点击
+/// 跳回去的通知，没有允许 / 拒绝。`preToolUse` 和读文件不接——那里没有
+/// 可靠的「交给用户」答复，乱回会直接挡住工具。
 ///
 /// hooks.json 里其余事件、其余 hook 定义原样保留，识别自己的条目只靠
 /// `command` 是否指向 `betterfocus-notify.sh`（不引入宿主可能拒绝的自定义字段）。
@@ -20,7 +23,8 @@ enum CursorHookInstaller {
 
     /// 我们注册的事件；顺序固定，便于自检比对。
     static let events = ["beforeSubmitPrompt", "stop", "sessionEnd",
-                         "subagentStop", "preCompact"]
+                         "subagentStop", "preCompact",
+                         "beforeShellExecution", "beforeMCPExecution"]
 
     // MARK: - 生命周期
 

@@ -37,6 +37,8 @@ final class NotchService: ObservableObject {
     @Published var bellSwingStart: Date?
     /// 呼吸灯覆盖层的主题色（nil 时不显示，非 nil 时按提供方主题色呼吸）。
     @Published private(set) var breathingTint: Color?
+    /// 当前卡片的详情是否已展开。换一张卡或翻到下一问时收回。
+    @Published var detailExpanded = false
     /// 是否有未处理的通知卡片（自动收起后为 true，用于驱动呼吸灯提醒）。
     @Published private(set) var hasUnprocessedNotice: Bool = false
     /// 未处理通知的提供方主题色（用于呼吸灯颜色）。
@@ -428,6 +430,11 @@ final class NotchService: ObservableObject {
         questionController.onDismiss = { [weak self] in
             self?.handleCardDismissal()
         }
+        questionController.onPageChange = { [weak self] in
+            guard let self else { return }
+            self.detailExpanded = false
+            self.relayoutActiveCard()
+        }
         permissionController.onPresent = { [weak self] in
             self?.showCard(.permission)
             if let req = self?.permissionController.request {
@@ -447,6 +454,16 @@ final class NotchService: ObservableObject {
         }
         noticeController.onDismiss = { [weak self] in
             self?.handleCardDismissal()
+        }
+        noticeController.onQueueChanged = { [weak self] in
+            self?.updatePendingTotal()
+        }
+        // 收起后待点开的那条被同一会话的更新顶掉：灯灭，避免还提示一条已经作废的通知。
+        noticeController.onSupersededResting = { [weak self] in
+            guard let self else { return }
+            self.hasUnprocessedNotice = false
+            self.unprocessedNoticeTint = nil
+            self.updateBreathingTint()
         }
         // Suppress the notice banner while an interactive card awaits the user.
         noticeController.hasPendingCard = { [weak self] in
@@ -590,8 +607,26 @@ final class NotchService: ObservableObject {
         scheduleAutoCollapse(after: Self.historyDuration)
     }
 
-    /// Show the transient turn-finished banner at a compact height.
+    /// 展开或收起当前卡片的详情，并按新行数改窗口高度。
+    func toggleDetailExpanded() {
+        detailExpanded.toggle()
+        relayoutActiveCard()
+        if activeCard == .notice {
+            scheduleAutoCollapse(after: Settings.shared.notifyBannerDuration)
+        }
+    }
+
+    /// 卡片还摊开时，按当前内容重算窗口。翻页和展开详情都走这里。
+    private func relayoutActiveCard() {
+        guard expanded, windowHost != nil, activeCard != .none else { return }
+        let size = targetSizeForCurrentCard()
+        guard size != surfaceSize else { return }
+        animateTo(size: size)
+    }
+
+    /// 通知横幅上屏。高度随正文行数变化，默认仍是一行。
     private func showNoticeBanner() {
+        detailExpanded = false
         activeCard = .notice
         // 新通知上屏：清除旧的未处理标记（呼吸灯随之关闭）
         hasUnprocessedNotice = false
@@ -600,7 +635,7 @@ final class NotchService: ObservableObject {
         refreshPinned()
         bellSwingStart = Date()  // Trigger bell swing animation.
         let bannerSize = CGSize(width: NotchLayout.expandedWidth,
-                                height: NotchLayout.expandedHeight)
+                                height: noticeCardHeight())
         if !expanded {
             expanded = true
             expandedAt = Date()
@@ -621,6 +656,7 @@ final class NotchService: ObservableObject {
     /// 是否保持（鼠标移出是否自动收起），不能把卡片吞进队列里只留一个圆点。
     /// 瞬态的通知 / 历史仍走 showNoticeBanner / showHistory 的按需逻辑。
     private func showCard(_ card: ActiveCard) {
+        detailExpanded = false
         activeCard = card
         // 置顶状态全局统一：不按卡片重置，从共享偏好解析
         refreshPinned()
@@ -811,7 +847,7 @@ final class NotchService: ObservableObject {
                           height: permissionCardHeight())
         case .notice:
             return CGSize(width: NotchLayout.expandedWidth,
-                          height: NotchLayout.expandedHeight)
+                          height: noticeCardHeight())
         case .history:
             // 历史面板高度计算（与 showHistory() 保持一致）
             let rows = max(1, historyController.entries.count)
@@ -852,8 +888,22 @@ final class NotchService: ObservableObject {
         let hasProject = !(q?.host?.cwd ?? "").isEmpty
         return QuestionCardLayout.contentHeight(question: q?.question,
                                                 hasProject: hasProject,
-                                                metrics: metrics)
+                                                metrics: metrics,
+                                                detail: .question(expanded: detailExpanded))
             + geometry.safeContentTop
+    }
+
+    /// 通知横幅高度。默认仍是设置里的一行高度；正文放不下时加上展开按钮，
+    /// 展开后按多出来的行数把卡片向下撑开。
+    private func noticeCardHeight() -> CGFloat {
+        let base = NotchLayout.expandedHeight
+        guard let body = noticeController.notice?.body, !body.isEmpty else { return base }
+        let width = max(40, NotchLayout.expandedWidth - NotchLayout.cardInset * 2 - 36 - 10)
+        let full = QuestionCardLayout.textHeight(body, width: width, font: 12)
+        let measured = DetailText.measure(fullHeight: full, font: 12,
+                                          collapsedLines: 1, expanded: detailExpanded)
+        let extraLines = CGFloat(max(0, measured.shownLines - 1))
+        return base + extraLines * 12 * 1.3 + (measured.showsControl ? DetailText.controlBlock : 0)
     }
     
     /// Permission card height (mirrors Python PermissionCard.total_height).
@@ -873,11 +923,12 @@ final class NotchService: ObservableObject {
 
         let detail = p?.detail ?? ""
         if !detail.isEmpty {
-            // Detail block: .font(.system(size: 10, monospaced)), .padding(10,8)*2 = 20+16,
-            // background RoundedRectangle, .lineLimit(4).
-            let detailLines = min(ceil(bodyHeight(detail, width: textWidth - 16, font: 10) / (10 * 1.3)), 4)
-            // VStack(spacing: 2) for detail header + detail text.
-            height += 8 + 16 + detailLines * 10 * 1.3 + 16
+            // 详情块：等宽 10pt，左右各 8pt 内边距，上下各 8pt。
+            // 默认最多 4 行；放不下时多一枚展开按钮，展开后按行数加高。
+            let full = QuestionCardLayout.textHeight(detail, width: textWidth - 16, font: 10)
+            let measured = DetailText.measure(fullHeight: full, font: 10,
+                                              collapsedLines: 4, expanded: detailExpanded)
+            height += 8 + 16 + measured.totalHeight + 16
         }
 
         // VStack(spacing: 8) before buttons, button height 28 (permissionButtonHeight=32 → use actual 28).

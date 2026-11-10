@@ -27,6 +27,8 @@ final class QuestionController: ObservableObject {
     /// 卡片状态变化回调（触发灵动岛展开 / 收起）。
     var onPresent: (() -> Void)?
     var onDismiss: (() -> Void)?
+    /// 多问翻页后通知外层重算高度，并收回已经展开的详情。
+    var onPageChange: (() -> Void)?
 
     var hasActiveCard: Bool { prompt != nil }
     var pendingCount: Int { queue.count }
@@ -198,6 +200,7 @@ final class QuestionController: ObservableObject {
         p.index = max(0, min(index, p.questions.count - 1))
         prompt = p
         keyboardFocus = selectedIndex(for: p.question)
+        onPageChange?()
     }
 
     /// 勾选某个答案。多选走切换语义。单选在 `advance` 为真时（鼠标、数字键）才自动翻页。
