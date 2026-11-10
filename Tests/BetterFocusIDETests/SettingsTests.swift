@@ -112,29 +112,30 @@ final class SettingsTests: XCTestCase {
     
     /// 测试：SettingCatalog.byKey 能正确查找设置定义。
     ///
-    /// 尺寸页已从面板拿掉，改用仍留在目录里的背景不透明度。
+    /// 背景不透明度已从面板拿掉，改用仍留在目录里的卡片圆角。
     func testSettingCatalogByKey() {
-        let def = SettingCatalog.byKey("backgroundAlpha")
-        XCTAssertNotNil(def, "Should find backgroundAlpha definition")
-        XCTAssertEqual(def?.key, "backgroundAlpha")
-        XCTAssertEqual(def?.label, "背景不透明度")
+        let def = SettingCatalog.byKey("radiusExpanded")
+        XCTAssertNotNil(def, "Should find radiusExpanded definition")
+        XCTAssertEqual(def?.key, "radiusExpanded")
+        XCTAssertEqual(def?.label, "卡片圆角")
     }
     
     /// 测试：SettingCatalog 的 get/set 闭包能正确读写 Settings。
     func testSettingCatalogGetSet() {
-        guard let def = SettingCatalog.byKey("backgroundAlpha") else {
-            XCTFail("backgroundAlpha definition not found")
+        guard let def = SettingCatalog.byKey("radiusExpanded") else {
+            XCTFail("radiusExpanded definition not found")
             return
         }
         
-        let originalValue = Settings.shared.backgroundAlpha
+        let originalValue = Settings.shared.radiusExpanded
         
-        def.set(.double(originalValue + 0.01))
+        def.set(.double(originalValue == 34 ? 20 : 34))
         
-        XCTAssertEqual(Settings.shared.backgroundAlpha, originalValue + 0.01, "Settings should be updated via catalog")
+        let expected = originalValue == 34 ? 20.0 : 34.0
+        XCTAssertEqual(Settings.shared.radiusExpanded, expected, "Settings should be updated via catalog")
         
         if case .double(let value) = def.get() {
-            XCTAssertEqual(value, originalValue + 0.01, "Catalog get should return updated value")
+            XCTAssertEqual(value, expected, "Catalog get should return updated value")
         } else {
             XCTFail("Expected double value")
         }
