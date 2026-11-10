@@ -151,13 +151,19 @@ final class HostHookTemplateTests: XCTestCase {
 
     // MARK: - 注册表
 
-    /// Cursor 的权限只接能回 ask 的事件，让原生审批框继续出现。
+    /// Cursor 的权限接 Shell、MCP，以及只匹配 Delete 的 preToolUse。
     func testCursorRegistersObserveOnlyEvents() {
         XCTAssertEqual(CursorHookInstaller.events, [
             "beforeSubmitPrompt", "stop", "sessionEnd",
             "subagentStop", "preCompact",
             "beforeShellExecution", "beforeMCPExecution",
+            "preToolUse",
         ])
+        let merged = CursorHookInstaller.mergedHooks([:])
+        let pre = (merged["preToolUse"] as? [[String: Any]])?.first
+        XCTAssertEqual(pre?["matcher"] as? String, "Delete")
+        let shell = (merged["beforeShellExecution"] as? [[String: Any]])?.first
+        XCTAssertNil(shell?["matcher"])
         let cursor = CursorHookInstaller.helperContent
         XCTAssertTrue(cursor.contains(#"{"permission": "ask"}"#))
         XCTAssertFalse(cursor.contains("beforeReadFile"))

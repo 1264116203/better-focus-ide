@@ -7,9 +7,9 @@ import XCTest
 /// 同一会话的未读通知只留最新一条。更新的一到，更早的视为已读。
 final class NoticeQueueTests: XCTestCase {
 
-    private func notice(_ session: String, title: String) -> TurnNotice {
+    private func notice(_ session: String, title: String, kind: HistoryKind = .turn) -> TurnNotice {
         TurnNotice(provider: "cursor", providerName: "Cursor", sessionID: session,
-                   title: title, body: title, bodyIsFallback: false, kind: .turn,
+                   title: title, body: title, bodyIsFallback: false, kind: kind,
                    project: "demo", host: nil, arrivedAt: Date(),
                    jumpEnabled: true, fromCLI: false)
     }
@@ -76,6 +76,35 @@ final class NoticeQueueTests: XCTestCase {
         XCTAssertEqual(result.effect, .enqueue(retiredResting: false))
         XCTAssertEqual(result.slot.current?.title, "甲")
         XCTAssertEqual(result.slot.queued.map(\.title), ["乙"])
+    }
+
+    /// 别的会话的回合横幅还在时，权限提醒直接顶上来。被顶下的横幅留在队首。
+    func testPermissionNoticePreemptsAnotherSessionsBanner() {
+        let banner = notice("s2", title: "回合完成")
+        let permission = notice("s1", title: "需要授权", kind: .permission)
+
+        let result = NoticeController.admit(
+            permission,
+            into: .init(current: banner, queued: [], resting: nil),
+            blocked: false)
+
+        XCTAssertEqual(result.effect, .replace)
+        XCTAssertEqual(result.slot.current?.title, "需要授权")
+        XCTAssertEqual(result.slot.queued.map(\.title), ["回合完成"])
+    }
+
+    /// 提问或权限卡占着岛时，权限横幅继续排队，不抢前台。
+    func testPermissionNoticeWaitsWhileACardIsUp() {
+        let permission = notice("s1", title: "需要授权", kind: .permission)
+
+        let result = NoticeController.admit(
+            permission,
+            into: .init(current: notice("s2", title: "回合完成"), queued: [], resting: nil),
+            blocked: true)
+
+        XCTAssertEqual(result.effect, .enqueue(retiredResting: false))
+        XCTAssertEqual(result.slot.current?.title, "回合完成")
+        XCTAssertEqual(result.slot.queued.map(\.title), ["需要授权"])
     }
 
     /// 岛空着时，新通知直接上屏，并清掉同一会话收起后还没点开的那条。

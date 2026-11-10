@@ -268,6 +268,15 @@ final class NoticeController: ObservableObject {
             return (slot, .replace)
         }
         if slot.current != nil || blocked {
+            // 权限提醒是要人现在去点的。普通横幅让开，被顶下的那条排回队首。
+            // 提问 / 权限卡占着岛时不抢；屏上已经是另一条权限提醒时也不抢。
+            if !blocked, incoming.kind == .permission, slot.current?.kind != .permission,
+               let displaced = slot.current {
+                slot.queued.insert(displaced, at: 0)
+                slot.current = incoming
+                slot.resting = nil
+                return (slot, .replace)
+            }
             slot.queued.append(incoming)
             return (slot, .enqueue(retiredResting: retiredResting))
         }
