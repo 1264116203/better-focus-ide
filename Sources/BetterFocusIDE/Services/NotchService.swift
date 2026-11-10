@@ -495,6 +495,7 @@ final class NotchService: ObservableObject {
         KimiHookInstaller.uninstall()
         QoderCnHookInstaller.uninstall()
         CopilotHookInstaller.uninstall()
+        AcpBridgeInstaller.uninstall()
     }
 
     /// 启动时校验**已装**的集成，内容与本构建不一致就重写回去。
@@ -550,6 +551,8 @@ final class NotchService: ObservableObject {
         if CopilotHookInstaller.isPresent {
             repair("Copilot Hook", CopilotHookInstaller.isInstalled, CopilotHookInstaller.install)
         }
+        // IDE 更新代理时会把 installed.json 里的命令盖回去。脚本还在就再套一次。
+        repair("JetBrains ACP", AcpBridgeInstaller.isInstalled) { try AcpBridgeInstaller.install() }
         if !repaired.isEmpty {
             Log.info("已校验安装态集成：" + repaired.joined(separator: "、"), topic: "install")
         }

@@ -100,6 +100,8 @@ enum PluginTemplate {
         }
 
         function sendToIsland(message) {
+          // ACP 桥已经按外面那个 IDE 发过通知。返回 false，提问会交回宿主自己的对话框。
+          if (process.env.BETTERFOCUS_ACP_BRIDGE === '1') return Promise.resolve(false);
           return new Promise((resolve) => {
             const client = new net.Socket();
             let settled = false;

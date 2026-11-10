@@ -77,6 +77,9 @@ enum HelperTemplate {
 
 
         def send(message):
+            # ACP 桥已经按外面那个 IDE 发过同一条通知。这里再发会多一张卡片。
+            if os.environ.get("BETTERFOCUS_ACP_BRIDGE") == "1":
+                return False
             # Fire-and-forget: the answer comes back through the answer files.
             try:
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

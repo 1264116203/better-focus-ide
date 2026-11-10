@@ -20,6 +20,8 @@ import Foundation
 ///   - Codex CLI: ~/.codex/hooks.json（生命周期）+ config.toml 的 notify（单值，可被占用）
 ///   - GitHub Copilot CLI: ~/.copilot/hooks/betterfocus.json（独立文件，不改 settings.json）
 ///   - Qoder CN: ~/.qoder-cn/settings.json + ~/.qoder-cn/hooks/（与 Qoder 同构）
+///   - JetBrains ACP: Application Support/JetBrains/acp-agents/installed.json
+///     的本机平台 `cmd` 换成 acp-bridge.py，原始命令记在 acp-bridge.json
 enum InstallerPaths {
     /// 数据目录命名空间（决定 Application Support 下的子目录名）。
     static let namespace = "BetterFocusIDE"
@@ -43,6 +45,21 @@ enum InstallerPaths {
     }
     static var settingsPath: String {
         (appSupport as NSString).appendingPathComponent("settings.json")
+    }
+    /// ACP stdio 桥。安装后 JetBrains 的代理命令指向它。
+    static var acpBridgeScript: String {
+        (appSupport as NSString).appendingPathComponent("acp-bridge.py")
+    }
+    /// 被换掉的原始 `cmd` / `args`。`installed.json` 里不写自定义字段。
+    static var acpBridgeSidecar: String {
+        (appSupport as NSString).appendingPathComponent("acp-bridge.json")
+    }
+    static var jetbrainsAcpDir: String {
+        (home as NSString).appendingPathComponent(
+            "Library/Application Support/JetBrains/acp-agents")
+    }
+    static var jetbrainsAcpRegistry: String {
+        (jetbrainsAcpDir as NSString).appendingPathComponent("installed.json")
     }
 
     // MARK: Qoder

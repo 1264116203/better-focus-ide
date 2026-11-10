@@ -80,6 +80,10 @@ enum HookInstallCatalog {
              hint: "提问可在岛上作答，权限只提醒。",
              isPresent: { isApplicationPresent(id: "copilot") },
              install: { try CopilotHookInstaller.install() }),
+        Host(id: "jetbrains-acp", label: "JetBrains ACP",
+             hint: "ACP 会话只提醒。回合、权限和待办在岛上亮，批准仍在 IDE 里。装好后重启 IDE。",
+             isPresent: { AcpBridgeInstaller.isHostPresent() },
+             install: { try AcpBridgeInstaller.install() }),
     ]
 
     /// 每个勾选项对应的应用 bundle id。系统应用列表里有其中任意一个才显示。
@@ -101,6 +105,7 @@ enum HookInstallCatalog {
         "qoder-cn-ide": ["com.aliyun.lingma.ide"],
         "qoder-cn-cli": [],
         "copilot": ["com.github.githubapp"],
+        "jetbrains-acp": AcpBridgeInstaller.jetbrainsBundles,
     ]
 
     /// 终端里的 Qoder。IDE 包内的 `bin/qoder` 只是 IDE 的启动脚本，不算 CLI。

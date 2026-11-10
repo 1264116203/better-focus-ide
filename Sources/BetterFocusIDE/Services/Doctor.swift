@@ -79,6 +79,10 @@ enum Doctor {
             registered: { KimiHookInstaller.isRegistered }))
         // 注意不能只看目录是否存在：`~/.qoder-cn` 常被链到 `~/.qoder`，
         // 那种情况是同一个安装，列出来只会让自检页出现重复的「Qoder CN」。
+        checks.append(contentsOf: hostIntegration(
+            label: "JetBrains ACP", hostDir: InstallerPaths.jetbrainsAcpDir,
+            script: InstallerPaths.acpBridgeScript, helper: nil,
+            registered: { AcpBridgeInstaller.isRegistered() }))
         if QoderCnHookInstaller.isPresent {
             checks.append(contentsOf: hostIntegration(
                 label: "Qoder CN", hostDir: InstallerPaths.qoderCnDir,
