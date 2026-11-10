@@ -56,6 +56,8 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gateke
 ## 目录结构
 
 ```
+├── README.md                              # 用户文档（中文）；与 README.en.md 必须同步
+├── README.en.md                           # 用户文档（英文）；与 README.md 必须同步
 ├── Package.swift                          # SPM 清单（库目标 + 瘦可执行目标）
 ├── build.sh                               # 构建 + .app 组装 + ad-hoc 签名
 ├── Resources/
@@ -370,6 +372,19 @@ Unix socket 文件本身就是锁锚点：
 - 面向用户的字符串使用中文（标签、菜单项、设置分组）
 - 代码注释使用中文（文档注释 `///` 与行内 `//`）；提交信息使用英文
 - 遵循现有命名：窗口/几何用 `Notch*`，卡片状态用 `*Controller`，SwiftUI 视图用 `*View`
+
+### README 多语言同步
+
+仓库根目录的用户文档按语言拆分，事实与结构必须一致：
+
+| 文件 | 语言 |
+|---|---|
+| `README.md` | 中文（默认，GitHub 首页） |
+| `README.en.md` | 英文 |
+
+改 README 时——功能说明、宿主能力表、截图与图注、安装步骤、快捷键、架构描述，以及新增、删除或调整章节——必须在同一次改动里更新全部分语言文件，并保持文首的语言切换链接可到达每一份。只润色某一种语言的用词、不改变事实时，可以只改那一份。
+
+新增语言沿用 `README.<lang>.md`（例如 `README.ja.md`），在每一份文首补上切换链接，并把新文件加进上表。`AGENTS.md` 面向贡献者，保持中文，不随 README 翻译。
 
 ### UI 模式
 
