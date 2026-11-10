@@ -1,4 +1,5 @@
 .DS_Store
+.qoder/
 /.build
 /Packages
 xcuserdata/
