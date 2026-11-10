@@ -76,6 +76,8 @@ final class NotchService: ObservableObject {
     private var keyMonitor: Any?
     /// 由 AppDelegate 接线，使 ⌘, 打开设置窗口。
     var onOpenSettings: (() -> Void)?
+    /// 气泡右键菜单。与菜单栏图标共用 AppDelegate 的那一份菜单。
+    var makeContextMenu: (() -> NSMenu)?
 
     /// 卡片出现后的防误触窗口（秒），对齐 Python `CARD_CLICK_GUARD`。手正搭在
     /// "允许"将落下的位置时无法误批。实时取自 Settings（click_guard）；0 关闭守卫。
@@ -458,49 +460,10 @@ final class NotchService: ObservableObject {
 
     // MARK: - Phase 4: Install / history
 
-    /// One-click install of all four integrations. Returns a human summary.
-    /// 任一宿主失败不影响其余条目：用户能直接从汇总里看到是哪一项出问题。
+    /// 只安装勾选的宿主。汇总给菜单弹窗。
     @discardableResult
-    func installAll() -> String {
-        var lines: [String] = []
-        func install(_ label: String, _ work: () throws -> Void) {
-            do {
-                try work()
-                lines.append("✓ \(label) 已安装")
-            } catch {
-                lines.append("✗ \(label) 失败：\(error.localizedDescription)")
-            }
-        }
-        install("Qoder Hook") { try QoderHookInstaller.install() }
-        install("OpenCode Plugin") { try OpenCodePluginInstaller.install() }
-        install("Cursor Hook") { try CursorHookInstaller.install() }
-        install("WorkBuddy Hook") { try WorkBuddyHookInstaller.install() }
-        // 其余宿主一律「装在本机才写配置」：给没装的宿主建目录，只会在人家
-        // 那边留一堆没人读的脚本，卸载时还得靠用户自己清理。
-        if InstallerPaths.hostDirectoryExists(InstallerPaths.claudeDir)
-            || FileManager.default.fileExists(atPath: "/Applications/Claude.app") {
-            install("Claude Code Hook") { try ClaudeCodeHookInstaller.install() }
-        }
-        if CodexHookInstaller.isPresent {
-            install("ChatGPT Notify") { try CodexHookInstaller.install() }
-        }
-        if TraeHookInstaller.Flavor.cn.isPresent {
-            install("Trae CN Hook") { try TraeHookInstaller.install(.cn) }
-        }
-        if TraeHookInstaller.Flavor.international.isPresent {
-            install("Trae Hook") { try TraeHookInstaller.install(.international) }
-        }
-        if KimiHookInstaller.isPresent {
-            install("Kimi Hook") { try KimiHookInstaller.install() }
-        }
-        if QoderCnHookInstaller.isPresent {
-            install("Qoder CN Hook") { try QoderCnHookInstaller.install() }
-        }
-        if CopilotHookInstaller.isPresent {
-            install("Copilot Hook") { try CopilotHookInstaller.install() }
-        }
-        Log.info("installAll: " + lines.joined(separator: " | "), topic: "install")
-        return lines.joined(separator: "\n")
+    func installHooks(_ ids: [String]) -> String {
+        HookInstallCatalog.install(ids)
     }
 
     func uninstallAll() {
@@ -1149,57 +1112,11 @@ final class NotchService: ObservableObject {
     
     // MARK: - 上下文菜单（右键）
 
-    /// 在给定画布局标点弹出右键菜单。
+    /// 在给定画布局标点弹出右键菜单。条目与菜单栏图标是同一份。
     private func showContextMenu(at point: NSPoint) {
-        let menu = buildContextMenu()
-        guard let panel = windowHost?.panel else { return }
-        // 把画布局部点转成窗口坐标供菜单定位。
-        let windowPoint = NSPoint(x: point.x, y: point.y)
-        menu.popUp(positioning: nil, at: windowPoint, in: windowHost?.panel.contentView)
-        _ = panel // 抑制未使用警告
+        guard let menu = makeContextMenu?(), let view = windowHost?.panel.contentView else { return }
+        menu.popUp(positioning: nil, at: point, in: view)
     }
-    
-    /// 构建右键上下文菜单（对齐 Python：钉住切换、立即收起、设置、退出）。
-    private func buildContextMenu() -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        
-        // 钉住切换
-        let pinItem = NSMenuItem(title: pinned ? "切换为按需模式" : "切换为固定模式",
-                                 action: #selector(contextMenuTogglePin), keyEquivalent: "")
-        pinItem.target = self
-        menu.addItem(pinItem)
-        
-        // 立即收起
-        let collapseItem = NSMenuItem(title: "立即收起",
-                                      action: #selector(contextMenuCollapse), keyEquivalent: "")
-        collapseItem.target = self
-        collapseItem.isEnabled = expanded
-        menu.addItem(collapseItem)
-        
-        menu.addItem(.separator())
-        
-        // 设置
-        let settingsItem = NSMenuItem(title: "设置…",
-                                      action: #selector(contextMenuSettings), keyEquivalent: ",")
-        settingsItem.target = self
-        menu.addItem(settingsItem)
-        
-        menu.addItem(.separator())
-        
-        // 退出
-        let quitItem = NSMenuItem(title: "退出 BetterFocusIDE",
-                                  action: #selector(contextMenuQuit), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
-        
-        return menu
-    }
-    
-    @objc private func contextMenuTogglePin() { togglePin() }
-    @objc private func contextMenuCollapse() { collapse() }
-    @objc private func contextMenuSettings() { onOpenSettings?() }
-    @objc private func contextMenuQuit() { NSApplication.shared.terminate(nil) }
 
     /// 从 cwd 取项目名（末级目录）：卡片副标题用，缺省为空串。
     private static func projectName(from cwd: String?) -> String {

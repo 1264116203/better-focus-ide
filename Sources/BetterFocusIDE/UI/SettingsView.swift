@@ -66,9 +66,11 @@ struct SettingsView: View {
         return f
     }()
 
-    /// 侧边栏末尾的「调试」页：不参与设置项搜索，也不是持久化配置，
+    /// 侧边栏末尾的「权限」「调试」页：不是持久化配置，
     /// 因此不进 `SettingCatalog.groups`（那个数组是纯设置分组）。
+    private static let permissionPage = "权限"
     private static let debugPage = "调试"
+    private static let permissionKeywords = ["权限", "自动化", "授权", "automation", "privacy"]
 
     /// 去除首尾空白后的搜索词。
     private var trimmedQuery: String {
@@ -77,6 +79,8 @@ struct SettingsView: View {
 
     /// 当前是否停在调试页。
     private var showingDebugPage: Bool { selectedGroup == Self.debugPage }
+    /// 当前是否停在权限页。
+    private var showingPermissionPage: Bool { selectedGroup == Self.permissionPage }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -87,8 +91,8 @@ struct SettingsView: View {
                 Divider()
                 content
             }
-            // 调试页没有"设置项"，也就没有恢复默认与写回状态可言，底部栏整体隐藏。
-            if !showingDebugPage {
+            // 权限页和调试页没有设置项，底部的恢复默认与写回状态整栏隐藏。
+            if !showingDebugPage && !showingPermissionPage {
                 Divider()
                 bottomBar.frame(height: Metric.barHeight)
             }
@@ -140,6 +144,10 @@ struct SettingsView: View {
     private func jumpToFirstHit() {
         let q = trimmedQuery
         guard !q.isEmpty else { return }
+        if Self.permissionKeywords.contains(where: { q.localizedCaseInsensitiveContains($0) }) {
+            selectedGroup = Self.permissionPage
+            return
+        }
         if let hit = SettingCatalog.groups.first(where: { group in
             SettingCatalog.settings(in: group).contains { $0.matches(q) }
         }) {
@@ -159,6 +167,7 @@ struct SettingsView: View {
                 }
                 Divider()
                     .padding(.vertical, 4)
+                sidebarRow(Self.permissionPage)
                 sidebarRow(Self.debugPage)
                 Spacer(minLength: 0)
             }
@@ -218,7 +227,9 @@ struct SettingsView: View {
     /// 右侧详情区：空态文案，或当前分类的分组页面（头部 + 提示 + 行序列）。
     private var content: some View {
         Group {
-            if showingDebugPage {
+            if showingPermissionPage {
+                PermissionStatusView()
+            } else if showingDebugPage {
                 // 调试页自成一个视图：它不是"若干设置行"，而是可点的触发按钮。
                 // 标题与提示另给一层水平内边距，与下方调试面板的内边距对齐。
                 VStack(alignment: .leading, spacing: 0) {

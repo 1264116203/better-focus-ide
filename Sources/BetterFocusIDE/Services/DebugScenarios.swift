@@ -342,13 +342,6 @@ enum DebugCatalog {
 
         // ---------------- 状态横幅 ----------------
         DebugScene(
-            id: "status.toolFailure",
-            group: "状态横幅",
-            title: "工具没有跑成",
-            note: "PostToolUseFailure：工具名和报错写在正文",
-            payload: .statusNotice(.failureNotice, title: "工具没有跑成",
-                                   body: "Bash：swift test 退出码 1，HistoryEntryLabelTests 有 2 项失败")),
-        DebugScene(
             id: "status.stopFailure",
             group: "状态横幅",
             title: "这一轮没有完成",

@@ -40,7 +40,6 @@ enum WorkBuddyHookInstaller {
         ("SessionEnd", nil, 5),
         ("StopFailure", nil, 5),
         ("PermissionDenied", nil, 5),
-        ("PostToolUseFailure", nil, 5),
         ("SubagentStop", nil, 5),
         ("PostCompact", nil, 5),
         ("Elicitation", nil, 5),

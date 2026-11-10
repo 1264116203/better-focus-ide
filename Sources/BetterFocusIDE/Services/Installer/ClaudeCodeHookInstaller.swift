@@ -36,7 +36,6 @@ enum ClaudeCodeHookInstaller {
             HookGroupSpec("SessionEnd", matcher: "", timeout: 5),
             HookGroupSpec("StopFailure", matcher: "", timeout: 5),
             HookGroupSpec("PermissionDenied", matcher: "", timeout: 5),
-            HookGroupSpec("PostToolUseFailure", matcher: "", timeout: 5),
             HookGroupSpec("SubagentStop", matcher: "", timeout: 5),
             HookGroupSpec("PostCompact", matcher: "", timeout: 5),
             HookGroupSpec("Elicitation", matcher: "", timeout: 5),

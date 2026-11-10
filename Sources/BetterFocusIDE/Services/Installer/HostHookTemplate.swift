@@ -610,8 +610,6 @@ enum HostHookTemplate {
                 return "登录状态失效"
             if event == "PermissionDenied":
                 return "自动模式拒绝了这次操作"
-            if event in ("PostToolUseFailure", "postToolUseFailure"):
-                return "工具没有跑成"
             if event in ("ErrorOccurred", "errorOccurred"):
                 return "执行出错"
             return "这一轮没有完成"
@@ -1639,8 +1637,6 @@ enum HostHookTemplate {
                 return "登录状态失效"
             if event == "PermissionDenied":
                 return "自动模式拒绝了这次操作"
-            if event in ("PostToolUseFailure", "postToolUseFailure"):
-                return "工具没有跑成"
             if event in ("ErrorOccurred", "errorOccurred"):
                 return "执行出错"
             return "这一轮没有完成"
@@ -1681,7 +1677,7 @@ enum HostHookTemplate {
                         emit_turn_finished(session_id, payload)
                 elif event == "sessionEnd":
                     emit_session_ended(session_id, payload)
-                elif event in ("postToolUseFailure", "errorOccurred"):
+                elif event == "errorOccurred":
                     emit_status("failure_notice", session_id, payload,
                                 failure_title(event, payload), status_detail(payload))
                 elif event == "subagentStop":
@@ -1711,8 +1707,11 @@ enum HostHookTemplate {
                 cache_user_prompt(session_id, payload)
                 return
 
-            # 状态横幅：失败、子任务、压缩。只通知，不回决策。
-            if event in ("StopFailure", "PermissionDenied", "PostToolUseFailure", "ErrorOccurred"):
+            # 状态横幅：回合失败、自动拒绝、执行出错、子任务、压缩。只通知，不回决策。
+            # 工具调用失败不通知。旧安装里 PostToolUseFailure 可能还挂着，进来就退出。
+            if event in ("PostToolUseFailure", "postToolUseFailure"):
+                return
+            if event in ("StopFailure", "PermissionDenied", "ErrorOccurred"):
                 emit_status("failure_notice", session_id, payload,
                             failure_title(event, payload), status_detail(payload))
                 return

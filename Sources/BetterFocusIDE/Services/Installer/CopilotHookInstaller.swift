@@ -74,7 +74,7 @@ enum CopilotHookInstaller {
               let hooks = config["hooks"] as? [String: Any] else { return false }
         let expected = ["PreToolUse", "PermissionRequest", "Notification",
                         "PostToolUse", "UserPromptSubmit", "Stop", "SessionEnd",
-                        "ErrorOccurred", "PostToolUseFailure", "SubagentStop", "PreCompact"]
+                        "ErrorOccurred", "SubagentStop", "PreCompact"]
         return expected.allSatisfy { event in
             let entries = hooks[event] as? [[String: Any]] ?? []
             return entries.contains { HookInstallerSupport.isOurCommand($0["command"]) }
@@ -107,7 +107,6 @@ enum CopilotHookInstaller {
                 "Stop": [entry(5)],
                 "SessionEnd": [entry(5)],
                 "ErrorOccurred": [entry(5)],
-                "PostToolUseFailure": [entry(5)],
                 "SubagentStop": [entry(5)],
                 "PreCompact": [entry(5)],
             ] as [String: Any],
