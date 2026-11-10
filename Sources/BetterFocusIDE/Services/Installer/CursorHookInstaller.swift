@@ -9,10 +9,10 @@ import Foundation
 /// 其余观测事件回 `{}`。`subagentStop`、`preCompact` 只发横幅。
 /// 工具调用失败不通知。
 ///
-/// 权限只接 `beforeShellExecution` / `beforeMCPExecution`：回
-/// `{"permission":"ask"}`，Cursor 仍弹出自己的审批框。岛上只出一条可点击
-/// 跳回去的通知，没有允许 / 拒绝。`preToolUse` 和读文件不接——那里没有
-/// 可靠的「交给用户」答复，乱回会直接挡住工具。
+/// 权限仍登记 `beforeShellExecution` / `beforeMCPExecution`，但回空对象，
+/// 不回 `ask`（那会凭空造出审批，或在自动审查里被忽略后岛上仍弹卡）。
+/// 岛只在 Shell 的 `sandbox` 明确为 false 时发跳转通知。MCP 分不出
+/// 自动执行和等人，不发卡片。`preToolUse` 和读文件不接。
 ///
 /// hooks.json 里其余事件、其余 hook 定义原样保留，识别自己的条目只靠
 /// `command` 是否指向 `betterfocus-notify.sh`（不引入宿主可能拒绝的自定义字段）。
