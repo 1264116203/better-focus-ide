@@ -18,10 +18,17 @@ enum HelperTemplate {
         # Serves the hook events Qoder fires for us:
         #   - PermissionRequest: a tool call needs the person's approval and the
         #     platform waits for our answer, so the island shows Allow / Always /
-        #     Reject. This is the permission channel.
-        #   - PreToolUse: fired for every tool call; the platform does NOT wait
-        #     for its answer. Only AskUserQuestion is handled here (older builds
-        #     enter the question flow through it); anything else exits silently.
+        #     Reject. AskUserQuestion is answered here. Qoder IDE / Qoder CN
+        #     still use this path.
+        #   - PreToolUse: fired for every tool call. Qoder IDE does not wait, so
+        #     ordinary tools exit immediately. Qoder.app does wait, and it asks
+        #     questions here instead of PermissionRequest — AskUserQuestion on
+        #     the desktop app shows the island question card and blocks until
+        #     the person answers.
+        #   - Notification: Qoder.app also emits permission_prompt when its own
+        #     dialog appears. Question tools are not turned into a second
+        #     notice if the card is already up. Other confirms stay notice-only;
+        #     stdout stays empty so Qoder's own dialog is not swallowed.
         #   - PostToolUse: fired after a tool finished. Only the todo tools are
         #     handled here — the island draws the segmented progress card from
         #     the tool's own argument list (TodoWrite sends the whole table
@@ -42,11 +49,6 @@ enum HelperTemplate {
         SETTINGS_PATH = os.environ.get("BETTERFOCUS_SETTINGS_PATH") or "__SETTINGS_PATH__"
         QUESTION_TIMEOUT = int(os.environ.get("BETTERFOCUS_QUESTION_TIMEOUT", "__QUESTION_TIMEOUT__"))
         PERMISSION_TIMEOUT = int(os.environ.get("BETTERFOCUS_PERMISSION_TIMEOUT", "__PERMISSION_TIMEOUT__"))
-
-        # Permission modes where the platform already auto-approves; don't raise
-        # a card for something the machine has already decided.
-        AUTO_MODES = ("accept_edits", "acceptEdits", "auto",
-                      "bypass_permissions", "bypassPermissions", "yolo", "dont_ask")
 
         # Bundles that mean "running in a terminal, no GUI window to jump back to".
         TERMINAL_BUNDLES = (
@@ -91,12 +93,25 @@ enum HelperTemplate {
                 return False
 
 
-        def emit(decision, reason, event="PermissionRequest"):
-            json.dump({"hookSpecificOutput": {
+        def emit(decision, reason, event="PermissionRequest", updates=None):
+            # permissionDecision 是 IDE / PreToolUse 认的字段。
+            # Qoder.app 的 PermissionRequest 只读 decision.behavior（allow / deny）。
+            # ask 不在那个枚举里，写进去整段 stdout 会被丢掉，所以只在 allow / deny 时附上。
+            # 「始终允许」把 updatedPermissions 交给 Qoder.app 自己落盘。
+            # 它不读 IDE 的 configChatCommandAllowlist。
+            output = {
                 "hookEventName": event,
                 "permissionDecision": decision,
                 "permissionDecisionReason": reason,
-            }}, sys.stdout)
+            }
+            if event == "PermissionRequest" and decision in ("allow", "deny"):
+                decided = {"behavior": decision}
+                if decision == "deny" and reason:
+                    decided["message"] = reason
+                if decision == "allow" and updates:
+                    decided["updatedPermissions"] = updates
+                output["decision"] = decided
+            json.dump({"hookSpecificOutput": output}, sys.stdout)
             sys.stdout.write("\\n")
             sys.stdout.flush()
 
@@ -263,7 +278,13 @@ enum HelperTemplate {
             \"\"\"通过环境变量决策树推导 product（与事件 JSON 无关）。
 
             优先级：
-              1 - 有 QODER_PROJECT_DIR 且无 QODER_SESSION_ID => qoder_cli
+              1 - 有 QODER_PROJECT_DIR 且无 QODER_SESSION_ID：
+                  Bundle 是 com.qoder.app，或 QODER_STANDALONE=1 => qoder
+                  Bundle 含 jetbrains/intellij => jetbrains_plugin
+                  Bundle 含 qoder / lingma => qoder_ide
+                  其余 => qoder_cli
+                  （Qoder.app 会注入项目目录，但不给 hook 进程会话 id。
+                  只看目录会把桌面版记成无头 CLI。）
               2 - 有 QODER_SESSION_ID:
                  - QODER_STANDALONE=1 => qoder
                  - Bundle ID 含 jetbrains/intellij => jetbrains_plugin
@@ -279,8 +300,15 @@ enum HelperTemplate {
                          or "").lower()
             transcript_path = os.environ.get("QODER_TRANSCRIPT_PATH") or ""
 
-            # 优先级 1：有项目目录但无会话 id → CLI 模式
+            # 优先级 1：有项目目录但无会话 id。
+            # 桌面版 Qoder.app 走这条，不能当成无头 CLI。
             if project_dir and not session_id:
+                if bundle_id == "com.qoder.app" or standalone == "1":
+                    return "qoder"
+                if "jetbrains" in bundle_id or "intellij" in bundle_id:
+                    return "jetbrains_plugin"
+                if "qoder" in bundle_id or "lingma" in bundle_id:
+                    return "qoder_ide"
                 return "qoder_cli"
 
             if session_id:
@@ -349,8 +377,69 @@ enum HelperTemplate {
             return _identify_product()
 
 
-        def run_question(payload, session_id, questions):
-            request_id = safe_id(payload.get("request_id") or ("q" + str(int(time.time()))))
+        def _real_questions(tool_input):
+            # 只认真正的 questions 数组。normalise 在缺这个字段时会把整个
+            # tool_input 当成一道题，普通工具不能走这条。
+            if not isinstance(tool_input, dict):
+                return []
+            raw = tool_input.get("questions")
+            if not isinstance(raw, list) or not raw:
+                inner = tool_input.get("input")
+                if isinstance(inner, str):
+                    try:
+                        inner = json.loads(inner)
+                    except Exception:
+                        inner = None
+                if isinstance(inner, dict):
+                    raw = inner.get("questions")
+            if not isinstance(raw, list) or not raw:
+                return []
+            questions = normalise({"questions": raw})
+            return [q for q in questions if q.get("question") or q.get("options")]
+
+
+        def _question_input(payload):
+            raw = payload.get("tool_input")
+            if raw is None:
+                raw = payload.get("toolInput")
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    raw = {}
+            return raw if isinstance(raw, dict) else {}
+
+
+        def _desktop_qoder():
+            # Qoder.app 的提问不走 PermissionRequest。IDE / CLI 仍走原来的通道，
+            # 不能在 PreToolUse 上堵住，否则和 PermissionRequest 各开一张卡。
+            product = _identify_product()
+            if product in ("qoder", "qoder_cn"):
+                return True
+            bundle = (host_app().get("bundle") or "").lower()
+            return bundle == "com.qoder.app"
+
+
+        def _mark_question(session_id):
+            state = _load_state(session_id)
+            state["question_card"] = time.time()
+            _save_state(session_id, state)
+
+
+        def _question_card_recent(session_id):
+            state = _load_state(session_id)
+            try:
+                started = float(state.get("question_card") or 0)
+            except Exception:
+                return False
+            return started > 0 and (time.time() - started) < (QUESTION_TIMEOUT + 30)
+
+
+        def publish_question(payload, session_id, questions):
+            request_id = safe_id(payload.get("request_id")
+                                 or payload.get("tool_use_id")
+                                 or payload.get("toolUseId")
+                                 or ("q" + str(int(time.time()))))
             product = _get_product(session_id)
             send({"provider": "qoder", "product": product,
                   "event": "question_requested",
@@ -361,6 +450,12 @@ enum HelperTemplate {
                   "cwd": payload.get("cwd") or "",
                   "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                   "payload": {"questions": questions, "request_id": request_id}})
+            _mark_question(session_id)
+            return request_id
+
+
+        def run_question(payload, session_id, questions, event="PermissionRequest"):
+            request_id = publish_question(payload, session_id, questions)
             since = time.time()
             deadline = since + QUESTION_TIMEOUT
             while time.time() < deadline:
@@ -380,7 +475,8 @@ enum HelperTemplate {
                     break
                 if answered == len(questions) and questions:
                     emit("deny", "The person answered on the BetterFocusIDE island. "
-                         "Use these answers and continue.\\n" + "\\n".join(lines))
+                         "Use these answers and continue.\\n" + "\\n".join(lines),
+                         event)
                     return
                 time.sleep(1)
             send({"provider": "qoder", "product": product,
@@ -388,52 +484,300 @@ enum HelperTemplate {
                   "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                   "payload": {"question_id": questions[0]["id"] if questions else "q1",
                               "request_id": request_id}})
-            emit("deny", "The person left the island question unanswered. Continue without it.")
+            emit("deny", "The person left the island question unanswered. Continue without it.",
+                 event)
 
 
-        def run_permission(payload, session_id):
-            # 岛不接管 Qoder 的权限决策：递个信就立刻回 `ask`。
-            #
-            # 为什么不接管（vorssaint 2026-10-29 实测）：以前弹三按钮卡、等用户点完
-            # 再回 allow / deny —— 但 Qoder 不认 hook 返回的决策：同一会话第二次
-            # 照问、新会话也照问。结果比不接管更糟：用户以为"以后不再问了"。
-            # 现在只发一条 `permission_notice` 让岛弹个提醒，拍板交给 Qoder 原生窗。
-            #
-            # 不等、不回 allow 也不回 deny：那都是替人拍板。`ask` = "平台你接着问"。
-            # 顺带的好处：不再有人没点时把工具挂到 600 秒才交回 IDE。
-            tool_name = payload.get("tool_name") or ""
-            tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+        def shell_command(tool_input):
+            if not isinstance(tool_input, dict):
+                return ""
+            value = tool_input.get("command")
+            if isinstance(value, str):
+                return value.strip()
+            return ""
+
+
+        def prefix_permission_updates(tool_name, token):
+            # Qoder.app 的前缀规则是「命令名:*」：等于该词，或以「该词 + 空格」开头。
+            # 落在 userSettings，跟 IDE 里那份全局允许名单一样，换一个会话仍然有效。
+            name = str(token or "").strip()
+            if not name:
+                return []
+            return [{
+                "type": "addRules",
+                "behavior": "allow",
+                "destination": "userSettings",
+                "rules": [{
+                    "toolName": tool_name or "Bash",
+                    "ruleContent": name + ":*",
+                }],
+            }]
+
+
+        # 这些命令名不能进允许名单，即使设置里已经有同名规则也不要静默放行。
+        DENY_COMMANDS = {"rm", "mv", "sudo", "wget", "curl", "chown", "remove-item"}
+
+
+        def command_head(command):
+            head = command.split(None, 1)[0] if command else ""
+            if not head or any(ch in head for ch in (",", '"', "'")):
+                return ""
+            if head.lower() in DENY_COMMANDS:
+                return ""
+            return head
+
+
+        def user_settings_path():
+            name = ".qoder-cn" if _identify_product() == "qoder_cn" else ".qoder"
+            return os.path.join(os.path.expanduser("~"), name, "settings.json")
+
+
+        def rule_covers_command(rule, command, tool_name):
+            # 落盘形式是 ToolName(ruleContent)，前缀是「命令名:*」。
+            if not isinstance(rule, str) or "(" not in rule or not rule.endswith(")"):
+                return False
+            tool, _, rest = rule.partition("(")
+            content = rest[:-1]
+            if tool_name and tool != tool_name:
+                return False
+            if content.endswith(":*"):
+                prefix = content[:-2]
+                if not prefix or prefix.lower() in DENY_COMMANDS:
+                    return False
+                return command == prefix or command.startswith(prefix + " ")
+            return content == command
+
+
+        def persist_prefix_rule(tool_name, token):
+            # Qoder.app 的 PreToolUse 没有 updatedPermissions。这里直接写入
+            # userSettings，下一次同类命令才能被 already_allowed 认出来。
+            # 回 ask 再等 PermissionRequest 会让原生审批框先画出来。
+            name = str(token or "").strip()
+            if not name or name.lower() in DENY_COMMANDS:
+                return False
+            if any(ch in name for ch in (",", '"', "'", "(", ")", "$", ";", "&", "|", "<", ">")):
+                return False
+            rule = "%s(%s:*)" % (tool_name or "Bash", name)
+            path = user_settings_path()
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except Exception:
+                return False
+            if not isinstance(data, dict):
+                return False
+            perms = data.get("permissions")
+            if not isinstance(perms, dict):
+                perms = {}
+            allow = perms.get("allow")
+            if not isinstance(allow, list):
+                allow = []
+            if rule in allow:
+                return True
+            allow.append(rule)
+            perms["allow"] = allow
+            data["permissions"] = perms
+            tmp = path + ".betterfocus.tmp"
+            try:
+                mode = os.stat(path).st_mode
+                with open(tmp, "w") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.write("\\n")
+                os.replace(tmp, path)
+                os.chmod(path, mode)
+            except Exception:
+                return False
+            return True
+
+
+        def already_allowed(command, tool_name):
+            # 规则已经在 userSettings 里时，PreToolUse 直接放行，不再开卡。
+            # 否则「始终允许」之后下一条同类命令仍会先弹出卡片。
+            if not command_head(command):
+                return False
+            try:
+                with open(user_settings_path()) as f:
+                    data = json.load(f)
+            except Exception:
+                return False
+            perms = data.get("permissions") if isinstance(data, dict) else None
+            allow = perms.get("allow") if isinstance(perms, dict) else None
+            if not isinstance(allow, list):
+                return False
+            name = tool_name or "Bash"
+            return any(rule_covers_command(rule, command, name) for rule in allow)
+
+
+        def permission_hold_path(session_id):
+            return os.path.join(ANSWER_DIR, "perm-hold-%s.json" % safe_id(session_id))
+
+
+        def remember_permission_hold(session_id, command, decision, token, tool_name):
+            # PreToolUse 先拿到答案。PermissionRequest 若随后仍出现，用这份记录
+            # 立刻回放，不再开第二张卡，也不让原生框一直挂着。
+            path = permission_hold_path(session_id)
+            body = {
+                "command": command,
+                "decision": decision,
+                "token": token or "",
+                "tool_name": tool_name or "Bash",
+                "ts": time.time(),
+            }
+            tmp = path + ".tmp"
+            try:
+                os.makedirs(ANSWER_DIR, exist_ok=True)
+                with open(tmp, "w") as f:
+                    json.dump(body, f)
+                    f.flush()
+                os.replace(tmp, path)
+            except Exception:
+                pass
+
+
+        def take_permission_hold(session_id, command):
+            path = permission_hold_path(session_id)
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except Exception:
+                return None
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            try:
+                age = time.time() - float(data.get("ts") or 0)
+            except Exception:
+                return None
+            if age < 0 or age > 4:
+                return None
+            if str(data.get("command") or "") != command:
+                return None
+            return data
+
+
+        def read_permission_answer(session_id, request_id, since):
+            path = os.path.join(ANSWER_DIR, "%s_perm-%s.json" % (session_id, request_id))
+            try:
+                if os.path.getmtime(path) < since - 1:
+                    return None
+                with open(path) as f:
+                    data = json.load(f)
+            except Exception:
+                return None
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return data
+
+
+        def permission_message(session_id, product, event, request_id, tool_name, tool_input, detail, host, cwd):
+            return {"provider": "qoder", "product": product,
+                    "event": event,
+                    "session_id": session_id,
+                    "host": host,
+                    "cwd": cwd or "",
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "payload": {
+                        "request_id": request_id,
+                        "tool_name": tool_name,
+                        "tool_input": tool_input,
+                        "resources": [detail] if detail else [],
+                        "flavor": "permission"}}
+
+
+        def run_permission(payload, session_id, event="PermissionRequest"):
+            # 终端命令（tool_input.command）等岛上的三按钮卡。
+            # Qoder 的 stdout 只有 allow / deny / ask，没有「始终允许」字段。
+            # 「始终允许」由岛把命令名写入界面 settings.json 和执行端 app-config.json，
+            # Qoder.app 还要在 PermissionRequest 上回 allow，并带 updatedPermissions。
+            # 没有 command 的权限请求只发 permission_notice，立刻回 ask。
+            # 超时也回 ask，把决定权交回 Qoder 自己的对话框，不等满 hook 的 660 秒。
+            tool_name = payload.get("tool_name") or payload.get("toolName") or ""
+            tool_input = _question_input(payload)
             request_id = safe_id(payload.get("tool_use_id")
                                  or payload.get("toolUseId")
                                  or payload.get("request_id")
                                  or (tool_name + "-" + str(int(time.time() * 1000))))
             host = host_app()
             product = _get_product(session_id)
+            command = shell_command(tool_input)
 
-            # tool_input 里挑一个最能说明问题的字段作为详情
-            detail = ""
-            for key in ("command", "file_path", "path", "url", "query", "pattern"):
-                value = tool_input.get(key)
-                if isinstance(value, str) and value:
-                    detail = value
-                    break
+            # 桌面版已经在 PreToolUse 上答过。这里只回放，不再开卡。
+            if event == "PermissionRequest" and command:
+                held = take_permission_hold(session_id, command)
+                if held:
+                    decision = str(held.get("decision") or "")
+                    if decision == "reject":
+                        emit("deny", "The person rejected this command on BetterFocusIDE.")
+                        return
+                    updates = None
+                    if decision == "always":
+                        token = str(held.get("token") or "").strip()
+                        name = held.get("tool_name") or tool_name
+                        updates = prefix_permission_updates(name, token) or None
+                    if decision in ("always", "once"):
+                        emit("allow", "The person allowed this command on BetterFocusIDE.",
+                             updates=updates)
+                        return
+
+            detail = command
+            if not detail:
+                for key in ("file_path", "path", "url", "query", "pattern"):
+                    value = tool_input.get(key)
+                    if isinstance(value, str) and value:
+                        detail = value
+                        break
             if not detail and tool_input:
                 detail = json.dumps(tool_input, ensure_ascii=False)[:400]
 
-            # 只递信不等回答：发完就收工
-            send({"provider": "qoder", "product": product,
-                  "event": "permission_notice",
-                  "session_id": session_id,
-                  "host": host,
-                  "cwd": payload.get("cwd") or "",
-                  "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                  "payload": {
-                      "request_id": request_id,
-                      "tool_name": tool_name,
-                      "tool_input": tool_input,
-                      "resources": [detail] if detail else [],
-                      "flavor": "permission"}})
-            emit("ask", "BetterFocusIDE only notifies about permissions; decide in Qoder's own dialog.")
+            cwd = payload.get("cwd") or ""
+            if not command:
+                send(permission_message(session_id, product, "permission_notice",
+                                        request_id, tool_name, tool_input, detail, host, cwd))
+                emit("ask", "BetterFocusIDE only notifies about permissions; decide in Qoder's own dialog.",
+                     event)
+                return
+
+            send(permission_message(session_id, product, "permission_requested",
+                                    request_id, tool_name, tool_input, detail, host, cwd))
+            since = time.time()
+            deadline = since + PERMISSION_TIMEOUT
+            while time.time() < deadline:
+                data = read_permission_answer(session_id, request_id, since)
+                if not data:
+                    time.sleep(0.5)
+                    continue
+                decision = str(data.get("decision") or "")
+                if decision == "reject":
+                    if event == "PreToolUse":
+                        remember_permission_hold(session_id, command, decision, "", tool_name)
+                    emit("deny", "The person rejected this command on BetterFocusIDE.", event)
+                    return
+                if decision in ("always", "once"):
+                    # 只在「始终允许」时附上前缀规则。Qoder.app 会写入
+                    # ~/.qoder/settings.json 并更新当前进程的规则，下一次同类命令不再询问。
+                    # 「允许」只放行这一次，不带 updatedPermissions。
+                    token = ""
+                    updates = None
+                    if decision == "always":
+                        token = str(data.get("command_token") or "").strip()
+                        updates = prefix_permission_updates(tool_name, token) or None
+                    if event == "PreToolUse":
+                        remember_permission_hold(session_id, command, decision, token, tool_name)
+                        if decision == "always":
+                            # 直接放行，不回 ask。回 ask 会迫使 Qoder.app 画出原生审批框。
+                            # 前缀规则写进 userSettings，下一次由 already_allowed 跳过卡片。
+                            persist_prefix_rule(tool_name, token)
+                    emit("allow", "The person allowed this command on BetterFocusIDE.",
+                         event, updates=updates)
+                    return
+                break
+            send(permission_message(session_id, product, "permission_timeout",
+                                    request_id, tool_name, tool_input, detail, host, cwd))
+            emit("ask", "The person left the permission card unanswered. Ask in Qoder's own dialog.",
+                 event)
 
 
         def emit_turn_finished(session_id, payload):
@@ -610,6 +954,130 @@ enum HelperTemplate {
                               "body": text}})
 
 
+        def _notice_details(payload):
+            details = payload.get("details")
+            return details if isinstance(details, dict) else {}
+
+
+        def _is_question_tool(name):
+            folded = str(name or "").lower().replace("_", "")
+            return folded in ("askuserquestion", "question", "askfollowupquestion")
+
+
+        def _tool_from_notice(payload, message):
+            \"\"\"从 Notification 里取出工具名。
+
+            Qoder.app 的 permission_prompt 把工具放在 details.toolName，
+            文案是 "Tool <name> requires confirmation"。Claude 系只有
+            "permission to use <name>"。
+            \"\"\"
+            details = _notice_details(payload)
+            name = str(details.get("toolName") or details.get("tool_name") or "").strip()
+            if name:
+                return name, details
+            text = message or ""
+            marker = " requires confirmation"
+            if text.startswith("Tool ") and marker in text:
+                return text[len("Tool "):text.find(marker)].strip(), details
+            lower = text.lower()
+            token = "permission to use "
+            idx = lower.find(token)
+            if idx >= 0:
+                rest = text[idx + len(token):]
+                picked = []
+                for ch in rest:
+                    if ch.isalnum() or ch in "_.-":
+                        picked.append(ch)
+                    else:
+                        break
+                return "".join(picked), details
+            return "", details
+
+
+        def emit_question_notice(session_id, payload, title, body):
+            # Notification 不等答复。只出提醒，stdout 保持空。
+            # 岛上作答仍只走 PermissionRequest / AskUserQuestion。
+            if not alerts_enabled("question") or not os.path.exists(SOCKET_PATH):
+                return
+            text = " ".join(str(body or "").split())[:180]
+            headline = " ".join(str(title or "").split())[:80] or "需要你的回答"
+            send({"provider": "qoder", "product": _get_product(session_id),
+                  "event": "question_notice", "session_id": session_id,
+                  "host": host_app(),
+                  "cwd": payload.get("cwd") or os.getcwd(),
+                  "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                  "payload": {"title": headline,
+                              "body": text or "请在 Qoder 里回答",
+                              "transcript_path": payload.get("transcript_path") or ""}})
+
+
+        def emit_permission_notice_only(session_id, payload, tool_name, tool_input, detail):
+            # 权限提醒不回 allow / deny / ask。Notification 的 stdout 印 JSON
+            # 会被宿主当成决策，盖住 Qoder 自己的对话框。
+            if not alerts_enabled("permission") or not os.path.exists(SOCKET_PATH):
+                return
+            details = _notice_details(payload)
+            request_id = safe_id(details.get("toolUseId")
+                                 or details.get("tool_use_id")
+                                 or payload.get("tool_use_id")
+                                 or ((tool_name or "tool") + "-" + str(int(time.time() * 1000))))
+            send(permission_message(session_id, _get_product(session_id), "permission_notice",
+                                    request_id, tool_name or "", tool_input or {},
+                                    " ".join(str(detail or "").split())[:180],
+                                    host_app(), payload.get("cwd") or ""))
+
+
+        def handle_user_wait_notice(session_id, payload, kind, message):
+            \"\"\"Qoder.app 等人时往往只发 Notification，不发 PermissionRequest。
+
+            提问工具不能发 permission_notice：岛侧会把它当成「提问卡已经在问」
+            而丢掉。桌面版有题面时发 question_requested；没有题面才退回提醒。
+            其余确认发 permission_notice。elicitation_dialog 沿用「需要你的输入」。
+            \"\"\"
+            if kind == "elicitation_dialog":
+                emit_status(session_id, "review_notice", "需要你的输入", message, payload)
+                return
+            tool_name, details = _tool_from_notice(payload, message)
+            raw_input = details.get("input")
+            if isinstance(raw_input, str):
+                try:
+                    raw_input = json.loads(raw_input)
+                except Exception:
+                    raw_input = {"input": raw_input}
+            tool_input = raw_input if isinstance(raw_input, dict) else {}
+            # 终端命令的三按钮卡由同时到达的 PermissionRequest 打开。
+            # 这里再发 permission_notice 会排在卡后面，答完又弹出一条过期横幅。
+            if shell_command(tool_input):
+                return
+            if kind == "ask_user_question" or _is_question_tool(tool_name):
+                # 桌面版的提问卡由 PreToolUse 打开并等答案。这条 Notification
+                # 超时只有 5 秒，不能在这里阻塞；卡已经开过就不再发提醒。
+                if _desktop_qoder() and _question_card_recent(session_id):
+                    return
+                questions = _real_questions(tool_input)
+                if questions and _desktop_qoder():
+                    publish_question(payload, session_id, questions)
+                    return
+                if questions:
+                    first = questions[0]
+                    title = first.get("header") or "需要你的回答"
+                    body = first.get("question") or message
+                    if len(questions) > 1:
+                        extra = "（共 %d 题）" % len(questions)
+                        body = ((body + " " + extra) if body else extra)
+                else:
+                    title = "需要你的回答"
+                    body = message or "请在 Qoder 里回答"
+                emit_question_notice(session_id, payload, title, body)
+                return
+            reason = details.get("message")
+            if isinstance(reason, str) and reason.strip():
+                detail = reason.strip()
+            else:
+                detail = message
+            emit_permission_notice_only(session_id, payload, tool_name, tool_input, detail)
+
+
         def main():
             try:
                 payload = json.load(sys.stdin)
@@ -652,6 +1120,9 @@ enum HelperTemplate {
                     emit_status(session_id, "failure_notice", title, message, payload)
                 elif kind in ("agent_needs_input", "elicitation_url_dialog"):
                     emit_status(session_id, "review_notice", "需要你的输入", message, payload)
+                elif kind in ("permission_prompt", "ask_user_question", "elicitation_dialog"):
+                    # Qoder.app 的 waiting-user 只到这里。stdout 保持空。
+                    handle_user_wait_notice(session_id, payload, kind, message)
                 return
 
             if event == "Stop":
@@ -679,12 +1150,10 @@ enum HelperTemplate {
                     else:
                         emit("allow", "Nothing to ask; continue.")
                     return
-                # 权限申请：只通知不等回答（vorssaint 模式），
-                # 必须 emit("ask") 让 Qoder 弹自己的原生对话框。
-                mode = str(payload.get("permission_mode") or payload.get("permissionMode") or "")
-                if mode in AUTO_MODES:
-                    emit("ask", "Auto-approved by permission mode.")
-                    return
+                # 带 command 的权限申请会等岛上的三按钮卡。
+                # 这条事件只在宿主已经决定要问人时才会到。acceptEdits / auto
+                # 仍会为终端命令发它，不能按会话模式提前回 ask。
+                # 其余仍只通知，立刻回 ask，让 Qoder 弹自己的对话框。
                 if not alerts_enabled("permission"):
                     emit("ask", "BetterFocusIDE permission notices are off; decide in Qoder's own dialog.")
                     return
@@ -704,8 +1173,29 @@ enum HelperTemplate {
                 return
 
             if event == "PreToolUse":
-                # PreToolUse 是 fire-and-forget：平台不等待响应，
-                # 所以不能在这里处理需要用户交互的请求。
+                # IDE 上这条不等待，立刻退出。桌面版 Qoder.app 会等这条返回
+                # 才进入 waiting-user，提问就在这里开卡并阻塞到答完。
+                tool_name = payload.get("tool_name") or payload.get("toolName") or ""
+                if _is_question_tool(tool_name) and _desktop_qoder():
+                    if alerts_enabled("question") and os.path.exists(SOCKET_PATH):
+                        questions = _real_questions(_question_input(payload))
+                        if questions:
+                            run_question(payload, session_id, questions, "PreToolUse")
+                            return
+                # 桌面版的终端权限在这里等卡片。PermissionRequest 要等检查结果已经是
+                # ask 才会到，那时原生审批框已经画出来了。允许 / 拒绝在这里直接回，
+                # 框就不会在等待期间出现。IDE 的 PreToolUse 不等待，不能在这里堵住。
+                if (_desktop_qoder() and alerts_enabled("permission")
+                        and os.path.exists(SOCKET_PATH)):
+                    tool_input = _question_input(payload)
+                    command = shell_command(tool_input)
+                    if command:
+                        if already_allowed(command, tool_name):
+                            emit("allow", "This command is already allowed in Qoder settings.",
+                                 "PreToolUse")
+                            return
+                        run_permission(payload, session_id, "PreToolUse")
+                        return
                 return
 
 

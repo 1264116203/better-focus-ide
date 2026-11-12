@@ -45,18 +45,15 @@ final class NotchPanel: NSPanel {
             super.sendEvent(event)
             return
         }
-        // 提问 / 权限需要键盘，这一下顺便成为 key，快捷键才能用。
-        // 气泡展开收起不抢焦点：只在投递这一下时假装是 key。
-        if acceptsKeyFocus, event.type == .leftMouseDown || event.type == .rightMouseDown {
-            makeKey()
-        }
-        if super.isKeyWindow {
-            super.sendEvent(event)
-            return
-        }
+        // 整次点击（按下、拖动、松开）都在假装已是 key 的状态下送进按钮。
+        // 按下之前就 makeKey 的话，SwiftUI 会把这一下当成激活窗口，按钮要点第二次。
+        // 松开之后再真正成为 key，快捷键和文本框才收得到后续输入。
         deliveringMouse = true
         super.sendEvent(event)
         deliveringMouse = false
+        if acceptsKeyFocus, event.type == .leftMouseUp || event.type == .rightMouseUp {
+            makeKey()
+        }
     }
 
     private static func deliversWhileInactive(_ type: NSEvent.EventType) -> Bool {

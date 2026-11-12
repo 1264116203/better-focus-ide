@@ -42,8 +42,10 @@ enum QoderHookInstaller {
     ///
     /// 注册五个事件：
     ///   - PermissionRequest（matcher `*`）：真正的权限通道。
-    ///   - PreToolUse（matcher `*`）：遗留提问入口；hook 只处理 AskUserQuestion，
-    ///     其他立即退出。
+    ///   - PreToolUse（matcher `*`）：普通工具立即退出。桌面版 Qoder.app 的
+    ///     AskUserQuestion 在这里开提问卡并阻塞到答完。
+    ///   - Notification：Qoder.app 的权限确认只提醒。提问若已由 PreToolUse
+    ///     开卡，这里不再发第二条通知。
     ///   - PostToolUse（matcher `TodoWrite|todo_write`）：待办整表转发，驱动
     ///     灵动岛的分段进度卡片。
     ///   - SessionEnd / Stop：发后即忘，短超时，绝不阻塞会话。

@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// 每个值对应 hook 侧 `_identify_product()` 决策树的一种输出，或新宿主自身的
 /// provider 标识：
-/// - `qoder`：独立 Qoder（QODER_STANDALONE=1）
+/// - `qoder`：Qoder.app 桌面版（bundle `com.qoder.app`，或 `QODER_STANDALONE=1`）
 /// - `opencode`：OpenCode JS 插件
 /// - `jetbrains_plugin`：JetBrains IDE 内的 Qoder 插件
 /// - `qoder_ide`：Qoder IDE（通义灵码）

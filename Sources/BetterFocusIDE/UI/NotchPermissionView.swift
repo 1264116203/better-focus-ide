@@ -157,13 +157,25 @@ struct NotchPermissionView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 28)
+                // 交互玻璃会吃掉第一下点击去做高光，按钮要再点一次才触发。
+                // 决策按钮必须第一次就生效。
                 .liquidGlass(.rounded(14), variant: .clear,
                              tint: color,
-                             interactive: controller.choice == nil,
+                             interactive: false,
                              fallback: chosen ? color : color.opacity(0.6))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PermissionPressStyle())
         .disabled(controller.choice != nil)
+    }
+}
+
+/// 按下时缩小并变淡。交互玻璃的高光会吃掉第一下点击，所以这里自己画按压。
+private struct PermissionPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 

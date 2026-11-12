@@ -129,6 +129,14 @@ final class PermissionController: ObservableObject {
         promoteNext()
     }
 
+    /// 终端命令原文。没有 `command` 字段时不把详情当成命令。
+    private func commandText(in request: PermissionRequest) -> String {
+        if let command = request.toolInput?["command"]?.stringValue, !command.isEmpty {
+            return command
+        }
+        return ""
+    }
+
     /// 队首请求提升为当前卡片。
     private func promoteNext() {
         guard request == nil, !queue.isEmpty else { return }
@@ -140,10 +148,27 @@ final class PermissionController: ObservableObject {
     // MARK: - 用户决策
 
     /// 做出决策：下发应答文件，记录 choice，给一次反馈，短暂停留后收起。
+    ///
+    /// 「始终允许」先把命令名写入 Qoder 的两份配置。写不进去时这一次改记为「允许」，
+    /// 不让 hook 以为已经记住。
     func decide(_ decision: PermissionDecisionValue) {
         guard let req = request, choice == nil else { return }
+        var outgoing = decision
+        var commandToken: String?
+        if decision == .allowAlways {
+            switch QoderCommandAllowList.remember(command: commandText(in: req),
+                                                   provider: req.provider) {
+            case .remembered(let token):
+                commandToken = token
+            case .downgraded:
+                outgoing = .allowOnce
+                Log.info("始终允许未能写入 Qoder 配置，这次按允许处理", topic: "permission")
+            }
+        }
         AnswerDispatcher.dispatchPermissionDecision(
-            sessionID: req.sessionID, requestID: req.requestID, decision: decision)
+            sessionID: req.sessionID, requestID: req.requestID,
+            decision: outgoing, commandToken: commandToken)
+        Log.info("权限已决定 \(outgoing.rawValue) request=\(req.requestID)", topic: "permission")
         choice = decision
         FeedbackService.onAnswer()
         // 短暂反馈后收起

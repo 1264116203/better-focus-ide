@@ -218,10 +218,10 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gateke
 |------|----------|----------|------------|------|
 | **Qoder** | `~/.qoder/settings.json` | PascalCase | `PermissionRequest` / `PreToolUse` / `Stop` / `SessionEnd` | 提问卡、权限提醒、回合完成、会话结束 |
 | **OpenCode** | 无需配置（插件目录） | JS 事件流 | `session.idle` 等 | 回合完成、会话结束 |
-| **Cursor** | `~/.cursor/hooks.json` | camelCase | `beforeSubmitPrompt` / `stop` / `sessionEnd` / `subagentStop` / `preCompact` | 回合完成、会话结束，以及子任务 / 即将压缩（观测型） |
+| **Cursor** | `~/.cursor/hooks.json` | camelCase | `beforeSubmitPrompt` / `stop` / `sessionEnd` / `subagentStop` / `preCompact` | 回合完成、会话结束，以及子任务 / 即将压缩（观测型，无权限卡） |
 | **WorkBuddy** | `~/.workbuddy/settings.json` 的 `hooks` | PascalCase | `PreToolUse` / `Notification` / `PermissionRequest` / `Stop` / `SessionEnd` | 提问卡、权限提醒、回合完成、会话结束 |
 
-**Cursor 为什么只做观测**：Cursor 的权限类 hook（`preToolUse` / `beforeShellExecution` / `beforeReadFile` 等）必须在 stdout 返回 `permission: allow|deny`。返回 `deny` 等于替用户拦掉工具，返回 `allow` 等于绕过用户审批，输出非法 JSON 还会直接阻塞调用。因此 Cursor 侧只注册观测事件：`beforeSubmitPrompt`（回 `{"continue":true}`）、`stop` / `sessionEnd` / `subagentStop` / `preCompact`（恒回 `{}`，不携带 `followup_message`，Agent 循环正常停止）。后两个只发子任务完成、即将压缩这两张横幅。工具调用失败不通知。
+**Cursor 为什么只做观测**：Cursor 没有 `Notification` 事件。`beforeShellExecution` / `beforeMCPExecution` / `preToolUse` / `beforeReadFile` 必须回 `permission`。`ask` 会盖过 Auto-review 并显示 Hook requested approval，`allow` 直接放行，`deny` 拦住，空对象会挡住调用。因此这些事件都不注册，岛上没有 Cursor 权限卡。观测事件是：`beforeSubmitPrompt`（回 `{"continue":true}`）、`stop` / `sessionEnd` / `subagentStop` / `preCompact`（恒回 `{}`）。工具调用失败不通知。
 
 **WorkBuddy 的事件选择**：
 - 提问走 `PreToolUse` + matcher `AskUserQuestion`，用 `hookSpecificOutput.permissionDecision = "deny"` 拦掉宿主原生提问框，并把岛上答案写进 `permissionDecisionReason` 回灌给 Agent（与 Qoder hook 同一手法）。
@@ -590,7 +590,7 @@ echo '{"provider":"qoder","product":"qoder_ide","event":"turn_finished","session
 
 **结论**：用 `PermissionRequest` 而非 `PreToolUse` 拦截 `AskUserQuestion`。
 **理由**：`PermissionRequest` 是阻塞式（Qoder 等待 hook 返回决策后再继续），`PreToolUse` 是 fire-and-forget（Qoder 不等待响应）。
-**适用范围**：仅 `AskUserQuestion` 提问接管。权限申请不能照此阻塞——Qoder 不采信 hook 返回的 allow/deny，且阻塞把工具挂起最长约 600s。正确策略是只发 `permission_notice` 通知、立即 `emit("ask")` 让 Qoder 弹原生框。
+**适用范围**：`AskUserQuestion` 仍走提问卡。带 `command` 的 Qoder `PermissionRequest` 等岛上的三按钮卡：`允许` / `拒绝` 回 `allow` / `deny`；`始终允许` 由岛把命令名写入 `~/Library/Application Support/Qoder{,CN}/User/settings.json` 的 `app.configChatCommandAllowlist` 和 `SharedClientCache/cache/app-config.json` 的 `commandAllowList`，这条 hook 仍回 `allow`。Qoder 会采信 `allow` / `deny`，stdout 没有「始终允许」字段。允许列表只在终端模式 `askEveryTime` 时减少后续确认。`PermissionRequest` 只在宿主已经要问人时触发，`acceptEdits` / `auto` 下的终端命令也会走到这里，不能按会话模式提前回 `ask`。stdout 同时写 IDE 的 `permissionDecision` 和 Qoder.app 的 `decision.behavior`。Qoder.app 的「始终允许」还要带 `updatedPermissions`（`命令名:*`，`userSettings`），它不读 IDE 的命令允许名单。Qoder.app 的终端命令在 PreToolUse 上等岛上的卡片：允许和始终允许都回 allow，拒绝回 deny，检查结果不再是 ask，原生审批框不会先画出来。始终允许同时把 `命令名:*` 写入 `~/.qoder/settings.json` 的 `permissions.allow`，下一次同类命令不再开卡。若检查仍然要问（工作区外的安全询问），紧接着的 PermissionRequest 立刻回放同一决定；始终允许的回放仍带 `updatedPermissions`。IDE 的 PreToolUse 仍然立刻退出，始终允许仍由 PermissionRequest 的 `updatedPermissions` 落盘。没有 `command` 的权限请求仍只发 `permission_notice` 并立刻 `emit("ask")`。超时同样回 `ask`。
 
 ### 布局参照基准
 
@@ -606,7 +606,7 @@ echo '{"provider":"qoder","product":"qoder_ide","event":"turn_finished","session
 |---|---|---|---|
 | Qoder / Qoder CN | `~/.qoder{,-cn}/settings.json` | matcher 分组 | 提问、权限、回合、会话结束 |
 | OpenCode | `~/.config/opencode/plugins/*.js` | 插件 | 提问、回合 |
-| Cursor | `~/.cursor/hooks.json` | camelCase，权限类必须回决策 | 回合、会话结束、子任务、即将压缩（观测型） |
+| Cursor | `~/.cursor/hooks.json` | camelCase；不注册权限钩子 | 回合、会话结束、子任务、即将压缩 |
 | WorkBuddy | `~/.workbuddy/settings.json` | PascalCase | 全部 |
 | Claude Code | `~/.claude/settings.json` | PascalCase | 全部 |
 | Trae / Trae CN | `~/.trae{,-cn}/hooks.json` | 同 Claude + `version:1` | 提问、权限提醒、回合（**无 SessionEnd**） |

@@ -1,5 +1,8 @@
 .DS_Store
 .qoder/
+.cursor/
+.idea/
+dist/
 /.build
 /Packages
 xcuserdata/

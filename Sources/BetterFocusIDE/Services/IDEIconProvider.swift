@@ -6,7 +6,8 @@ import SwiftUI
 /// IDE 图标提供者：根据宿主应用名称返回对应的图标 Image。
 ///
 /// 支持真实图标的 IDE（从 Resources/IDE-Icons 加载）：
-/// - JetBrains: IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider, CLion, PhpStorm, RubyMine
+/// - JetBrains: IntelliJ IDEA, PyCharm, WebStorm, GoLand, Rider, CLion, PhpStorm, RubyMine；
+///   没有单独产品图标时（JetBrains、DataGrip、Fleet）用公司标 `jetbrains.png`
 /// - VS Code 系: VS Code, Cursor, Qoder IDE, Qoder CN IDE, Trae CN
 /// - 终端: Warp, iTerm
 /// - 其他: OpenCode, Qoder, Qoder Work, Qoder CN, Qoder CN Work, WorkBuddy, Kimi, ChatGPT, Claude, Copilot
@@ -35,6 +36,10 @@ enum IDEIconProvider {
         "clion": "clion",
         "phpstorm": "phpstorm",
         "rubymine": "rubymine",
+        // 公司标。没有单独产品图标的名字走这一张，避免纯色底加首字母。
+        "jetbrains": "jetbrains",
+        "datagrip": "jetbrains",
+        "fleet": "jetbrains",
         // VS Code 及衍生
         "visual studio code": "vscode",
         "vscode": "vscode",
@@ -94,6 +99,8 @@ enum IDEIconProvider {
         "com.jetbrains.CLion": "clion",
         "com.jetbrains.PhpStorm": "phpstorm",
         "com.jetbrains.rubymine": "rubymine",
+        "com.jetbrains.datagrip": "jetbrains",
+        "com.jetbrains.fleet": "jetbrains",
         "com.byte-dance.trae": "trae-cn",
         "com.bytedance.trae": "trae-cn",
         "cn.trae.app": "trae-cn",
@@ -166,8 +173,15 @@ enum IDEIconProvider {
 
     /// 命中的图标文件名（不含扩展名）。bundle 优先于名字。
     static func resolvedIconName(for hostName: String?, bundleID: String? = nil) -> String? {
-        if let bundle = bundleID, !bundle.isEmpty, let iconName = bundleIconMapping[bundle] {
-            return iconName
+        if let bundle = bundleID, !bundle.isEmpty {
+            if let iconName = bundleIconMapping[bundle] {
+                return iconName
+            }
+            // 表里没有的 JetBrains 产品（以及大小写不同的 bundle）用公司标，
+            // 不再退回纯色底加首字母。
+            if bundle.lowercased().hasPrefix("com.jetbrains.") {
+                return "jetbrains"
+            }
         }
         guard let name = hostName?.lowercased() else { return nil }
         for (key, iconName) in sortedMappings where name.contains(key) {

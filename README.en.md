@@ -78,7 +78,7 @@ Click the idle capsule to look back at the latest items: questions still waiting
 |---|---|:---:|:---:|:---:|:---:|:---:|
 | <img src="docs/readme/icons/qoder-ide.png" width="20" height="20" alt=""> <img src="docs/readme/icons/qoder-cn-ide.png" width="20" height="20" alt=""> | Qoder / Qoder CN | Answer | Notice | ✓ | ✓ | ✓ |
 | <img src="docs/readme/icons/opencode.png" width="20" height="20" alt=""> | OpenCode | Answer | — | ✓ | — | ✓ |
-| <img src="docs/readme/icons/cursor.png" width="20" height="20" alt=""> | Cursor | — | Notice | ✓ | ✓ | — |
+| <img src="docs/readme/icons/cursor.png" width="20" height="20" alt=""> | Cursor | — | — | ✓ | ✓ | — |
 | <img src="docs/readme/icons/workbuddy.png" width="20" height="20" alt=""> | WorkBuddy | Notice | Notice | ✓ | ✓ | ✓ |
 | <img src="docs/readme/icons/claude.png" width="20" height="20" alt=""> | Claude Code | Answer | Notice | ✓ | ✓ | ✓ |
 | <img src="docs/readme/icons/trae.png" width="20" height="20" alt=""> <img src="docs/readme/icons/trae-cn.png" width="20" height="20" alt=""> | Trae / Trae CN | Answer | Notice | ✓ | — | — |
@@ -88,9 +88,11 @@ Click the idle capsule to look back at the latest items: questions still waiting
 
 Qoder IDE, the Qoder CLI, and the JetBrains plugin share the Qoder row. The China build writes its config under `~/.qoder-cn`. Restart the IDE after a hook change.
 
+**Qoder.app** (the desktop app, bundle `com.qoder.app`, not Qoder IDE) does not fire `PermissionRequest` for questions. It waits on `PreToolUse`, and the island opens an answerable question card, then hands the answer back. Permission confirmations and MCP elicitation still arrive only as `Notification`: the island shows a notice, and a click jumps back to Qoder's own dialog. Qoder IDE / Qoder CN questions still go through `PermissionRequest`.
+
 A few hosts differ from a plain reading of the table:
 
-- **Cursor** permissions are notice-only. Terminal commands and MCP calls light up a notice; click it to jump back. Approval still happens in Cursor's own dialog. There is no question card and no todo card. File reads and generic tool calls are not wired up — those events have no "hand this to the user" reply.
+- **Cursor** has no permission card. A before-shell or before-MCP hook must answer `allow`, `deny`, or `ask`, and each of those changes Cursor's own approval, so those events are not registered. Approval stays in Cursor. There is no question card and no todo card. Turn-complete and session-end notices still appear.
 - **WorkBuddy** questions are not answered on the island. The host's own form appears first; the island only shows a notice, and a click jumps back so you can answer there. Permissions are notice-only as well. `settings.json` does not hot-reload — reopen the current session.
 - **Trae / Trae CN** has no session-end event. The todo tool is visible in the chat, but hooks never receive it, so there is no progress card.
 - **ChatGPT** (formerly Codex) has no `AskUserQuestion` tool name and no matching todo event, so those two cards never appear. After install, trust the hook once inside ChatGPT. Trust it again after the script changes.

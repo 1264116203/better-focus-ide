@@ -81,12 +81,19 @@ enum AnswerDispatcher {
     }
 
     /// 下发一次权限决策（允许/始终允许/拒绝），附带决策原始值。
+    ///
+    /// `commandToken` 只在「始终允许」已经写入 Qoder 允许列表时带上，供 hook 核对。
     static func dispatchPermissionDecision(sessionID: String, requestID: String,
-                                           decision: PermissionDecisionValue) {
+                                           decision: PermissionDecisionValue,
+                                           commandToken: String? = nil) {
         let file = permissionPath(sessionID: sessionID, requestID: requestID)
+        var extra: [String: Any] = ["decision": decision.rawValue, "message": ""]
+        if let commandToken, !commandToken.isEmpty {
+            extra["command_token"] = commandToken
+        }
         writeAnswer(to: file, optionIndex: decision.answerIndex,
                     optionLabel: decision.label,
-                    extra: ["decision": decision.rawValue, "message": ""])
+                    extra: extra)
     }
 
     /// 下发一次权限超时（decision = timeout）。

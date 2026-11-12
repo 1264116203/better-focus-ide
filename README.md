@@ -80,7 +80,7 @@ BetterFocusIDE is a native macOS menu-bar accessory app (no Dock icon) that surf
 |---|---|:---:|:---:|:---:|:---:|:---:|
 | <img src="docs/readme/icons/qoder-ide.png" width="20" height="20" alt=""> <img src="docs/readme/icons/qoder-cn-ide.png" width="20" height="20" alt=""> | Qoder / Qoder CN | 作答 | 提醒 | ✓ | ✓ | ✓ |
 | <img src="docs/readme/icons/opencode.png" width="20" height="20" alt=""> | OpenCode | 作答 | — | ✓ | — | ✓ |
-| <img src="docs/readme/icons/cursor.png" width="20" height="20" alt=""> | Cursor | — | 提醒 | ✓ | ✓ | — |
+| <img src="docs/readme/icons/cursor.png" width="20" height="20" alt=""> | Cursor | — | — | ✓ | ✓ | — |
 | <img src="docs/readme/icons/workbuddy.png" width="20" height="20" alt=""> | WorkBuddy | 提醒 | 提醒 | ✓ | ✓ | ✓ |
 | <img src="docs/readme/icons/claude.png" width="20" height="20" alt=""> | Claude Code | 作答 | 提醒 | ✓ | ✓ | ✓ |
 | <img src="docs/readme/icons/trae.png" width="20" height="20" alt=""> <img src="docs/readme/icons/trae-cn.png" width="20" height="20" alt=""> | Trae / Trae CN | 作答 | 提醒 | ✓ | — | — |
@@ -90,9 +90,11 @@ BetterFocusIDE is a native macOS menu-bar accessory app (no Dock icon) that surf
 
 Qoder 的 IDE、CLI 和 JetBrains 插件共用这一行，国内版写在 `~/.qoder-cn`。改完 hook 要重启 IDE 才生效。
 
+**Qoder.app**（桌面版，bundle `com.qoder.app`，不是 Qoder IDE）的提问不发 `PermissionRequest`。它在 `PreToolUse` 里等 hook 返回，岛上开的是可作答的提问卡，答完再交回 Qoder。权限确认和 MCP elicitation 仍只走 `Notification`，岛上出提醒，点一下跳回 Qoder 自己的对话框。Qoder IDE / Qoder CN 的提问仍走 `PermissionRequest`。
+
 几处和表上的字不一样的地方：
 
-- **Cursor** 的权限只提醒：终端命令和 MCP 调用会在岛上亮一条通知，点一下跳回去，批准仍在 Cursor 自己的对话框里。没有提问卡，也没有待办。读文件和通用工具调用不接，那些事件没有「交给用户审批」的答复。
+- **Cursor** 没有权限卡。执行前的 Shell / MCP 钩子必须回 `allow`、`deny` 或 `ask`，都会改掉 Cursor 自己的审批，所以不接。批准留在 Cursor 里。没有提问卡，也没有待办。回合完成和会话结束仍会通知。
 - **WorkBuddy** 的提问不在岛上作答。宿主自己的问卷会先出现，岛上只亮一条提醒，点一下跳回去答。权限同样只提醒。`settings.json` 改完不会热加载，要重开当前会话。
 - **Trae / Trae CN** 没有会话结束事件。待办工具虽然在对话里看得到，hook 收不到，所以没有进度卡。
 - **ChatGPT**（原 Codex）的工具名里没有 `AskUserQuestion`，也没有能对上的待办事件，所以这两张卡不出。装好之后还要在 ChatGPT 里把 hook 信任一次，改过脚本要重新信任。

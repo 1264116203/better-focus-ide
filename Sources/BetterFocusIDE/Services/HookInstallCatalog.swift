@@ -49,7 +49,7 @@ enum HookInstallCatalog {
              isPresent: { isApplicationPresent(id: "opencode") },
              install: { try OpenCodePluginInstaller.install() }),
         Host(id: "cursor", label: "Cursor",
-             hint: "通知回合完成、会话结束和权限申请。批准仍在 Cursor 里，点通知跳回去。",
+             hint: "通知回合完成和会话结束。权限审批留在 Cursor 里。",
              isPresent: { isApplicationPresent(id: "cursor") },
              install: { try CursorHookInstaller.install() }),
         Host(id: "workbuddy", label: "WorkBuddy",

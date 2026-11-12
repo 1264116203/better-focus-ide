@@ -151,21 +151,21 @@ final class HostHookTemplateTests: XCTestCase {
 
     // MARK: - 注册表
 
-    /// Cursor 的权限接 Shell、MCP，以及只匹配 Delete 的 preToolUse。
+    /// Cursor 不注册权限钩子。回复会改掉 Cursor 自己的审批。
     func testCursorRegistersObserveOnlyEvents() {
         XCTAssertEqual(CursorHookInstaller.events, [
             "beforeSubmitPrompt", "stop", "sessionEnd",
             "subagentStop", "preCompact",
-            "beforeShellExecution", "beforeMCPExecution",
-            "preToolUse",
         ])
-        let merged = CursorHookInstaller.mergedHooks([:])
-        let pre = (merged["preToolUse"] as? [[String: Any]])?.first
-        XCTAssertEqual(pre?["matcher"] as? String, "Delete")
-        let shell = (merged["beforeShellExecution"] as? [[String: Any]])?.first
-        XCTAssertNil(shell?["matcher"])
+        let merged = CursorHookInstaller.mergedHooks([
+            "beforeShellExecution": [["command": CursorHookInstaller.scriptPath, "timeout": 5]],
+            "beforeMCPExecution": [["command": CursorHookInstaller.scriptPath, "timeout": 5]],
+        ])
+        XCTAssertNil(merged["beforeShellExecution"])
+        XCTAssertNil(merged["beforeMCPExecution"])
+        XCTAssertNil(merged["preToolUse"])
         let cursor = CursorHookInstaller.helperContent
-        XCTAssertTrue(cursor.contains(#"{"permission": "ask"}"#))
+        XCTAssertFalse(cursor.contains("run_permission(session_id, notice)"))
         XCTAssertFalse(cursor.contains("beforeReadFile"))
     }
 

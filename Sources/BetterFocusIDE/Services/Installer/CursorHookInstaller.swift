@@ -5,16 +5,12 @@ import Foundation
 
 /// 安装 / 卸载 Cursor 用户级 hook（`~/.cursor/hooks.json`）。
 ///
-/// 只注册不替用户拍板的事件。`beforeSubmitPrompt` 回 `{"continue": true}`，
-/// 其余观测事件回 `{}`。`subagentStop`、`preCompact` 只发横幅。
-/// 工具调用失败不通知。
+/// 只注册观测事件。`beforeSubmitPrompt` 回 `{"continue": true}`，
+/// 其余回 `{}`。`subagentStop`、`preCompact` 只发横幅。工具调用失败不通知。
 ///
-/// 权限接 `beforeShellExecution` / `beforeMCPExecution`，以及 `preToolUse`
-/// 里 matcher 为 `Delete` 的删除。都回 `{"permission":"ask"}`：Shell / MCP
-/// 上这会让 Cursor 继续弹自己的审批框；`preToolUse` 的 `ask` 文档写明不被
-/// 强制执行，所以删除仍由 Cursor 自己决定，岛上只出一条可点击跳回去的通知。
-/// 不接读文件，也不把 `preToolUse` 开到全部工具——空对象在这条上会挡住调用，
-/// `allow` 等于替用户放行。
+/// 不接权限。`beforeShellExecution` / `beforeMCPExecution` / `preToolUse`
+/// 的回复都会改 Cursor 自己的审批：`ask` 强制弹出 Hook requested approval，
+/// `allow` 直接放行，空对象会挡住调用。Cursor 也没有只通知的 Notification 事件。
 ///
 /// hooks.json 里其余事件、其余 hook 定义原样保留，识别自己的条目只靠
 /// `command` 是否指向 `betterfocus-notify.sh`（不引入宿主可能拒绝的自定义字段）。
@@ -25,9 +21,7 @@ enum CursorHookInstaller {
 
     /// 我们注册的事件；顺序固定，便于自检比对。
     static let events = ["beforeSubmitPrompt", "stop", "sessionEnd",
-                         "subagentStop", "preCompact",
-                         "beforeShellExecution", "beforeMCPExecution",
-                         "preToolUse"]
+                         "subagentStop", "preCompact"]
 
     // MARK: - 生命周期
 
@@ -70,12 +64,10 @@ enum CursorHookInstaller {
     static func mergedHooks(_ hooks: [String: Any]) -> [String: Any] {
         var hooks = hooksAfterRemoval(hooks)
         for event in events {
-            var entry: [String: Any] = [
+            let entry: [String: Any] = [
                 "command": scriptPath,
                 "timeout": 5,
             ]
-            // 删除文件不走 Shell。只匹配 Delete，避免 Read / Grep 每次都进 hook。
-            if event == "preToolUse" { entry["matcher"] = "Delete" }
             var list = hooks[event] as? [[String: Any]] ?? []
             list.append(entry)
             hooks[event] = list
