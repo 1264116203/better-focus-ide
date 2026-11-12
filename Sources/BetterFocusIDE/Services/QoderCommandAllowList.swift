@@ -20,6 +20,11 @@ enum QoderCommandAllowList {
 
     private static let defaultDenyList = "rm,mv,sudo,wget,curl,chown,remove-item"
 
+    /// 桌面版「本会话允许」用的命令名。不写任何配置文件。
+    static func sessionToken(from command: String) -> String? {
+        token(from: command, denyList: defaultDenyList)
+    }
+
     /// 取命令的第一个词。含逗号或引号、或命中禁用列表时返回 nil。
     static func token(from command: String, denyList: String) -> String? {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)

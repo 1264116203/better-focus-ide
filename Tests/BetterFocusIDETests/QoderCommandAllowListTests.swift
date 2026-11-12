@@ -91,6 +91,33 @@ final class QoderCommandAllowListTests: XCTestCase {
         XCTAssertEqual(runtime["commandAllowList"] as? String, "git")
     }
 
+    func testDesktopAlwaysStaysInSessionAndDoesNotWriteLists() throws {
+        try seed(uiAllow: "ls", runtimeAllow: "ls", deny: "rm")
+        let controller = PermissionController()
+        let session = "sess-\(UUID().uuidString)"
+        controller.present(PermissionRequest(
+            requestID: "req-desk",
+            provider: .qoder,
+            sessionID: session,
+            action: "shell",
+            resources: ["git status"],
+            agent: "",
+            toolName: "Bash",
+            toolInput: ["command": .string("git status")],
+            arrivedAt: Date()
+        ))
+        controller.decide(.allowAlways)
+
+        let answer = try answerJSON(session: session, request: "req-desk")
+        XCTAssertEqual(answer["decision"] as? String, "always")
+        XCTAssertEqual(answer["command_token"] as? String, "git")
+        let ui = try json(at: directory.appendingPathComponent("settings.json"))
+        let app = ui["app"] as? [String: Any]
+        XCTAssertEqual(app?["configChatCommandAllowlist"] as? String, "ls")
+        let runtime = try json(at: directory.appendingPathComponent("app-config.json"))
+        XCTAssertEqual(runtime["commandAllowList"] as? String, "ls")
+    }
+
     func testAllowAlwaysDowngradesWhenConfigIsMissing() throws {
         let controller = PermissionController()
         let session = "sess-\(UUID().uuidString)"
@@ -113,7 +140,11 @@ final class QoderCommandAllowListTests: XCTestCase {
         XCTAssertTrue(body.contains(":*"))
         XCTAssertTrue(body.contains("run_permission(payload, session_id, \"PreToolUse\")"))
         XCTAssertTrue(body.contains("remember_permission_hold"))
-        XCTAssertTrue(body.contains("persist_prefix_rule"))
+        XCTAssertTrue(body.contains("remember_session_allow"))
+        XCTAssertTrue(body.contains("qoder_handles_approval"))
+        XCTAssertTrue(body.contains("bypass_permissions"))
+        XCTAssertTrue(body.contains("\"destination\": \"session\""))
+        XCTAssertFalse(body.contains("persist_prefix_rule"))
     }
 
     // MARK: - 夹具

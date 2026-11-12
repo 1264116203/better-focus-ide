@@ -133,12 +133,12 @@ struct NotchPermissionView: View {
 
     // MARK: - 按钮
 
-    /// 三个决策按钮：允许 / 始终允许 / 拒绝。
+    /// 三个决策按钮：允许 / 本会话允许 / 拒绝。
     private func buttonsView(_ req: PermissionRequest) -> some View {
         HStack(spacing: 8) {
             permissionButton("允许", decision: .allowOnce,
                              color: req.provider.tint, req: req)
-            permissionButton("始终允许", decision: .allowAlways,
+            permissionButton("本会话允许", decision: .allowAlways,
                              color: req.provider.tint.opacity(0.7), req: req)
             permissionButton("拒绝", decision: .reject,
                              color: Color(red: 0.9, green: 0.3, blue: 0.3), req: req)
@@ -157,6 +157,14 @@ struct NotchPermissionView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 28)
+                // macOS 的 Button 只命中不透明像素。玻璃底不进命中区，
+                // 只有文字能点。几乎透明的填充让整块按钮都有像素，
+                // contentShape 再把命中形状收成圆角矩形。
+                .background {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.white.opacity(0.001))
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 // 交互玻璃会吃掉第一下点击去做高光，按钮要再点一次才触发。
                 // 决策按钮必须第一次就生效。
                 .liquidGlass(.rounded(14), variant: .clear,
@@ -173,6 +181,9 @@ struct NotchPermissionView: View {
 private struct PermissionPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            // 自定义 ButtonStyle 不会继承标签内部的 contentShape，
+            // 命中形状必须写在样式返回的视图上，否则仍只有文字能点。
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .scaleEffect(configuration.isPressed ? 0.96 : 1)
             .opacity(configuration.isPressed ? 0.72 : 1)
             .animation(.easeOut(duration: 0.1), value: configuration.isPressed)

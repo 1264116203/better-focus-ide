@@ -41,18 +41,18 @@ final class HistoryEntryLabelTests: XCTestCase {
 
     // MARK: - 不展示的情况
 
-    /// 正文与标题重复（单轮会话里两者同为用户提示词）→ 整行不渲染。
-    func testDuplicateBodyIsHidden() {
+    /// 正文与标题重复时仍展示。标题是会话名，这一行带「用户：」前缀并给出完整输入。
+    func testDuplicateBodyStillShown() {
         let e = entry(title: "实现这个 prd", body: "实现这个 prd", kind: .turn)
-        XCTAssertTrue(e.bodyLine.isEmpty)
+        XCTAssertEqual(e.bodyLine, "用户：实现这个 prd")
     }
 
-    /// 单轮会话里标题是正文的截断版（带省略号），同样视为重复。
-    func testTruncatedTitleDuplicatingBodyIsHidden() {
+    /// 标题只是正文的截断版时，历史行仍展示完整输入。
+    func testTruncatedTitleStillShowsFullBody() {
         let e = entry(title: "diff --git a/ruoyi-admin/src/main…",
                       body: "diff --git a/ruoyi-admin/src/main/resources/application.yml",
                       kind: .turn)
-        XCTAssertTrue(e.bodyLine.isEmpty)
+        XCTAssertEqual(e.bodyLine, "用户：diff --git a/ruoyi-admin/src/main/resources/application.yml")
     }
 
     /// 多轮会话：正文是新一轮输入，与首条标题不同源，应正常展示。

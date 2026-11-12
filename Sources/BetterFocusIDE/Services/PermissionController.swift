@@ -149,20 +149,31 @@ final class PermissionController: ObservableObject {
 
     /// 做出决策：下发应答文件，记录 choice，给一次反馈，短暂停留后收起。
     ///
-    /// 「始终允许」先把命令名写入 Qoder 的两份配置。写不进去时这一次改记为「允许」，
-    /// 不让 hook 以为已经记住。
+    /// IDE 的「始终允许」写入两份允许名单，写不进去就降级成「允许」。
+    /// Qoder.app 没有能改这条规则的设置页，写进配置会永久作用于整个应用，
+    /// 所以桌面版只把命令名交给 hook，由它记在当前会话里。
     func decide(_ decision: PermissionDecisionValue) {
         guard let req = request, choice == nil else { return }
         var outgoing = decision
         var commandToken: String?
         if decision == .allowAlways {
-            switch QoderCommandAllowList.remember(command: commandText(in: req),
-                                                   provider: req.provider) {
-            case .remembered(let token):
-                commandToken = token
-            case .downgraded:
-                outgoing = .allowOnce
-                Log.info("始终允许未能写入 Qoder 配置，这次按允许处理", topic: "permission")
+            switch req.provider {
+            case .qoder, .qoder_cn:
+                if let token = QoderCommandAllowList.sessionToken(from: commandText(in: req)) {
+                    commandToken = token
+                } else {
+                    outgoing = .allowOnce
+                    Log.info("这条命令不能在本会话记住，这次按允许处理", topic: "permission")
+                }
+            default:
+                switch QoderCommandAllowList.remember(command: commandText(in: req),
+                                                       provider: req.provider) {
+                case .remembered(let token):
+                    commandToken = token
+                case .downgraded:
+                    outgoing = .allowOnce
+                    Log.info("始终允许未能写入 Qoder 配置，这次按允许处理", topic: "permission")
+                }
             }
         }
         AnswerDispatcher.dispatchPermissionDecision(

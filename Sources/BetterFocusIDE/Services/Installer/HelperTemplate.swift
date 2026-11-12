@@ -97,8 +97,8 @@ enum HelperTemplate {
             # permissionDecision 是 IDE / PreToolUse 认的字段。
             # Qoder.app 的 PermissionRequest 只读 decision.behavior（allow / deny）。
             # ask 不在那个枚举里，写进去整段 stdout 会被丢掉，所以只在 allow / deny 时附上。
-            # 「始终允许」把 updatedPermissions 交给 Qoder.app 自己落盘。
-            # 它不读 IDE 的 configChatCommandAllowlist。
+            # Qoder.app 的「本会话允许」只带 destination=session。
+            # 写进 userSettings 会永久作用于整个 Qoder，设置里又改不掉。
             output = {
                 "hookEventName": event,
                 "permissionDecision": decision,
@@ -498,15 +498,16 @@ enum HelperTemplate {
 
 
         def prefix_permission_updates(tool_name, token):
-            # Qoder.app 的前缀规则是「命令名:*」：等于该词，或以「该词 + 空格」开头。
-            # 落在 userSettings，跟 IDE 里那份全局允许名单一样，换一个会话仍然有效。
+            # 前缀是「命令名:*」。destination 用 session：只在当前 Qoder 会话有效。
+            # userSettings 会写进 ~/.qoder/settings.json，永久作用于整个 Qoder，
+            # 设置页又没有地方把它改回去。
             name = str(token or "").strip()
             if not name:
                 return []
             return [{
                 "type": "addRules",
                 "behavior": "allow",
-                "destination": "userSettings",
+                "destination": "session",
                 "rules": [{
                     "toolName": tool_name or "Bash",
                     "ruleContent": name + ":*",
@@ -518,6 +519,18 @@ enum HelperTemplate {
         DENY_COMMANDS = {"rm", "mv", "sudo", "wget", "curl", "chown", "remove-item"}
 
 
+        def session_permission_mode(payload):
+            raw = payload.get("permission_mode") or payload.get("permissionMode") or ""
+            return str(raw).strip().lower().replace("-", "_")
+
+
+        def qoder_handles_approval(payload):
+            # 自动审批是 auto，完全访问是 bypass_permissions（别名 yolo）。
+            # 这两种由 Qoder 自己放行，岛上不再开权限卡。
+            # 每次询问是 accept_edits，那种仍然开卡。
+            return session_permission_mode(payload) in ("auto", "bypass_permissions", "yolo")
+
+
         def command_head(command):
             head = command.split(None, 1)[0] if command else ""
             if not head or any(ch in head for ch in (",", '"', "'")):
@@ -525,11 +538,6 @@ enum HelperTemplate {
             if head.lower() in DENY_COMMANDS:
                 return ""
             return head
-
-
-        def user_settings_path():
-            name = ".qoder-cn" if _identify_product() == "qoder_cn" else ".qoder"
-            return os.path.join(os.path.expanduser("~"), name, "settings.json")
 
 
         def rule_covers_command(rule, command, tool_name):
@@ -548,64 +556,33 @@ enum HelperTemplate {
             return content == command
 
 
-        def persist_prefix_rule(tool_name, token):
-            # Qoder.app 的 PreToolUse 没有 updatedPermissions。这里直接写入
-            # userSettings，下一次同类命令才能被 already_allowed 认出来。
-            # 回 ask 再等 PermissionRequest 会让原生审批框先画出来。
+        def remember_session_allow(session_id, tool_name, token):
+            # 只记在这份会话状态里。不写 ~/.qoder/settings.json，
+            # 否则规则会永久留下，Qoder 里没有地方删。
             name = str(token or "").strip()
             if not name or name.lower() in DENY_COMMANDS:
-                return False
+                return
             if any(ch in name for ch in (",", '"', "'", "(", ")", "$", ";", "&", "|", "<", ">")):
-                return False
+                return
             rule = "%s(%s:*)" % (tool_name or "Bash", name)
-            path = user_settings_path()
-            try:
-                with open(path) as f:
-                    data = json.load(f)
-            except Exception:
-                return False
-            if not isinstance(data, dict):
-                return False
-            perms = data.get("permissions")
-            if not isinstance(perms, dict):
-                perms = {}
-            allow = perms.get("allow")
-            if not isinstance(allow, list):
-                allow = []
-            if rule in allow:
-                return True
-            allow.append(rule)
-            perms["allow"] = allow
-            data["permissions"] = perms
-            tmp = path + ".betterfocus.tmp"
-            try:
-                mode = os.stat(path).st_mode
-                with open(tmp, "w") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                    f.write("\\n")
-                os.replace(tmp, path)
-                os.chmod(path, mode)
-            except Exception:
-                return False
-            return True
+            state = _load_state(session_id)
+            rules = state.get("session_allow")
+            if not isinstance(rules, list):
+                rules = []
+            if rule not in rules:
+                rules.append(rule)
+            state["session_allow"] = rules
+            _save_state(session_id, state)
 
 
-        def already_allowed(command, tool_name):
-            # 规则已经在 userSettings 里时，PreToolUse 直接放行，不再开卡。
-            # 否则「始终允许」之后下一条同类命令仍会先弹出卡片。
+        def session_allows(session_id, command, tool_name):
             if not command_head(command):
                 return False
-            try:
-                with open(user_settings_path()) as f:
-                    data = json.load(f)
-            except Exception:
-                return False
-            perms = data.get("permissions") if isinstance(data, dict) else None
-            allow = perms.get("allow") if isinstance(perms, dict) else None
-            if not isinstance(allow, list):
+            rules = _load_state(session_id).get("session_allow")
+            if not isinstance(rules, list):
                 return False
             name = tool_name or "Bash"
-            return any(rule_covers_command(rule, command, name) for rule in allow)
+            return any(rule_covers_command(rule, command, name) for rule in rules)
 
 
         def permission_hold_path(session_id):
@@ -756,8 +733,7 @@ enum HelperTemplate {
                     emit("deny", "The person rejected this command on BetterFocusIDE.", event)
                     return
                 if decision in ("always", "once"):
-                    # 只在「始终允许」时附上前缀规则。Qoder.app 会写入
-                    # ~/.qoder/settings.json 并更新当前进程的规则，下一次同类命令不再询问。
+                    # 「本会话允许」附上 destination=session 的前缀规则。
                     # 「允许」只放行这一次，不带 updatedPermissions。
                     token = ""
                     updates = None
@@ -767,9 +743,7 @@ enum HelperTemplate {
                     if event == "PreToolUse":
                         remember_permission_hold(session_id, command, decision, token, tool_name)
                         if decision == "always":
-                            # 直接放行，不回 ask。回 ask 会迫使 Qoder.app 画出原生审批框。
-                            # 前缀规则写进 userSettings，下一次由 already_allowed 跳过卡片。
-                            persist_prefix_rule(tool_name, token)
+                            remember_session_allow(session_id, tool_name, token)
                     emit("allow", "The person allowed this command on BetterFocusIDE.",
                          event, updates=updates)
                     return
@@ -1151,9 +1125,12 @@ enum HelperTemplate {
                         emit("allow", "Nothing to ask; continue.")
                     return
                 # 带 command 的权限申请会等岛上的三按钮卡。
-                # 这条事件只在宿主已经决定要问人时才会到。acceptEdits / auto
-                # 仍会为终端命令发它，不能按会话模式提前回 ask。
+                # 每次询问（accept_edits）仍会为终端命令发它，不能按这个模式提前放行。
+                # 自动审批（auto）和完全访问（bypass_permissions）由 Qoder 自己处理，不开卡。
                 # 其余仍只通知，立刻回 ask，让 Qoder 弹自己的对话框。
+                if qoder_handles_approval(payload) and shell_command(_question_input(payload)):
+                    emit("allow", "This Qoder session approves commands itself.")
+                    return
                 if not alerts_enabled("permission"):
                     emit("ask", "BetterFocusIDE permission notices are off; decide in Qoder's own dialog.")
                     return
@@ -1190,9 +1167,12 @@ enum HelperTemplate {
                     tool_input = _question_input(payload)
                     command = shell_command(tool_input)
                     if command:
-                        if already_allowed(command, tool_name):
-                            emit("allow", "This command is already allowed in Qoder settings.",
+                        if session_allows(session_id, command, tool_name):
+                            emit("allow", "This command is allowed for the rest of this Qoder session.",
                                  "PreToolUse")
+                            return
+                        # 不回决策。Qoder 按当前会话的自动审批或完全访问自己放行。
+                        if qoder_handles_approval(payload):
                             return
                         run_permission(payload, session_id, "PreToolUse")
                         return

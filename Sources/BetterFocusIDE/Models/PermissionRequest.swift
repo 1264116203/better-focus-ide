@@ -19,7 +19,7 @@ enum PermissionDecisionValue: String {
     var label: String {
         switch self {
         case .allowOnce: return "允许"
-        case .allowAlways: return "始终允许"
+        case .allowAlways: return "本会话允许"
         case .reject: return "拒绝"
         case .timeout: return "超时"
         }
