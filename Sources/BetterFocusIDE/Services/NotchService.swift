@@ -770,7 +770,9 @@ final class NotchService: ObservableObject {
             activeCard = .permission
             animateTo(size: targetSizeForCurrentCard())
         } else if noticeController.hasActiveNotice {
-            activeCard = .notice
+            // 提问 / 权限占着岛时，这条通知还留在当前槽里，没有推进队列。
+            // 只把 activeCard 改回通知的话，窗口会停在上一张大卡片的尺寸上。
+            showNoticeBanner()
         } else if todoController.hasTodo {
             // 提问 / 权限 / 通知撤下后，把仍在的任务进度接回来（不必等下一次 todo 事件）。
             // 进行中的展开后保持；全部完成走 2.5s 收尾。
@@ -896,8 +898,8 @@ final class NotchService: ObservableObject {
             + geometry.safeContentTop
     }
 
-    /// 通知横幅高度。默认仍是设置里的一行高度；正文放不下时加上展开按钮，
-    /// 展开后按多出来的行数把卡片向下撑开。
+    /// 通知横幅高度。默认仍是设置里的一行高度。
+    /// 正文放不下时不另加按钮；点被省略的文字展开后，按多出来的行数把卡片向下撑开。
     private func noticeCardHeight() -> CGFloat {
         let base = NotchLayout.expandedHeight
         guard let body = noticeController.notice?.body, !body.isEmpty else { return base }
@@ -906,7 +908,7 @@ final class NotchService: ObservableObject {
         let measured = DetailText.measure(fullHeight: full, font: 12,
                                           collapsedLines: 1, expanded: detailExpanded)
         let extraLines = CGFloat(max(0, measured.shownLines - 1))
-        return base + extraLines * 12 * 1.3 + (measured.showsControl ? DetailText.controlBlock : 0)
+        return base + extraLines * 12 * 1.3
     }
     
     /// Permission card height (mirrors Python PermissionCard.total_height).

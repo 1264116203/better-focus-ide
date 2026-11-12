@@ -31,19 +31,17 @@ struct NotchNoticeView: View {
         let width = max(40, NotchLayout.expandedWidth - inset * 2 - 36 - 10)
         let measured = DetailText.measure(notice.body, width: width, font: 12,
                                           collapsedLines: 1, expanded: detailExpanded)
-        return VStack(alignment: .trailing, spacing: DetailText.controlSpacing) {
-            DetailTextBlock(
-                text: notice.body,
-                fontSize: 12,
-                color: .white.opacity(0.75),
-                collapsedLines: 1,
-                expanded: detailExpanded,
-                measure: measured)
-                .allowsHitTesting(false)
-            if measured.showsControl {
-                DetailDisclosure(expanded: detailExpanded, action: onToggleDetail)
-            }
-        }
+        // 放不下时点正文本身展开或收回。没有单独的按钮，点击面只覆盖这段文字，
+        // 点到标题或空白仍走整卡的「打开来源」。
+        return DetailTextBlock(
+            text: notice.body,
+            fontSize: 12,
+            color: .white.opacity(0.75),
+            collapsedLines: 1,
+            expanded: detailExpanded,
+            measure: measured,
+            onToggle: measured.showsControl ? onToggleDetail : nil)
+            .allowsHitTesting(measured.showsControl)
     }
 
     /// 拖动关闭触发阈值（点）。
@@ -69,8 +67,8 @@ struct NotchNoticeView: View {
             let visW = drawerVisibleWidth ?? fullW
 
             ZStack(alignment: .topTrailing) {
-                // 整卡点击放在底层按钮上。详情「收起」若和祖先 onTapGesture 叠在一起，
-                // 点文字折叠会把这次点击当成点横幅：跳回 IDE 并把整张卡片收掉。
+                // 整卡点击放在底层按钮上。正文的展开 / 收起若和这层叠在一起，
+                // 点文字会当成点横幅：跳回 IDE 并把整张卡片收掉。
                 Button(action: onTap) {
                     Color.clear
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
