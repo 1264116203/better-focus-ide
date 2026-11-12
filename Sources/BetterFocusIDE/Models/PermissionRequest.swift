@@ -15,13 +15,24 @@ enum PermissionDecisionValue: String {
     case reject = "reject"
     case timeout = "timeout"
 
-    /// 决策的中文按钮/回显文案。
+    /// 决策的中文按钮/回显文案。桌面版中间按钮是「本会话允许」。
     var label: String {
         switch self {
         case .allowOnce: return "允许"
         case .allowAlways: return "本会话允许"
         case .reject: return "拒绝"
         case .timeout: return "超时"
+        }
+    }
+
+    /// 卡片按钮文案。Qoder IDE 的中间按钮改设置页里的自动执行，文案是「始终允许」。
+    func buttonLabel(for provider: AgentProvider) -> String {
+        guard self == .allowAlways else { return label }
+        switch provider {
+        case .qoder_ide, .qoder_cn_ide, .qoder_cli, .qoder_cn_cli:
+            return "始终允许"
+        default:
+            return label
         }
     }
 

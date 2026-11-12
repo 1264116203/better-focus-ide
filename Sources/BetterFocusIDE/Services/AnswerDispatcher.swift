@@ -85,14 +85,15 @@ enum AnswerDispatcher {
     /// `commandToken` 只在「始终允许」已经写入 Qoder 允许列表时带上，供 hook 核对。
     static func dispatchPermissionDecision(sessionID: String, requestID: String,
                                            decision: PermissionDecisionValue,
-                                           commandToken: String? = nil) {
+                                           commandToken: String? = nil,
+                                           optionLabel: String? = nil) {
         let file = permissionPath(sessionID: sessionID, requestID: requestID)
         var extra: [String: Any] = ["decision": decision.rawValue, "message": ""]
         if let commandToken, !commandToken.isEmpty {
             extra["command_token"] = commandToken
         }
         writeAnswer(to: file, optionIndex: decision.answerIndex,
-                    optionLabel: decision.label,
+                    optionLabel: optionLabel ?? decision.label,
                     extra: extra)
     }
 

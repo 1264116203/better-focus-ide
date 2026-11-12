@@ -97,6 +97,9 @@ enum HelperTemplate {
             # permissionDecision 是 IDE / PreToolUse 认的字段。
             # Qoder.app 的 PermissionRequest 只读 decision.behavior（allow / deny）。
             # ask 不在那个枚举里，写进去整段 stdout 会被丢掉，所以只在 allow / deny 时附上。
+            # IDE 的解析器不认 decision 这个对象。附在 PermissionRequest 上时，
+            # 整段 stdout 会被当成没有解析结果，卡片上的允许不会生效，
+            # IDE 仍弹出自己的选择框。所以只在桌面版附上。
             # Qoder.app 的「本会话允许」只带 destination=session。
             # 写进 userSettings 会永久作用于整个 Qoder，设置里又改不掉。
             output = {
@@ -104,7 +107,8 @@ enum HelperTemplate {
                 "permissionDecision": decision,
                 "permissionDecisionReason": reason,
             }
-            if event == "PermissionRequest" and decision in ("allow", "deny"):
+            if (event == "PermissionRequest" and decision in ("allow", "deny")
+                    and _desktop_qoder()):
                 decided = {"behavior": decision}
                 if decision == "deny" and reason:
                     decided["message"] = reason

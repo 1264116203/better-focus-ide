@@ -386,6 +386,12 @@ Unix socket 文件本身就是锁锚点：
 
 新增语言沿用 `README.<lang>.md`（例如 `README.ja.md`），在每一份文首补上切换链接，并把新文件加进上表。`AGENTS.md` 面向贡献者，保持中文，不随 README 翻译。
 
+### 功能经验沉淀
+
+新功能的实现思路定下来并落地后，同一次改动里把经验写进 `knowledge/`。写清最终行为、关键路径、实测过的接口和取值、否决过的做法、代码落点。同一主题已有文档时更新那一份；旧方案被取代时在文首标明，不要让旧计划继续被当成现行做法。
+
+目录按主题放在 `knowledge/technologies/active/sprint2611/<主题>/`，经验文用 `NN-开发经验.md` 或 `NN-适配经验.md`。只润色用词、不改变事实时不必另开一篇。用户文档仍走上面的 README 多语言同步，knowledge 不代替用户手册。
+
 ### UI 模式
 
 - 所有 UI 均为 SwiftUI，强制深色模式
@@ -590,7 +596,7 @@ echo '{"provider":"qoder","product":"qoder_ide","event":"turn_finished","session
 
 **结论**：用 `PermissionRequest` 而非 `PreToolUse` 拦截 `AskUserQuestion`。
 **理由**：`PermissionRequest` 是阻塞式（Qoder 等待 hook 返回决策后再继续），`PreToolUse` 是 fire-and-forget（Qoder 不等待响应）。
-**适用范围**：`AskUserQuestion` 仍走提问卡。带 `command` 的 Qoder `PermissionRequest` 等岛上的三按钮卡：`允许` / `拒绝` 回 `allow` / `deny`；`始终允许` 由岛把命令名写入 `~/Library/Application Support/Qoder{,CN}/User/settings.json` 的 `app.configChatCommandAllowlist` 和 `SharedClientCache/cache/app-config.json` 的 `commandAllowList`，这条 hook 仍回 `allow`。Qoder 会采信 `allow` / `deny`，stdout 没有「始终允许」字段。允许列表只在终端模式 `askEveryTime` 时减少后续确认。`PermissionRequest` 只在宿主已经要问人时触发，`acceptEdits` / `auto` 下的终端命令也会走到这里，不能按会话模式提前回 `ask`。stdout 同时写 IDE 的 `permissionDecision` 和 Qoder.app 的 `decision.behavior`。Qoder.app 的「本会话允许」带 `updatedPermissions`（`命令名:*`，`destination` 为 `session`）。不要写成 `userSettings`：那会进 `~/.qoder/settings.json` 的 `permissions.allow`，永久作用于整个 Qoder，设置页里没有地方改回去。Qoder.app 的终端命令在会话模式为每次询问（`accept_edits`）时，于 PreToolUse 上等岛上的卡片：允许和本会话允许都回 allow，拒绝回 deny，检查结果不再是 ask，原生审批框不会先画出来。自动审批（`auto`）和完全访问（`bypass_permissions`）不开卡，也不回决策，让 Qoder 自己放行。本会话允许记在 hook 的会话状态里，同一个会话的下一次同类命令不再开卡，会话结束就失效。若检查仍然要问（工作区外的安全询问），紧接着的 PermissionRequest 立刻回放同一决定。IDE 的 PreToolUse 仍然立刻退出；IDE 的始终允许仍写两份允许名单，并可由 PermissionRequest 的 `updatedPermissions` 落盘。没有 `command` 的权限请求仍只发 `permission_notice` 并立刻 `emit("ask")`。超时同样回 `ask`。
+**适用范围**：`AskUserQuestion` 仍走提问卡。带 `command` 的 Qoder `PermissionRequest` 等岛上的三按钮卡：`允许` / `拒绝` 回 `allow` / `deny`；Qoder IDE 的 `始终允许` 走设置页保存时用的语言服务。先 `config/getGlobal` 取整份配置，再 `config/updateGlobal` 只改三项：`terminalRunMode=fullAccess`、`webToolsExecutionMode=enabledAutoExecute`、`planModeRunConfig=autoRunInFuture`，然后 `config/updateGlobalTerminalRunMode` 再写一次终端模式。套接字是 `~/Library/Application Support/Qoder{,CN}/SharedClientCache/qoder.sock`。设置页重新打开时读 `User/app.json`，并会把它同步回语言服务。所以同一决定还要写进 `app.json` 的 `config.chat.terminalRunMode`、`config.chat.webToolsMode`（`Auto-execute`）、`config.integrations.planModeRunConfig`（`Auto-run`），以及 `User/settings.json` 的 `configChatTerminalRunMode`、`configChatWebToolsMode`、`configIntegrationsPlanModeRunConfig`。语言服务枚举和设置页文案不是同一套字符串。这条 hook 仍回 `allow`。Qoder 会采信 `allow` / `deny`，stdout 没有「始终允许」字段。允许列表只在终端模式 `askEveryTime` 时减少后续确认。`PermissionRequest` 只在宿主已经要问人时触发，`acceptEdits` / `auto` 下的终端命令也会走到这里，不能按会话模式提前回 `ask`。stdout 始终写 `permissionDecision`。`decision.behavior` 只附在 Qoder.app 上；IDE 不认这个对象，附上会把整段 stdout 丢掉，卡片上的允许不会生效。Qoder.app 的「本会话允许」带 `updatedPermissions`（`命令名:*`，`destination` 为 `session`）。不要写成 `userSettings`：那会进 `~/.qoder/settings.json` 的 `permissions.allow`，永久作用于整个 Qoder，设置页里没有地方改回去。Qoder.app 的终端命令在会话模式为每次询问（`accept_edits`）时，于 PreToolUse 上等岛上的卡片：允许和本会话允许都回 allow，拒绝回 deny，检查结果不再是 ask，原生审批框不会先画出来。自动审批（`auto`）和完全访问（`bypass_permissions`）不开卡，也不回决策，让 Qoder 自己放行。本会话允许记在 hook 的会话状态里，同一个会话的下一次同类命令不再开卡，会话结束就失效。若检查仍然要问（工作区外的安全询问），紧接着的 PermissionRequest 立刻回放同一决定。IDE 的 PreToolUse 仍然立刻退出；IDE 的始终允许改的是上面三项自动执行，不再写允许名单，stdout 只回 `permissionDecision`。没有 `command` 的权限请求仍只发 `permission_notice` 并立刻 `emit("ask")`。超时同样回 `ask`。
 
 ### 布局参照基准
 

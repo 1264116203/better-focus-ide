@@ -133,12 +133,13 @@ struct NotchPermissionView: View {
 
     // MARK: - 按钮
 
-    /// 三个决策按钮：允许 / 本会话允许 / 拒绝。
+    /// 三个决策按钮。Qoder.app 中间是「本会话允许」，Qoder IDE 中间是「始终允许」。
     private func buttonsView(_ req: PermissionRequest) -> some View {
         HStack(spacing: 8) {
             permissionButton("允许", decision: .allowOnce,
                              color: req.provider.tint, req: req)
-            permissionButton("本会话允许", decision: .allowAlways,
+            permissionButton(PermissionDecisionValue.allowAlways.buttonLabel(for: req.provider),
+                             decision: .allowAlways,
                              color: req.provider.tint.opacity(0.7), req: req)
             permissionButton("拒绝", decision: .reject,
                              color: Color(red: 0.9, green: 0.3, blue: 0.3), req: req)

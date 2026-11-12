@@ -149,7 +149,8 @@ final class PermissionController: ObservableObject {
 
     /// 做出决策：下发应答文件，记录 choice，给一次反馈，短暂停留后收起。
     ///
-    /// IDE 的「始终允许」写入两份允许名单，写不进去就降级成「允许」。
+    /// Qoder IDE 的「始终允许」把终端、Web 工具和计划智能体改成自动执行，
+    /// 语言服务没收下就降级成「允许」。
     /// Qoder.app 没有能改这条规则的设置页，写进配置会永久作用于整个应用，
     /// 所以桌面版只把命令名交给 hook，由它记在当前会话里。
     func decide(_ decision: PermissionDecisionValue) {
@@ -178,7 +179,8 @@ final class PermissionController: ObservableObject {
         }
         AnswerDispatcher.dispatchPermissionDecision(
             sessionID: req.sessionID, requestID: req.requestID,
-            decision: outgoing, commandToken: commandToken)
+            decision: outgoing, commandToken: commandToken,
+            optionLabel: decision.buttonLabel(for: req.provider))
         Log.info("权限已决定 \(outgoing.rawValue) request=\(req.requestID)", topic: "permission")
         choice = decision
         FeedbackService.onAnswer()

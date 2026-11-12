@@ -19,9 +19,38 @@ final class QoderCommandAllowListTests: XCTestCase {
         }
     }
 
+    private var updates: [[String: Any]] = []
+    private var globalUpdates: [[String: Any]] = []
+
     override func tearDownWithError() throws {
         QoderCommandAllowList.locationsForTesting = nil
+        QoderCommandAllowList.rpcForTesting = nil
         try? FileManager.default.removeItem(at: directory)
+    }
+
+    /// 语言服务替身：读出当前配置，收下整份更新和终端模式更新。
+    private func installRPC() {
+        updates = []
+        globalUpdates = []
+        QoderCommandAllowList.rpcForTesting = { method, params in
+            switch method {
+            case "config/getGlobal":
+                return [
+                    "terminalRunMode": "askEveryTime",
+                    "webToolsExecutionMode": "enabledAskEveryTime",
+                    "planModeRunConfig": "askEveryTime",
+                    "commandAllowList": "keep-me",
+                ]
+            case "config/updateGlobal":
+                self.globalUpdates.append(params)
+                return ["success": true]
+            case "config/updateGlobalTerminalRunMode":
+                self.updates.append(params)
+                return ["success": true]
+            default:
+                return nil
+            }
+        }
     }
 
     func testCommandTokenUsesFirstWordAndSkipsDenyList() {
@@ -40,22 +69,68 @@ final class QoderCommandAllowListTests: XCTestCase {
         XCTAssertEqual(QoderCommandAllowList.merging("npm", token: "git"), "npm,git")
     }
 
-    func testRememberWritesBothFilesAndPreservesOtherKeys() throws {
-        try seed(uiAllow: "", runtimeAllow: "", deny: "rm,sudo")
+    func testRememberUpdatesLanguageServiceAndMirrorsSettings() throws {
+        try seed(uiAllow: "ls", runtimeAllow: "keep-me", deny: "rm,sudo")
+        try write([
+            "config": [
+                "chat": [
+                    "terminalRunMode": "askEveryTime",
+                    "webToolsMode": "Ask every time",
+                    "commandAllowlist": "ls",
+                ],
+                "integrations": [
+                    "planModeRunConfig": "Ask every time",
+                    "questPlanModeRunConfig": "Auto-run",
+                ],
+            ],
+        ], to: directory.appendingPathComponent("app.json"))
+        installRPC()
         let outcome = QoderCommandAllowList.remember(command: "git status", provider: .qoder_ide)
         guard case .remembered(let token) = outcome else {
             return XCTFail("expected remembered, got \(outcome)")
         }
         XCTAssertEqual(token, "git")
+        XCTAssertEqual(updates.count, 1)
+        XCTAssertEqual(updates[0]["terminalRunMode"] as? String, "fullAccess")
+        XCTAssertEqual(globalUpdates.count, 1)
+        XCTAssertEqual(globalUpdates[0]["terminalRunMode"] as? String, "fullAccess")
+        XCTAssertEqual(globalUpdates[0]["webToolsExecutionMode"] as? String, "enabledAutoExecute")
+        XCTAssertEqual(globalUpdates[0]["planModeRunConfig"] as? String, "autoRunInFuture")
+        XCTAssertEqual(globalUpdates[0]["commandAllowList"] as? String, "keep-me")
 
         let ui = try json(at: directory.appendingPathComponent("settings.json"))
         let app = ui["app"] as? [String: Any]
-        XCTAssertEqual(app?["configChatCommandAllowlist"] as? String, "git")
-        XCTAssertEqual(app?["configChatTerminalRunMode"] as? String, "askEveryTime")
+        XCTAssertEqual(app?["configChatCommandAllowlist"] as? String, "ls")
+        XCTAssertEqual(app?["configChatTerminalRunMode"] as? String, "fullAccess")
+        XCTAssertEqual(app?["configChatWebToolsMode"] as? String, "Auto-execute")
+        XCTAssertEqual(app?["configIntegrationsPlanModeRunConfig"] as? String, "Auto-run")
+        let page = try json(at: directory.appendingPathComponent("app.json"))
+        let chat = (page["config"] as? [String: Any])?["chat"] as? [String: Any]
+        let integrations = (page["config"] as? [String: Any])?["integrations"] as? [String: Any]
+        XCTAssertEqual(chat?["terminalRunMode"] as? String, "fullAccess")
+        XCTAssertEqual(chat?["webToolsMode"] as? String, "Auto-execute")
+        XCTAssertEqual(chat?["commandAllowlist"] as? String, "ls")
+        XCTAssertEqual(integrations?["planModeRunConfig"] as? String, "Auto-run")
+        XCTAssertEqual(integrations?["questPlanModeRunConfig"] as? String, "Auto-run")
 
         let runtime = try json(at: directory.appendingPathComponent("app-config.json"))
-        XCTAssertEqual(runtime["commandAllowList"] as? String, "git")
-        XCTAssertEqual(runtime["terminalRunMode"] as? String, "askEveryTime")
+        XCTAssertEqual(runtime["commandAllowList"] as? String, "keep-me")
+    }
+
+    func testRememberWritesSettingsFileWhenRuntimeCacheIsMissing() throws {
+        try seed(uiAllow: "", runtimeAllow: "", deny: "rm,sudo")
+        installRPC()
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("app-config.json"))
+        let outcome = QoderCommandAllowList.remember(command: "git status", provider: .qoder_ide)
+        guard case .remembered(let token) = outcome else {
+            return XCTFail("expected remembered, got \(outcome)")
+        }
+        XCTAssertEqual(token, "git")
+        let ui = try json(at: directory.appendingPathComponent("settings.json"))
+        let app = ui["app"] as? [String: Any]
+        XCTAssertEqual(app?["configChatTerminalRunMode"] as? String, "fullAccess")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent("app-config.json").path))
     }
 
     func testRememberDoesNotCreateMissingFiles() {
@@ -69,6 +144,7 @@ final class QoderCommandAllowListTests: XCTestCase {
 
     func testAllowAlwaysRecordsTokenAndAllowOnceDoesNotTouchLists() throws {
         try seed(uiAllow: "", runtimeAllow: "", deny: "rm")
+        installRPC()
         let controller = PermissionController()
         let session = "sess-\(UUID().uuidString)"
         controller.present(makeRequest(session: session, command: "git status"))
@@ -79,7 +155,7 @@ final class QoderCommandAllowListTests: XCTestCase {
         XCTAssertEqual(answer["command_token"] as? String, "git")
         let ui = try json(at: directory.appendingPathComponent("settings.json"))
         let app = ui["app"] as? [String: Any]
-        XCTAssertEqual(app?["configChatCommandAllowlist"] as? String, "git")
+        XCTAssertEqual(app?["configChatTerminalRunMode"] as? String, "fullAccess")
 
         let onceController = PermissionController()
         onceController.present(makeRequest(session: session, command: "npm test", requestID: "req-2"))
@@ -88,7 +164,8 @@ final class QoderCommandAllowListTests: XCTestCase {
         XCTAssertEqual(once["decision"] as? String, "once")
         XCTAssertNil(once["command_token"])
         let runtime = try json(at: directory.appendingPathComponent("app-config.json"))
-        XCTAssertEqual(runtime["commandAllowList"] as? String, "git")
+        XCTAssertEqual(runtime["commandAllowList"] as? String, "")
+        XCTAssertEqual(updates[0]["terminalRunMode"] as? String, "fullAccess")
     }
 
     func testDesktopAlwaysStaysInSessionAndDoesNotWriteLists() throws {
@@ -135,6 +212,7 @@ final class QoderCommandAllowListTests: XCTestCase {
         XCTAssertTrue(body.contains("decision") && body.contains("\"always\""))
         XCTAssertTrue(body.contains("permission_notice"))
         XCTAssertFalse(body.contains("AUTO_MODES"))
+        XCTAssertTrue(body.contains("and _desktop_qoder()"))
         XCTAssertTrue(body.contains("\"behavior\": decision"))
         XCTAssertTrue(body.contains("updatedPermissions"))
         XCTAssertTrue(body.contains(":*"))
@@ -155,6 +233,8 @@ final class QoderCommandAllowListTests: XCTestCase {
                 "configChatCommandAllowlist": uiAllow,
                 "configChatCommandDenyList": deny,
                 "configChatTerminalRunMode": "askEveryTime",
+                "configChatWebToolsMode": "Ask every time",
+                "configIntegrationsPlanModeRunConfig": "Ask every time",
             ],
         ]
         let runtime: [String: Any] = [
