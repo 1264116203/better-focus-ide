@@ -96,6 +96,9 @@ struct PermissionRequest: Equatable, Identifiable {
             "file": "读写文件", "patch": "修改文件",
             "glob": "查找文件", "grep": "搜索内容",
             "webfetch": "访问网页", "websearch": "联网搜索",
+            "switchmode": "执行方式", "createplan": "执行计划",
+            "enterplanmode": "计划智能体", "exitplanmode": "执行计划",
+            "planagent": "计划智能体",
             "subagent": "启动智能体", "skill": "调用技能",
             "mcp": "MCP 工具", "permission": "权限审批", "tool": "权限审批",
         ]

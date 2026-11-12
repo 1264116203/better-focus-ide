@@ -7,11 +7,11 @@ import Foundation
 ///
 /// 设置页改终端模式时调用 `config/updateGlobalTerminalRunMode`。正在生效的值是
 /// `terminalRunMode`，对应设置记录里的 `configChatTerminalRunMode`。
-/// 「始终允许」把终端设为 `fullAccess`（完全访问权限），把 Web 工具设为自动执行，
-/// 把计划智能体设为自动运行。设置页重新打开时读的是 `User/app.json`，不是
-/// `settings.json`。页面会把 app.json 里的旧值同步回语言服务。所以语言服务收下后，
-/// 还要改 app.json 和 settings.json 里的对应字段。语言服务没连上时返回
-/// `.downgraded`，调用方把这一次当成「允许」。
+/// 「始终允许」只改这一张卡对应的那一项：终端命令改成完全访问，联网搜索和访问网页
+/// 改成自动执行，计划智能体改成自动运行。点 Web 卡不会改计划智能体。设置页重新
+/// 打开时读的是 `User/app.json`，不是 `settings.json`。页面会把 app.json 里的旧值
+/// 同步回语言服务。所以语言服务收下后，还要改 app.json 和 settings.json 里的对应
+/// 字段。语言服务没连上时返回 `.downgraded`，调用方把这一次当成「允许」。
 enum QoderCommandAllowList {
     /// 写入结果。`remembered` 的字符串是落盘的命令名。
     enum Outcome: Equatable {
@@ -83,33 +83,98 @@ enum QoderCommandAllowList {
         }
     }
 
-    /// 把终端、Web 工具、计划智能体改成自动执行。语言服务没收下就放弃。
-    static func remember(command: String, provider: AgentProvider) -> Outcome {
+    /// 这张卡的「始终允许」该改哪一项。认不出工具名时按终端命令处理。
+    static func target(for toolName: String) -> Target {
+        let name = toolName.replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: "-", with: "")
+            .lowercased()
+        switch name {
+        case "websearch", "webfetch":
+            return .web
+        case "switchmode", "createplan", "enterplanmode", "exitplanmode", "planagent":
+            return .plan
+        default:
+            return .terminal
+        }
+    }
+
+    /// 「始终允许」改的是哪一项设置。
+    enum Target {
+        case terminal
+        case web
+        case plan
+    }
+
+    /// 语言服务现在能不能读到配置。读不到时「始终允许」应降级，不要先答应。
+    static func canReadConfig(provider: AgentProvider) -> Bool {
+        guard locations(for: provider) != nil else { return false }
+        return call(method: "config/getGlobal", params: [:], provider: provider) != nil
+    }
+
+    /// 先让 hook 结束，再写配置。
+    ///
+    /// 语言服务还停在这次 PermissionRequest 里时，`config/updateGlobal` 会一直
+    /// 等到套接字超时。hook 每 0.5 秒看一次应答，所以真实环境下等它退出再写。
+    /// 测试替身没有 hook，立刻写。
+    static func rememberAfterHook(command: String, toolName: String, provider: AgentProvider) {
+        let write = {
+            switch remember(command: command, toolName: toolName, provider: provider) {
+            case .remembered:
+                Log.info("始终允许已写入 Qoder 的设置", topic: "permission")
+            case .downgraded:
+                Log.info("始终允许未能写入 Qoder 配置", topic: "permission")
+            }
+        }
+        if locationsForTesting != nil || rpcForTesting != nil {
+            write()
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 1.0, execute: write)
+    }
+
+    /// 只改 `toolName` 对应的那一项。语言服务没收下就放弃。
+    static func remember(command: String, toolName: String = "", provider: AgentProvider) -> Outcome {
         guard locations(for: provider) != nil else { return .downgraded }
+        let target = target(for: toolName)
         guard var current = call(method: "config/getGlobal", params: [:], provider: provider) else {
             Log.info("没有读到 Qoder 的自动执行配置，这次按允许处理", topic: "permission")
             return .downgraded
         }
-        current["terminalRunMode"] = fullAccessMode
-        current["webToolsExecutionMode"] = webAutoLive
-        current["planModeRunConfig"] = planAutoLive
+        switch target {
+        case .terminal:
+            current["terminalRunMode"] = fullAccessMode
+        case .web:
+            current["webToolsExecutionMode"] = webAutoLive
+        case .plan:
+            current["planModeRunConfig"] = planAutoLive
+        }
         guard let updated = call(method: "config/updateGlobal", params: current, provider: provider),
-              (updated["success"] as? Bool) == true,
-              let terminal = call(method: "config/updateGlobalTerminalRunMode",
-                                  params: ["terminalRunMode": fullAccessMode],
-                                  provider: provider),
-              (terminal["success"] as? Bool) == true else {
+              (updated["success"] as? Bool) == true else {
             Log.info("没有把自动执行改成放行，这次按允许处理", topic: "permission")
             return .downgraded
         }
+        if target == .terminal {
+            guard let terminal = call(method: "config/updateGlobalTerminalRunMode",
+                                      params: ["terminalRunMode": fullAccessMode],
+                                      provider: provider),
+                  (terminal["success"] as? Bool) == true else {
+                Log.info("没有把终端模式改成完全访问，这次按允许处理", topic: "permission")
+                return .downgraded
+            }
+        }
         if let settings = locations(for: provider)?.ui {
-            mirrorSettings(fullAccessMode, key: "configChatTerminalRunMode", at: settings)
-            mirrorSettings(webAutoPage, key: "configChatWebToolsMode", at: settings)
-            mirrorSettings(planAutoPage, key: "configIntegrationsPlanModeRunConfig", at: settings)
             let page = settings.deletingLastPathComponent().appendingPathComponent("app.json")
-            mirrorJSONKey(fullAccessMode, key: "terminalRunMode", at: page)
-            mirrorJSONKey(webAutoPage, key: "webToolsMode", at: page)
-            mirrorJSONKey(planAutoPage, key: "planModeRunConfig", at: page)
+            switch target {
+            case .terminal:
+                mirrorSettings(fullAccessMode, key: "configChatTerminalRunMode", at: settings)
+                mirrorJSONKey(fullAccessMode, key: "terminalRunMode", at: page)
+            case .web:
+                mirrorSettings(webAutoPage, key: "configChatWebToolsMode", at: settings)
+                mirrorJSONKey(webAutoPage, key: "webToolsMode", at: page)
+            case .plan:
+                mirrorSettings(planAutoPage, key: "configIntegrationsPlanModeRunConfig", at: settings)
+                mirrorJSONKey(planAutoPage, key: "planModeRunConfig", at: page)
+            }
         }
         return .remembered(token(from: command, denyList: defaultDenyList) ?? "")
     }
@@ -190,7 +255,7 @@ enum QoderCommandAllowList {
         defer { close(fd) }
         var one: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        var timeout = timeval(tv_sec: 5, tv_usec: 0)
         let timeoutLen = socklen_t(MemoryLayout<timeval>.size)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, timeoutLen)
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, timeoutLen)

@@ -61,6 +61,10 @@ final class QoderCommandAllowListTests: XCTestCase {
         XCTAssertNil(QoderCommandAllowList.token(from: "\"quoted\"", denyList: ""))
         XCTAssertNil(QoderCommandAllowList.token(from: "rm -rf /tmp", denyList: "rm,sudo"))
         XCTAssertNil(QoderCommandAllowList.token(from: "Sudo ls", denyList: "rm,sudo"))
+        XCTAssertEqual(QoderCommandAllowList.target(for: "SwitchMode"), .plan)
+        XCTAssertEqual(QoderCommandAllowList.target(for: "CreatePlan"), .plan)
+        XCTAssertEqual(QoderCommandAllowList.target(for: "WebFetch"), .web)
+        XCTAssertEqual(QoderCommandAllowList.target(for: "Bash"), .terminal)
     }
 
     func testMergeKeepsOtherEntriesAndDoesNotDuplicate() {
@@ -94,27 +98,62 @@ final class QoderCommandAllowListTests: XCTestCase {
         XCTAssertEqual(updates[0]["terminalRunMode"] as? String, "fullAccess")
         XCTAssertEqual(globalUpdates.count, 1)
         XCTAssertEqual(globalUpdates[0]["terminalRunMode"] as? String, "fullAccess")
-        XCTAssertEqual(globalUpdates[0]["webToolsExecutionMode"] as? String, "enabledAutoExecute")
-        XCTAssertEqual(globalUpdates[0]["planModeRunConfig"] as? String, "autoRunInFuture")
+        XCTAssertEqual(globalUpdates[0]["webToolsExecutionMode"] as? String, "enabledAskEveryTime")
+        XCTAssertEqual(globalUpdates[0]["planModeRunConfig"] as? String, "askEveryTime")
         XCTAssertEqual(globalUpdates[0]["commandAllowList"] as? String, "keep-me")
 
         let ui = try json(at: directory.appendingPathComponent("settings.json"))
         let app = ui["app"] as? [String: Any]
         XCTAssertEqual(app?["configChatCommandAllowlist"] as? String, "ls")
         XCTAssertEqual(app?["configChatTerminalRunMode"] as? String, "fullAccess")
-        XCTAssertEqual(app?["configChatWebToolsMode"] as? String, "Auto-execute")
-        XCTAssertEqual(app?["configIntegrationsPlanModeRunConfig"] as? String, "Auto-run")
+        XCTAssertEqual(app?["configChatWebToolsMode"] as? String, "Ask every time")
+        XCTAssertEqual(app?["configIntegrationsPlanModeRunConfig"] as? String, "Ask every time")
         let page = try json(at: directory.appendingPathComponent("app.json"))
         let chat = (page["config"] as? [String: Any])?["chat"] as? [String: Any]
         let integrations = (page["config"] as? [String: Any])?["integrations"] as? [String: Any]
         XCTAssertEqual(chat?["terminalRunMode"] as? String, "fullAccess")
-        XCTAssertEqual(chat?["webToolsMode"] as? String, "Auto-execute")
+        XCTAssertEqual(chat?["webToolsMode"] as? String, "Ask every time")
         XCTAssertEqual(chat?["commandAllowlist"] as? String, "ls")
-        XCTAssertEqual(integrations?["planModeRunConfig"] as? String, "Auto-run")
+        XCTAssertEqual(integrations?["planModeRunConfig"] as? String, "Ask every time")
         XCTAssertEqual(integrations?["questPlanModeRunConfig"] as? String, "Auto-run")
 
         let runtime = try json(at: directory.appendingPathComponent("app-config.json"))
         XCTAssertEqual(runtime["commandAllowList"] as? String, "keep-me")
+    }
+
+    func testRememberWebDoesNotChangePlanOrTerminal() throws {
+        try seed(uiAllow: "ls", runtimeAllow: "keep-me", deny: "rm,sudo")
+        try write([
+            "config": [
+                "chat": [
+                    "terminalRunMode": "askEveryTime",
+                    "webToolsMode": "Ask every time",
+                ],
+                "integrations": ["planModeRunConfig": "Ask every time"],
+            ],
+        ], to: directory.appendingPathComponent("app.json"))
+        installRPC()
+        let outcome = QoderCommandAllowList.remember(command: "", toolName: "WebSearch",
+                                                     provider: .qoder_ide)
+        guard case .remembered = outcome else {
+            return XCTFail("expected remembered, got \(outcome)")
+        }
+        XCTAssertTrue(updates.isEmpty)
+        XCTAssertEqual(globalUpdates[0]["webToolsExecutionMode"] as? String, "enabledAutoExecute")
+        XCTAssertEqual(globalUpdates[0]["terminalRunMode"] as? String, "askEveryTime")
+        XCTAssertEqual(globalUpdates[0]["planModeRunConfig"] as? String, "askEveryTime")
+
+        let ui = try json(at: directory.appendingPathComponent("settings.json"))
+        let app = ui["app"] as? [String: Any]
+        XCTAssertEqual(app?["configChatWebToolsMode"] as? String, "Auto-execute")
+        XCTAssertEqual(app?["configChatTerminalRunMode"] as? String, "askEveryTime")
+        XCTAssertEqual(app?["configIntegrationsPlanModeRunConfig"] as? String, "Ask every time")
+        let page = try json(at: directory.appendingPathComponent("app.json"))
+        let chat = (page["config"] as? [String: Any])?["chat"] as? [String: Any]
+        let integrations = (page["config"] as? [String: Any])?["integrations"] as? [String: Any]
+        XCTAssertEqual(chat?["webToolsMode"] as? String, "Auto-execute")
+        XCTAssertEqual(chat?["terminalRunMode"] as? String, "askEveryTime")
+        XCTAssertEqual(integrations?["planModeRunConfig"] as? String, "Ask every time")
     }
 
     func testRememberWritesSettingsFileWhenRuntimeCacheIsMissing() throws {
@@ -211,6 +250,13 @@ final class QoderCommandAllowListTests: XCTestCase {
         XCTAssertTrue(body.contains("perm-"))
         XCTAssertTrue(body.contains("decision") && body.contains("\"always\""))
         XCTAssertTrue(body.contains("permission_notice"))
+        XCTAssertTrue(body.contains("def _card_permission"))
+        XCTAssertTrue(body.contains("\"websearch\""))
+        XCTAssertTrue(body.contains("\"webfetch\""))
+        XCTAssertTrue(body.contains("\"switchmode\""))
+        XCTAssertFalse(body.contains("\"createplan\""))
+        XCTAssertTrue(body.contains("_permission_card_recent"))
+        XCTAssertTrue(body.contains("_permission_notice_recent"))
         XCTAssertFalse(body.contains("AUTO_MODES"))
         XCTAssertTrue(body.contains("and _desktop_qoder()"))
         XCTAssertTrue(body.contains("\"behavior\": decision"))

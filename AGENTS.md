@@ -365,6 +365,14 @@ Unix socket 文件本身就是锁锚点：
 
 ## 编码规范
 
+### 模型回复
+
+回复用户时按这个顺序，三段都要有：
+
+1. **结论**：先说清楚结果或判断。
+2. **原因**：接着说明为什么是这个结论。
+3. **下一步**：最后给出推荐的下一步。
+
 ### 语言与风格
 
 - **Swift 5.9**，shell 脚本中严格使用 `set -euo pipefail`
@@ -596,7 +604,7 @@ echo '{"provider":"qoder","product":"qoder_ide","event":"turn_finished","session
 
 **结论**：用 `PermissionRequest` 而非 `PreToolUse` 拦截 `AskUserQuestion`。
 **理由**：`PermissionRequest` 是阻塞式（Qoder 等待 hook 返回决策后再继续），`PreToolUse` 是 fire-and-forget（Qoder 不等待响应）。
-**适用范围**：`AskUserQuestion` 仍走提问卡。带 `command` 的 Qoder `PermissionRequest` 等岛上的三按钮卡：`允许` / `拒绝` 回 `allow` / `deny`；Qoder IDE 的 `始终允许` 走设置页保存时用的语言服务。先 `config/getGlobal` 取整份配置，再 `config/updateGlobal` 只改三项：`terminalRunMode=fullAccess`、`webToolsExecutionMode=enabledAutoExecute`、`planModeRunConfig=autoRunInFuture`，然后 `config/updateGlobalTerminalRunMode` 再写一次终端模式。套接字是 `~/Library/Application Support/Qoder{,CN}/SharedClientCache/qoder.sock`。设置页重新打开时读 `User/app.json`，并会把它同步回语言服务。所以同一决定还要写进 `app.json` 的 `config.chat.terminalRunMode`、`config.chat.webToolsMode`（`Auto-execute`）、`config.integrations.planModeRunConfig`（`Auto-run`），以及 `User/settings.json` 的 `configChatTerminalRunMode`、`configChatWebToolsMode`、`configIntegrationsPlanModeRunConfig`。语言服务枚举和设置页文案不是同一套字符串。这条 hook 仍回 `allow`。Qoder 会采信 `allow` / `deny`，stdout 没有「始终允许」字段。允许列表只在终端模式 `askEveryTime` 时减少后续确认。`PermissionRequest` 只在宿主已经要问人时触发，`acceptEdits` / `auto` 下的终端命令也会走到这里，不能按会话模式提前回 `ask`。stdout 始终写 `permissionDecision`。`decision.behavior` 只附在 Qoder.app 上；IDE 不认这个对象，附上会把整段 stdout 丢掉，卡片上的允许不会生效。Qoder.app 的「本会话允许」带 `updatedPermissions`（`命令名:*`，`destination` 为 `session`）。不要写成 `userSettings`：那会进 `~/.qoder/settings.json` 的 `permissions.allow`，永久作用于整个 Qoder，设置页里没有地方改回去。Qoder.app 的终端命令在会话模式为每次询问（`accept_edits`）时，于 PreToolUse 上等岛上的卡片：允许和本会话允许都回 allow，拒绝回 deny，检查结果不再是 ask，原生审批框不会先画出来。自动审批（`auto`）和完全访问（`bypass_permissions`）不开卡，也不回决策，让 Qoder 自己放行。本会话允许记在 hook 的会话状态里，同一个会话的下一次同类命令不再开卡，会话结束就失效。若检查仍然要问（工作区外的安全询问），紧接着的 PermissionRequest 立刻回放同一决定。IDE 的 PreToolUse 仍然立刻退出；IDE 的始终允许改的是上面三项自动执行，不再写允许名单，stdout 只回 `permissionDecision`。没有 `command` 的权限请求仍只发 `permission_notice` 并立刻 `emit("ask")`。超时同样回 `ask`。
+**适用范围**：`AskUserQuestion` 仍走提问卡。带 `command` 的 Qoder `PermissionRequest` 等岛上的三按钮卡：`允许` / `拒绝` 回 `allow` / `deny`；Qoder IDE 的 `始终允许` 走设置页保存时用的语言服务。先 `config/getGlobal` 取整份配置，再 `config/updateGlobal` 只改这一张卡对应的一项：终端是 `terminalRunMode=fullAccess`，Web 是 `webToolsExecutionMode=enabledAutoExecute`，计划智能体是 `planModeRunConfig=autoRunInFuture`。终端卡再调 `config/updateGlobalTerminalRunMode`。点 Web 卡不会改计划智能体。套接字是 `~/Library/Application Support/Qoder{,CN}/SharedClientCache/qoder.sock`。设置页重新打开时读 `User/app.json`，并会把它同步回语言服务。所以同一决定还要写进 `app.json` 和 `User/settings.json` 里这一项：终端是 `terminalRunMode` / `configChatTerminalRunMode`，Web 是 `webToolsMode`=`Auto-execute` / `configChatWebToolsMode`，计划是 `planModeRunConfig`=`Auto-run` / `configIntegrationsPlanModeRunConfig`。语言服务枚举和设置页文案不是同一套字符串。这条 hook 仍回 `allow`。Qoder 会采信 `allow` / `deny`，stdout 没有「始终允许」字段。允许列表只在终端模式 `askEveryTime` 时减少后续确认。`PermissionRequest` 只在宿主已经要问人时触发，`acceptEdits` / `auto` 下的终端命令也会走到这里，不能按会话模式提前回 `ask`。stdout 始终写 `permissionDecision`。`decision.behavior` 只附在 Qoder.app 上；IDE 不认这个对象，附上会把整段 stdout 丢掉，卡片上的允许不会生效。Qoder.app 的「本会话允许」带 `updatedPermissions`（`命令名:*`，`destination` 为 `session`）。不要写成 `userSettings`：那会进 `~/.qoder/settings.json` 的 `permissions.allow`，永久作用于整个 Qoder，设置页里没有地方改回去。Qoder.app 的终端命令在会话模式为每次询问（`accept_edits`）时，于 PreToolUse 上等岛上的卡片：允许和本会话允许都回 allow，拒绝回 deny，检查结果不再是 ask，原生审批框不会先画出来。自动审批（`auto`）和完全访问（`bypass_permissions`）不开卡，也不回决策，让 Qoder 自己放行。本会话允许记在 hook 的会话状态里，同一个会话的下一次同类命令不再开卡，会话结束就失效。若检查仍然要问（工作区外的安全询问），紧接着的 PermissionRequest 立刻回放同一决定。IDE 的 PreToolUse 仍然立刻退出；IDE 的始终允许只改这一张卡对应的那一项，不再写允许名单，stdout 只回 `permissionDecision`。没有 `command`、也不是 `WebSearch` / `WebFetch` / `SwitchMode` / `EnterPlanMode` / `ExitPlanMode` / `PlanAgent` 的权限请求仍只发 `permission_notice` 并立刻 `emit("ask")`。`SwitchMode` 是执行方式，等三按钮卡。`CreatePlan` 是这份计划要不要执行，只发通知（点击仍跳回 IDE），立刻回 `ask`，选择留在 IDE 的「执行」上。允许回 `allow`、拒绝回 `deny`。`AskUserQuestion` 的 `allow` 会被收下，IDE 仍会弹出自己的确认；语言服务对这个工具名关掉了 hook allow 后的跳过。超时同样回 `ask`。
 
 ### 布局参照基准
 

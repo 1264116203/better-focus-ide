@@ -439,6 +439,53 @@ enum HelperTemplate {
             return started > 0 and (time.time() - started) < (QUESTION_TIMEOUT + 30)
 
 
+        def _mark_permission_card(session_id):
+            state = _load_state(session_id)
+            state["permission_card"] = time.time()
+            _save_state(session_id, state)
+
+
+        def _permission_card_recent(session_id):
+            state = _load_state(session_id)
+            try:
+                started = float(state.get("permission_card") or 0)
+            except Exception:
+                return False
+            return started > 0 and (time.time() - started) < (PERMISSION_TIMEOUT + 30)
+
+
+        def _card_permission(tool_name):
+            # 这些工具的 PermissionRequest 没有 command。立刻回 ask 时，
+            # 岛上只有通知，人没法允许或拒绝。
+            # CreatePlan 不在这里：hook 的 allow 收得下，但 Qoder 仍会弹出自己的
+            # 「执行」。岛上再等一次允许或拒绝，人就要确认两遍。它只发通知。
+            name = (tool_name or "").replace("_", "").replace("-", "").lower()
+            return name in {
+                "websearch", "webfetch",
+                "switchmode", "enterplanmode", "exitplanmode", "planagent",
+            }
+
+
+        def _mark_permission_notice(session_id, tool_name):
+            state = _load_state(session_id)
+            state["permission_notice_tool"] = (tool_name or "").replace("_", "").replace("-", "").lower()
+            state["permission_notice_at"] = time.time()
+            _save_state(session_id, state)
+
+
+        def _permission_notice_recent(session_id, tool_name):
+            # PermissionRequest 已经为这个工具发过通知时，紧跟着的 Notification
+            # 不再发第二条。窗口只盖住同一次确认，不吞掉之后别的权限提醒。
+            state = _load_state(session_id)
+            try:
+                started = float(state.get("permission_notice_at") or 0)
+            except Exception:
+                return False
+            name = (tool_name or "").replace("_", "").replace("-", "").lower()
+            marked = str(state.get("permission_notice_tool") or "")
+            return bool(name) and name == marked and started > 0 and (time.time() - started) < 30
+
+
         def publish_question(payload, session_id, questions):
             request_id = safe_id(payload.get("request_id")
                                  or payload.get("tool_use_id")
@@ -673,8 +720,9 @@ enum HelperTemplate {
             # Qoder 的 stdout 只有 allow / deny / ask，没有「始终允许」字段。
             # 「始终允许」由岛把命令名写入界面 settings.json 和执行端 app-config.json，
             # Qoder.app 还要在 PermissionRequest 上回 allow，并带 updatedPermissions。
-            # 没有 command 的权限请求只发 permission_notice，立刻回 ask。
-            # 超时也回 ask，把决定权交回 Qoder 自己的对话框，不等满 hook 的 660 秒。
+            # 没有 command、也不是联网搜索 / 访问网页 / 执行方式的请求只发
+            # permission_notice，立刻回 ask。CreatePlan 走这条：选择留在 IDE
+            # 的「执行」上，岛上只通知，点击仍跳回 IDE。超时也回 ask。
             tool_name = payload.get("tool_name") or payload.get("toolName") or ""
             tool_input = _question_input(payload)
             request_id = safe_id(payload.get("tool_use_id")
@@ -714,15 +762,17 @@ enum HelperTemplate {
                 detail = json.dumps(tool_input, ensure_ascii=False)[:400]
 
             cwd = payload.get("cwd") or ""
-            if not command:
+            if not command and not _card_permission(tool_name):
                 send(permission_message(session_id, product, "permission_notice",
                                         request_id, tool_name, tool_input, detail, host, cwd))
+                _mark_permission_notice(session_id, tool_name)
                 emit("ask", "BetterFocusIDE only notifies about permissions; decide in Qoder's own dialog.",
                      event)
                 return
 
             send(permission_message(session_id, product, "permission_requested",
                                     request_id, tool_name, tool_input, detail, host, cwd))
+            _mark_permission_card(session_id)
             since = time.time()
             deadline = since + PERMISSION_TIMEOUT
             while time.time() < deadline:
@@ -1023,9 +1073,10 @@ enum HelperTemplate {
                 except Exception:
                     raw_input = {"input": raw_input}
             tool_input = raw_input if isinstance(raw_input, dict) else {}
-            # 终端命令的三按钮卡由同时到达的 PermissionRequest 打开。
+            # 终端命令、联网搜索、访问网页的三按钮卡由同时到达的 PermissionRequest 打开。
             # 这里再发 permission_notice 会排在卡后面，答完又弹出一条过期横幅。
-            if shell_command(tool_input):
+            # 同一个工具刚由 PermissionRequest 发过通知时也不再发。
+            if shell_command(tool_input) or _permission_card_recent(session_id) or _permission_notice_recent(session_id, tool_name):
                 return
             if kind == "ask_user_question" or _is_question_tool(tool_name):
                 # 桌面版的提问卡由 PreToolUse 打开并等答案。这条 Notification
@@ -1128,7 +1179,7 @@ enum HelperTemplate {
                     else:
                         emit("allow", "Nothing to ask; continue.")
                     return
-                # 带 command 的权限申请会等岛上的三按钮卡。
+                # 带 command 的权限申请，以及联网搜索 / 访问网页 / 计划智能体，会等岛上的三按钮卡。
                 # 每次询问（accept_edits）仍会为终端命令发它，不能按这个模式提前放行。
                 # 自动审批（auto）和完全访问（bypass_permissions）由 Qoder 自己处理，不开卡。
                 # 其余仍只通知，立刻回 ask，让 Qoder 弹自己的对话框。

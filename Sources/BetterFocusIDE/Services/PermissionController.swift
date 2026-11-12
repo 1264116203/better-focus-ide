@@ -149,8 +149,9 @@ final class PermissionController: ObservableObject {
 
     /// 做出决策：下发应答文件，记录 choice，给一次反馈，短暂停留后收起。
     ///
-    /// Qoder IDE 的「始终允许」把终端、Web 工具和计划智能体改成自动执行，
-    /// 语言服务没收下就降级成「允许」。
+    /// Qoder IDE 的「始终允许」只改这张卡对应的那一项设置。
+    /// 读不到语言服务时降级成「允许」。读得到就先把允许交回 hook，
+    /// 再写配置：hook 还占着这次调用时，配置更新会一直等到超时，设置页不会变。
     /// Qoder.app 没有能改这条规则的设置页，写进配置会永久作用于整个应用，
     /// 所以桌面版只把命令名交给 hook，由它记在当前会话里。
     func decide(_ decision: PermissionDecisionValue) {
@@ -167,14 +168,27 @@ final class PermissionController: ObservableObject {
                     Log.info("这条命令不能在本会话记住，这次按允许处理", topic: "permission")
                 }
             default:
-                switch QoderCommandAllowList.remember(command: commandText(in: req),
-                                                       provider: req.provider) {
-                case .remembered(let token):
-                    commandToken = token
-                case .downgraded:
+                let command = commandText(in: req)
+                guard QoderCommandAllowList.canReadConfig(provider: req.provider) else {
                     outgoing = .allowOnce
                     Log.info("始终允许未能写入 Qoder 配置，这次按允许处理", topic: "permission")
+                    break
                 }
+                AnswerDispatcher.dispatchPermissionDecision(
+                    sessionID: req.sessionID, requestID: req.requestID,
+                    decision: .allowAlways,
+                    commandToken: QoderCommandAllowList.sessionToken(from: command),
+                    optionLabel: decision.buttonLabel(for: req.provider))
+                Log.info("权限已决定 always request=\(req.requestID)", topic: "permission")
+                choice = decision
+                FeedbackService.onAnswer()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    self?.dismiss()
+                }
+                QoderCommandAllowList.rememberAfterHook(command: command,
+                                                         toolName: req.toolName,
+                                                         provider: req.provider)
+                return
             }
         }
         AnswerDispatcher.dispatchPermissionDecision(
