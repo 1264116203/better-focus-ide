@@ -67,13 +67,10 @@ final class NotchService: ObservableObject {
     /// 卡片正在淡出时为 true；按键被忽略，应答不会中途被改。
     private var isClosing = false
     /// 钉住的卡片保持展开而非自动收起（"固定 ⇄ 按需"）。
-    /// 初值必须与设置一致：否则启动后、第一张卡片上屏前，图钉图标会显示成"按需"
-    /// 而设置里其实是"固定"，两者短暂不同步。
+    /// 全部卡片共用这一份，并与设置里的「卡片固定展示」保持一致。
+    /// 初值必须读设置：否则启动后、第一张卡片上屏前，图钉图标会和设置短暂不同步。
     @Published private(set) var pinned = Settings.shared.pinByDefault
-    /// 用户手动置顶偏好（**所有卡片共享一份**；nil = 未手动切换，实时跟随设置 pinByDefault）。
-    /// 进程内记忆：重启 app 后回到设置默认值。
-    private var userPinned: Bool?
-    /// 上次看到的设置默认值；用于在设置面板切换「卡片默认固定展示」时清除手动覆盖。
+    /// 上次看到的固定开关。用来分辨这次设置变更是不是这个开关自己变了。
     private var lastPinByDefault = Settings.shared.pinByDefault
     private var keyMonitor: Any?
     /// 由 AppDelegate 接线，使 ⌘, 打开设置窗口。
@@ -578,9 +575,8 @@ final class NotchService: ObservableObject {
         unprocessedNoticeTint = nil
         updateBreathingTint()
         activeCard = .history
-        // 置顶状态全局统一：不按卡片重置，从共享偏好解析
         refreshPinned()
-        Log.info("showHistory: pinned=\(pinned), userPinned=\(String(describing: userPinned))", topic: "history")
+        Log.info("showHistory: pinned=\(pinned)", topic: "history")
 
         let rows = max(1, historyController.entries.count)
 
@@ -634,7 +630,6 @@ final class NotchService: ObservableObject {
         // 新通知上屏：清除旧的未处理标记（呼吸灯随之关闭）
         hasUnprocessedNotice = false
         unprocessedNoticeTint = nil
-        // 置顶状态全局统一：不按卡片重置，从共享偏好解析
         refreshPinned()
         bellSwingStart = Date()  // Trigger bell swing animation.
         let bannerSize = CGSize(width: NotchLayout.expandedWidth,
@@ -661,7 +656,6 @@ final class NotchService: ObservableObject {
     private func showCard(_ card: ActiveCard) {
         detailExpanded = false
         activeCard = card
-        // 置顶状态全局统一：不按卡片重置，从共享偏好解析
         refreshPinned()
         // 先记日志再形变：首帧布局可能耗时数百毫秒到数秒，日志放在 animateTo
         // 之后会让「卡片已弹出」的记录晚于真实时刻，干扰问题定位。
@@ -929,11 +923,11 @@ final class NotchService: ObservableObject {
         let detail = p?.detail ?? ""
         if !detail.isEmpty {
             // 详情块：等宽 10pt，左右各 8pt 内边距，上下各 8pt。
-            // 默认最多 4 行；放不下时多一枚展开按钮，展开后按行数加高。
+            // 默认最多 4 行；放不下时点正文展开，展开后按行数加高，不再另留按钮。
             let full = QuestionCardLayout.textHeight(detail, width: textWidth - 16, font: 10)
             let measured = DetailText.measure(fullHeight: full, font: 10,
                                               collapsedLines: 4, expanded: detailExpanded)
-            height += 8 + 16 + measured.totalHeight + 16
+            height += 8 + 16 + measured.textHeight + 16
         }
 
         // VStack(spacing: 8) before buttons, button height 28 (permissionButtonHeight=32 → use actual 28).
@@ -1379,11 +1373,13 @@ final class NotchService: ObservableObject {
     }
 
     /// 翻转固定模式：钉住的卡片保持展开而非自动收起。
-    /// 手动偏好全局共享——在任意卡片上切换，对所有卡片生效。
+    /// 这一份状态全局共用，并写回「卡片固定展示」，换卡和重启都不另起一份。
     func togglePin() {
         let next = !pinned
         Log.info("togglePin called: before pinned=\(pinned), activeCard=\(activeCard)", topic: "pin")
-        userPinned = next
+        Settings.shared.pinByDefault = next
+        Settings.shared.markChanged()
+        Settings.shared.scheduleSave()
         applyPinned(next)
         // 切换必须立刻可见。原先只改了一个布尔值，而提问 / 权限卡片从来不会
         // 自动收起，于是点图钉除了图标换色之外什么都没发生。
@@ -1402,13 +1398,13 @@ final class NotchService: ObservableObject {
         Log.info("图钉切换 pinned=\(pinned), expanded=\(expanded)", topic: "pin")
     }
 
-    /// 从共享偏好解析置顶状态：用户手动切换过以用户为准，否则实时跟随设置。
+    /// 按已保存的全局固定状态刷新。换卡片时不另起一份。
     private func refreshPinned() {
-        applyPinned(userPinned ?? Settings.shared.pinByDefault)
+        applyPinned(Settings.shared.pinByDefault)
     }
 
-    /// 置顶状态的唯一落点：写 published 值并同步自动收起调度。
-    /// 四类卡片共用这一份状态，切换卡片不再各自重置。
+    /// 固定状态的唯一落点：写 published 值并同步自动收起调度。
+    /// 提问、权限、通知、待办、历史共用这一份状态。
     private func applyPinned(_ newValue: Bool) {
         guard pinned != newValue else { return }
         pinned = newValue
@@ -1437,18 +1433,14 @@ final class NotchService: ObservableObject {
         updatePendingTotal()
         restartSweepTimerIfNeeded()
         restartTodoIdleTimer()
-        // 设置面板切换「卡片默认固定展示」时以设置为准：清掉进程内的手动覆盖，
-        // 否则用户点过一次图钉后，这个开关就永远不起作用了。
-        // 其它设置变更仍按共享偏好重解析（手动偏好优先）。
+        // 设置面板和卡片图钉写的是同一份「卡片固定展示」。
+        // 这里只读设置，不能再写回去，否则会和图钉形成回路。
         let defaultPinned = Settings.shared.pinByDefault
         var switchedToFixed = false
         if defaultPinned != lastPinByDefault {
             lastPinByDefault = defaultPinned
-            userPinned = nil
             applyPinned(defaultPinned)
             switchedToFixed = defaultPinned
-        } else if activeCard != .none {
-            refreshPinned()
         }
         guard windowHost != nil else { return }
         let resting = geometry.restingSize(showsContent: true)  // 收起态也使用 bubbleWidth/bubbleHeight

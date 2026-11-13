@@ -10,7 +10,7 @@ struct NotchAgentQuestionView: View {
     @ObservedObject private var settings = Settings.shared
     var pinned = false
     var onTogglePin: () -> Void = {}
-    /// 正文和选项说明是否已展开。放不下时才出现按钮。
+    /// 正文和选项说明是否已展开。放不下时点那段文字展开，再点一次收回。
     var detailExpanded = false
     var onToggleDetail: () -> Void = {}
     @FocusState private var otherFocused: Bool
@@ -83,48 +83,24 @@ struct NotchAgentQuestionView: View {
         .question(expanded: detailExpanded)
     }
 
-    /// 正文或任一选项说明超过折叠行数。
-    private func showsDetailControl(_ question: AgentQuestion) -> Bool {
-        let metrics = QuestionCardLayout.Metrics(
-            cardWidth: NotchLayout.questionCardWidth,
-            cardInset: inset,
-            badgeSize: IDEIconProvider.badgeSize,
-            bodyFont: bodyFontSize,
-            optionFont: optionFontSize,
-            descFont: descFontSize,
-            optionRowMin: NotchLayout.questionOptionRowMin,
-            sendHeight: NotchLayout.questionSendHeight,
-            minHeight: 0)
-        return QuestionCardLayout.detailOverflow(
-            question: question,
-            textWidth: questionTextWidth,
-            optionTextWidth: optionTextWidth,
-            metrics: metrics,
-            detail: detailStyle)
-    }
-
     @ViewBuilder
     private func detailSection(_ question: AgentQuestion) -> some View {
-        let showsControl = showsDetailControl(question)
-        if !question.question.isEmpty || showsControl {
-            VStack(alignment: .trailing, spacing: DetailText.controlSpacing) {
-                if !question.question.isEmpty {
-                    DetailTextBlock(
-                        text: question.question,
-                        fontSize: bodyFontSize,
-                        collapsedLines: detailStyle.bodyCollapsedLines,
-                        expanded: detailExpanded,
-                        measure: DetailText.measure(
-                            question.question,
-                            width: questionTextWidth,
-                            font: bodyFontSize,
-                            collapsedLines: detailStyle.bodyCollapsedLines,
-                            expanded: detailExpanded))
-                }
-                if showsControl {
-                    DetailDisclosure(expanded: detailExpanded, action: onToggleDetail)
-                }
-            }
+        if !question.question.isEmpty {
+            let measured = DetailText.measure(
+                question.question,
+                width: questionTextWidth,
+                font: bodyFontSize,
+                collapsedLines: detailStyle.bodyCollapsedLines,
+                expanded: detailExpanded)
+            // 只有这段正文自己放不下时才能点。选项说明另算，避免点到短正文把整张卡展开。
+            DetailTextBlock(
+                text: question.question,
+                fontSize: bodyFontSize,
+                collapsedLines: detailStyle.bodyCollapsedLines,
+                expanded: detailExpanded,
+                measure: measured,
+                onToggle: measured.showsControl ? onToggleDetail : nil)
+                .allowsHitTesting(measured.showsControl)
         }
     }
 
@@ -199,59 +175,115 @@ struct NotchAgentQuestionView: View {
     }
 
     /// 单个选项行：勾选符号 + 标签 + 可选描述；选中时用提供方主题色高亮底。
+    ///
+    /// 说明被省略时，点说明展开或收回，不能同时把这一项选上。
+    /// 说明因此叠在选项按钮之上，只盖住说明本身；标签、图标和空白仍是选择。
     private func optionRow(index: Int, option: AgentQuestionOption, question: AgentQuestion) -> some View {
         let picked = isSelected(index, question: question)
         let focused = controller.keyboardFocus == index
-        return Button {
-            controller.pick(.option(index), for: question.id)
-        } label: {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: pickSymbol(picked, multiSelect: question.multiSelect))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(picked ? AnyShapeStyle(prompt?.provider.tint ?? .blue)
-                                     : AnyShapeStyle(.white.opacity(0.4)))
-                    .frame(width: 16)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(option.label)
-                        .font(.system(size: optionFontSize, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.95))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if !option.description.isEmpty {
-                        DetailTextBlock(
-                            text: option.description,
-                            fontSize: descFontSize,
-                            color: .secondary,
-                            collapsedLines: DetailText.Style.question(expanded: false).descriptionCollapsedLines,
-                            expanded: detailExpanded,
-                            measure: DetailText.measure(
-                                option.description,
-                                width: optionTextWidth,
-                                font: descFontSize,
-                                collapsedLines: DetailText.Style.question(expanded: false).descriptionCollapsedLines,
-                                expanded: detailExpanded))
-                    }
-                }
-                Spacer(minLength: 0)
+        let descMeasure = optionDescriptionMeasure(option)
+        let descOverflows = descMeasure?.showsControl == true
+        return ZStack(alignment: .topLeading) {
+            Button {
+                controller.pick(.option(index), for: question.id)
+            } label: {
+                optionRowBody(option: option, question: question, picked: picked,
+                              focused: focused, descMeasure: descMeasure,
+                              descriptionVisible: !descOverflows)
             }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlass(.rounded(16), variant: .clear,
-                         tint: picked ? (prompt?.provider.tint ?? .blue) : nil,
-                         interactive: controller.choice == nil,
-                         fallback: picked
-                            ? (prompt?.provider.tint ?? .blue).opacity(0.22)
-                            : Color.white.opacity(0.06))
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay {
-                if focused && !picked {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(.white.opacity(0.45), lineWidth: 1)
-                }
+            .buttonStyle(.plain)
+            .disabled(controller.choice != nil)
+
+            if descOverflows, let descMeasure {
+                optionDescriptionToggle(option: option, measure: descMeasure)
             }
         }
-        .buttonStyle(.plain)
-        .disabled(controller.choice != nil)
+    }
+
+    private func optionDescriptionMeasure(_ option: AgentQuestionOption) -> DetailText.Measure? {
+        guard !option.description.isEmpty else { return nil }
+        let lines = DetailText.Style.question(expanded: false).descriptionCollapsedLines
+        return DetailText.measure(option.description, width: optionTextWidth, font: descFontSize,
+                                  collapsedLines: lines, expanded: detailExpanded)
+    }
+
+    /// 与选项行同一套内边距，只让说明文字接住点击。
+    private func optionDescriptionToggle(option: AgentQuestionOption,
+                                         measure: DetailText.Measure) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Color.clear
+                .frame(width: 16, height: 1)
+                .allowsHitTesting(false)
+            VStack(alignment: .leading, spacing: 1) {
+                optionLabel(option.label)
+                    .hidden()
+                    .accessibilityHidden(true)
+                    .allowsHitTesting(false)
+                descriptionBlock(option.description, measure: measure, tappable: true)
+            }
+            Spacer(minLength: 0)
+                .allowsHitTesting(false)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+    }
+
+    private func optionRowBody(option: AgentQuestionOption, question: AgentQuestion,
+                               picked: Bool, focused: Bool,
+                               descMeasure: DetailText.Measure?,
+                               descriptionVisible: Bool) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: pickSymbol(picked, multiSelect: question.multiSelect))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(picked ? AnyShapeStyle(prompt?.provider.tint ?? .blue)
+                                 : AnyShapeStyle(.white.opacity(0.4)))
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                optionLabel(option.label)
+                if let descMeasure {
+                    descriptionBlock(option.description, measure: descMeasure, tappable: false)
+                        .opacity(descriptionVisible ? 1 : 0)
+                        .accessibilityHidden(!descriptionVisible)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlass(.rounded(16), variant: .clear,
+                     tint: picked ? (prompt?.provider.tint ?? .blue) : nil,
+                     interactive: controller.choice == nil,
+                     fallback: picked
+                        ? (prompt?.provider.tint ?? .blue).opacity(0.22)
+                        : Color.white.opacity(0.06))
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            if focused && !picked {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(.white.opacity(0.45), lineWidth: 1)
+            }
+        }
+    }
+
+    private func optionLabel(_ label: String) -> some View {
+        Text(label)
+            .font(.system(size: optionFontSize, weight: .medium))
+            .foregroundStyle(.white.opacity(0.95))
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func descriptionBlock(_ text: String, measure: DetailText.Measure,
+                                  tappable: Bool) -> some View {
+        let lines = DetailText.Style.question(expanded: false).descriptionCollapsedLines
+        return DetailTextBlock(
+            text: text,
+            fontSize: descFontSize,
+            color: .secondary,
+            collapsedLines: lines,
+            expanded: detailExpanded,
+            measure: measure,
+            onToggle: tappable ? onToggleDetail : nil)
     }
 
     // MARK: - "其他…"行

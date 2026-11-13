@@ -292,7 +292,7 @@ enum SettingCatalog {
         SettingDefinition(key: "animationSpeed", label: "弹窗动画速度", kind: .slider, group: "外观", section: "动画",
             min: 0.4, max: 3.0, step: 0.1, unit: "×", digits: 2,
             note: "展开 / 收起时长同时按这个倍率缩放",
-            defaultValue: .double(1.0), get: getD(\.animationSpeed), set: setD(\.animationSpeed)),
+            defaultValue: .double(0.5), get: getD(\.animationSpeed), set: setD(\.animationSpeed)),
         SettingDefinition(key: "animationFps", label: "动画帧率上限", kind: .choice, group: "外观", section: "动画",
             choices: Settings.fpsChoices,
             note: "刘海屏选自动可跑满 120Hz；显示异常时降到 60", advanced: true,
@@ -345,8 +345,8 @@ enum SettingCatalog {
             defaultValue: .string("generic"), get: getS(\.hapticPattern), set: setS(\.hapticPattern)),
 
         // ---------------- 行为 ----------------
-        SettingDefinition(key: "pinByDefault", label: "卡片默认固定展示", kind: .toggle, group: "行为",
-            note: "关闭后卡片仍会弹出一次，但不再保持：鼠标移出或到时自动收起，气泡保留待处理提示",
+        SettingDefinition(key: "pinByDefault", label: "卡片固定展示", kind: .toggle, group: "行为",
+            note: "提问、权限、通知、待办和历史共用这一枚开关。卡片上的图钉改的就是它，换一张卡片或重新打开后仍然保持。关闭后卡片仍会弹出一次，但鼠标移出或到时自动收起",
             defaultValue: .bool(true), get: getB(\.pinByDefault), set: setB(\.pinByDefault)),
         SettingDefinition(key: "clickGuard", label: "防误触窗口", kind: .slider, group: "行为",
             min: 0, max: 2.0, step: 0.05, unit: "秒", digits: 2,

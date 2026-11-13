@@ -36,6 +36,28 @@ enum QoderHookInstaller {
         FileManager.default.fileExists(atPath: InstallerPaths.qoderScriptPath)
     }
 
+    /// `settings.json` 的 hooks 里有没有我们的分组。
+    ///
+    /// 认标记，也认 command 指向 `betterfocus-notify.sh`。Qoder 重写配置时会丢掉
+    /// `_betterfocus_marker`，命令还在，这时开关仍然是开的。
+    static func isRegistered(in hooks: [String: Any]) -> Bool {
+        for value in hooks.values {
+            if hookGroups(value).contains(where: isOurGroup) { return true }
+        }
+        return false
+    }
+
+    private static func hookGroups(_ value: Any) -> [[String: Any]] {
+        if let groups = value as? [[String: Any]] { return groups }
+        if let raw = value as? [Any] { return raw.compactMap { $0 as? [String: Any] } }
+        if let group = value as? [String: Any] { return [group] }
+        return []
+    }
+
+    static var isRegistered: Bool {
+        isRegistered(in: loadSettings()["hooks"] as? [String: Any] ?? [:])
+    }
+
     // MARK: - Settings 合并
 
     /// 在 `hooks` 内新增或刷新我们自己的 matcher 分组，其余事件与分组原样保留。

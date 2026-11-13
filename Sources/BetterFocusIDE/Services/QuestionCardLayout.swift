@@ -13,7 +13,6 @@ import Foundation
 /// header（徽章 badgeSize 为行内最高）        30
 /// [项目名 9pt 单行]                          8 + 11.7
 /// [正文 bodyFont 可换行]                     8 + 行数 × (font × 1.3)
-/// [展开按钮，仅在正文或说明被折叠时]          4 + 18
 /// VStack(spacing: 6) { 选项…; 其他… }        8 + Σ各行高 + 选项数 × 6
 /// 发送按钮                                  8 + 26
 /// ```
@@ -81,9 +80,6 @@ enum QuestionCardLayout {
 
         let optionTextW = max(40, textW - rowTextInset)
         var rowsH: CGFloat = 0
-        let detailOverflows = detailOverflow(question: question, textWidth: textW,
-                                             optionTextWidth: optionTextW,
-                                             metrics: metrics, detail: detail)
         for option in question.options {
             let labelH = textHeight(option.label, width: optionTextW, font: metrics.optionFont)
             let descH = option.description.isEmpty
@@ -103,35 +99,9 @@ enum QuestionCardLayout {
         // 间隔数 = 行数 - 1 = (选项数 + 1) - 1 = 选项数
         rowsH += rowSpacing * CGFloat(question.options.count)
         height += sectionSpacing + rowsH
-        if detailOverflows {
-            height += DetailText.controlBlock
-        }
 
         height += sectionSpacing + metrics.sendHeight
         return max(height, metrics.minHeight)
-    }
-
-    /// 正文或任一选项说明超过折叠行数时，卡片上会多一枚展开按钮。
-    static func detailOverflow(question: AgentQuestion,
-                               textWidth: CGFloat,
-                               optionTextWidth: CGFloat,
-                               metrics: Metrics,
-                               detail: DetailText.Style) -> Bool {
-        if !question.question.isEmpty,
-           DetailText.measure(question.question, width: textWidth, font: metrics.bodyFont,
-                              collapsedLines: detail.bodyCollapsedLines,
-                              expanded: false).showsControl {
-            return true
-        }
-        for option in question.options where !option.description.isEmpty {
-            if DetailText.measure(option.description, width: optionTextWidth,
-                                  font: metrics.descFont,
-                                  collapsedLines: detail.descriptionCollapsedLines,
-                                  expanded: false).showsControl {
-                return true
-            }
-        }
-        return false
     }
 
     /// 精确文本高度：按字符类型累计宽度（全角 ≈ 1.0×font，半角 ≈ 0.55×font），

@@ -7,6 +7,24 @@ import XCTest
 /// ACP 桥只改本机平台的 `cmd`，并把 JSON-RPC 译成岛上已经认识的事件。
 final class AcpBridgeTests: XCTestCase {
 
+    /// 发行包里的脚本在资源包的 Contents/Resources，不在包根目录。
+    /// 本机源码树的 `#filePath` 兜底在别的电脑上不存在。
+    func testReadsScriptFromBundleContentsResources() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("acp-bundle-\(UUID().uuidString).bundle", isDirectory: true)
+        let resources = root
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("Resources", isDirectory: true)
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let body = "# bridge\nsession/update\n"
+        try body.write(to: resources.appendingPathComponent("acp-bridge.py"),
+                       atomically: true, encoding: .utf8)
+
+        let text = try XCTUnwrap(AcpBridgeInstaller.scriptText(in: [root]))
+        XCTAssertTrue(text.contains("session/update"))
+    }
+
     func testWrapKeepsForeignFieldsAndRestoresOriginalCommand() {
         var registry = sampleRegistry()
         var sidecar: [String: Any] = [:]

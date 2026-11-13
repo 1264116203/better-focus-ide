@@ -132,21 +132,30 @@ final class QuestionCardLayoutTests: XCTestCase {
         XCTAssertEqual(h, 12 * 1.3, accuracy: 0.01)
     }
 
-    /// 正文超过两行时，折叠高度只留两行并加上展开按钮；展开后按全文加高。
-    func testCollapsedDetailIsShorterAndKeepsTheButton() {
-        let question = AgentQuestion(
+    /// 正文超过两行时，折叠高度只留两行，不再为展开按钮加高；展开后按全文加高。
+    func testCollapsedDetailOmitsExpandButton() {
+        // 文字宽 560 - 32×2 = 496。全角 12pt，一行 41 字，82 字正好两行，83 字折到第三行。
+        let fitted = AgentQuestion(
             id: "q1", header: "h",
-            question: String(repeating: "这是一段需要展开才能看完的提问正文。", count: 8),
+            question: String(repeating: "中", count: 82),
             options: [AgentQuestionOption(label: "继续", description: "")])
+        let longer = AgentQuestion(
+            id: "q1", header: "h",
+            question: String(repeating: "中", count: 83),
+            options: [AgentQuestionOption(label: "继续", description: "")])
+        let twoLines = QuestionCardLayout.contentHeight(
+            question: fitted, hasProject: false, metrics: metrics,
+            detail: .question(expanded: false))
         let collapsed = QuestionCardLayout.contentHeight(
-            question: question, hasProject: false, metrics: metrics,
+            question: longer, hasProject: false, metrics: metrics,
             detail: .question(expanded: false))
         let expanded = QuestionCardLayout.contentHeight(
-            question: question, hasProject: false, metrics: metrics,
+            question: longer, hasProject: false, metrics: metrics,
             detail: .question(expanded: true))
+        XCTAssertEqual(collapsed, twoLines, accuracy: 0.01)
         XCTAssertGreaterThan(expanded, collapsed)
         let textW = metrics.cardWidth - metrics.cardInset * 2
-        let full = QuestionCardLayout.textHeight(question.question, width: textW, font: 12)
+        let full = QuestionCardLayout.textHeight(longer.question, width: textW, font: 12)
         let folded = DetailText.measure(fullHeight: full, font: 12, collapsedLines: 2, expanded: false)
         XCTAssertTrue(folded.showsControl)
         XCTAssertEqual(folded.shownLines, 2)

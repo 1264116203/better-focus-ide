@@ -102,26 +102,23 @@ struct NotchPermissionView: View {
 
     // MARK: - 详情
 
-    /// 详情块：等宽字体展示命令/路径。默认 4 行，放不下时可以展开。
+    /// 详情块：等宽字体展示命令/路径。默认 4 行，放不下时点这段文字展开，再点一次收回。
     private func detailBlock(_ req: PermissionRequest) -> some View {
         let measured = detailMeasure(req.detail)
-        return VStack(alignment: .trailing, spacing: DetailText.controlSpacing) {
-            DetailTextBlock(
-                text: req.detail,
-                fontSize: 10,
-                monospaced: true,
-                color: .white.opacity(0.75),
-                collapsedLines: 4,
-                expanded: detailExpanded,
-                measure: measured)
-            if measured.showsControl {
-                DetailDisclosure(expanded: detailExpanded, action: onToggleDetail)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .liquidGlass(.rounded(14), fallback: Color.white.opacity(0.06))
+        return DetailTextBlock(
+            text: req.detail,
+            fontSize: 10,
+            monospaced: true,
+            color: .white.opacity(0.75),
+            collapsedLines: 4,
+            expanded: detailExpanded,
+            measure: measured,
+            onToggle: measured.showsControl ? onToggleDetail : nil)
+            .allowsHitTesting(measured.showsControl)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlass(.rounded(14), fallback: Color.white.opacity(0.06))
     }
 
     private func detailMeasure(_ detail: String) -> DetailText.Measure {

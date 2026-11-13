@@ -352,7 +352,7 @@ Unix socket 文件本身就是锁锚点：
 
 **持久化边界**：全部设置项落盘于 `settings.json`，重装 app（删除 `.app` bundle 或重新 `build.sh`）不会重置任何参数；仅手动删该文件或在 app 内"恢复默认"(`resetAll`) 才会重置。改代码默认值不会影响已保存 `settings.json` 的用户实值，验证前必须先读 `settings.json` 取实际值。
 
-**置顶状态（pinned）链路**：`NotchService` 只保留单一 `userPinned: Bool?`（四类卡片共享，`nil` = 用户从未手动切换），`refreshPinned()` 统一解析 `userPinned ?? Settings.shared.pinByDefault`，接入点为 `showHistory`/`showNoticeBanner`/`showCard`/`handleSettingsChanged`。语义保持进程内记忆、重启回落默认。
+**置顶状态（pinned）链路**：提问、权限、通知、待办、历史共用 `Settings.pinByDefault` 这一份值。卡片图钉通过 `togglePin()` 写回这项设置并落盘；`refreshPinned()` 只读它，接入点为 `showHistory`/`showNoticeBanner`/`showCard`/`revealTodoCard`/`handleSettingsChanged`。换卡片和重新打开都保持上次的选择，不再在进程内另记一份、重启后回落代码默认值。`handleSettingsChanged()` 对这项设置仍然只读。
 
 ### 安装器系统
 

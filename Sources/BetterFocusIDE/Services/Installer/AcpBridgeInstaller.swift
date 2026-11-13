@@ -176,7 +176,37 @@ enum AcpBridgeInstaller {
         throw Failure.sourceMissing
     }
 
+    /// 在给定的资源包根目录里找桥脚本。
+    ///
+    /// SwiftPM 在 macOS 上把 `.copy` 资源放进
+    /// `BetterFocusIDE_BetterFocusIDE.bundle/Contents/Resources/`，不在包根目录。
+    /// 只查根目录时，编译机还能靠 `#filePath` 读到源码树，别的电脑就会报「找不到 ACP 桥脚本」。
+    static func scriptText(in roots: [URL]) -> String? {
+        for root in roots {
+            let nested = root
+                .appendingPathComponent("Contents/Resources")
+                .appendingPathComponent(scriptName)
+            if let text = readScript(at: nested) { return text }
+            if let bundle = Bundle(url: root),
+               let url = bundle.url(forResource: "acp-bridge", withExtension: "py"),
+               let text = readScript(at: url) {
+                return text
+            }
+            if let text = readScript(at: root.appendingPathComponent(scriptName)) { return text }
+        }
+        return nil
+    }
+
+    private static func readScript(at url: URL) -> String? {
+        guard let text = try? String(contentsOf: url, encoding: .utf8), !text.isEmpty else { return nil }
+        return text
+    }
+
     private static func resourceText() -> String? {
+        scriptText(in: resourceRoots())
+    }
+
+    private static func resourceRoots() -> [URL] {
         let bundleName = "BetterFocusIDE_BetterFocusIDE.bundle"
         var roots: [URL] = []
         if let path = Bundle.main.resourceURL?.appendingPathComponent(bundleName) {
@@ -189,13 +219,7 @@ enum AcpBridgeInstaller {
             .appendingPathComponent(bundleName) {
             roots.append(exec)
         }
-        for root in roots {
-            let file = root.appendingPathComponent(scriptName)
-            if let text = try? String(contentsOf: file, encoding: .utf8), !text.isEmpty {
-                return text
-            }
-        }
-        return nil
+        return roots
     }
 
     // MARK: - JSON

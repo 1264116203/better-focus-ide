@@ -73,6 +73,24 @@ final class HostAdapterTests: XCTestCase {
         XCTAssertNil(cleaned["SessionEnd"], "我们独占的事件应整键移除")
     }
 
+    /// 自检不能只认 `_betterfocus_marker`。Qoder 重写 settings 时会丢掉这个自定义字段，
+    /// command 还在，开关实际是开的。只认标记会报「未在宿主配置中登记」。
+    func testQoderRegistrationAcceptsCommandWithoutMarker() throws {
+        let json = """
+        {"PermissionRequest":[{"matcher":"*","hooks":[{"type":"command","command":"/Users/a/.qoder/hooks/betterfocus-notify.sh","timeout":5}]}]}
+        """.data(using: .utf8)!
+        let hooks = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Any])
+        XCTAssertTrue(QoderHookInstaller.isRegistered(in: hooks))
+    }
+
+    func testQoderRegistrationIgnoresForeignHooks() throws {
+        let json = """
+        {"PermissionRequest":[{"matcher":"*","hooks":[{"type":"command","command":"echo someone-else"}]}]}
+        """.data(using: .utf8)!
+        let hooks = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Any])
+        XCTAssertFalse(QoderHookInstaller.isRegistered(in: hooks))
+    }
+
     /// 无 marker、但有 `hooks` 数组且 command 指向我们的脚本 —— 这种历史分组
     /// （早期版本写的，或 Qoder CN 装进了英文版配置）必须被认出来并清掉。
     ///

@@ -25,26 +25,19 @@ enum DetailText {
 
     /// 展开后单块详情最多铺开的行数，避免一条超长命令把岛拉出屏幕。
     static let expandedLineCap = 12
-    /// 展开按钮本身的高度。
-    static let controlHeight: CGFloat = 18
-    /// 按钮与正文之间的间距。
-    static let controlSpacing: CGFloat = 4
-    /// 按钮占用的总高度（间距 + 按钮）。
-    static var controlBlock: CGFloat { controlHeight + controlSpacing }
 
     struct Measure {
-        /// 正文本身的高度，不含按钮。
+        /// 正文本身的高度。
         var textHeight: CGFloat
         /// 实际画出来的行数。
         var shownLines: Int
-        /// 全文比折叠行数长，需要那枚按钮。
+        /// 全文比折叠行数长。点这段文字展开，再点一次收回。
         var showsControl: Bool
         /// 展开后仍超过行数上限，正文区域内部滚动。
         var scrolls: Bool
-        var totalHeight: CGFloat { textHeight + (showsControl ? controlBlock : 0) }
     }
 
-    /// 按已经量好的全文高度决定折叠、展开和按钮。
+    /// 按已经量好的全文高度决定折叠行数，以及点文字能否展开。
     static func measure(fullHeight: CGFloat, font: CGFloat,
                         collapsedLines: Int, expanded: Bool) -> Measure {
         let line = max(font * 1.3, 1)

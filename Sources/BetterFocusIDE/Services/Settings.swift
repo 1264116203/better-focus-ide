@@ -124,7 +124,7 @@ final class Settings: ObservableObject {
     @Published var motionGrowBounce: Double = 0.25
     /// 三态："system" 跟随无障碍设置，"on"/"off" 强制。
     @Published var reduceMotion = "system"
-    @Published var animationSpeed: Double = 1.0
+    @Published var animationSpeed: Double = 0.5
     @Published var animationFps = 0
     @Published var hoverExpandDelay: Double = 0.18
     @Published var hoverCollapseDelay: Double = 0.35
@@ -484,7 +484,7 @@ final class Settings: ObservableObject {
         cardShadowOffsetX = 0; cardShadowOffsetY = -14
         glowRadius = 10
         glowBreathAmplitude = 0.65; glowBreathPeriod = 2.4
-        motionGrowBounce = 0.25; reduceMotion = "system"; animationSpeed = 1.0; animationFps = 0
+        motionGrowBounce = 0.25; reduceMotion = "system"; animationSpeed = 0.5; animationFps = 0
         hoverExpandDelay = 0.18; hoverCollapseDelay = 0.35
         notifyBannerDuration = 5.0; historyDuration = 8; idlePulsePeriod = 2.4
         notifySound = "Ping"; notifyVolume = 1.0

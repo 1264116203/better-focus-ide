@@ -26,7 +26,7 @@ enum Doctor {
         checks.append(contentsOf: hostIntegration(
             label: "Qoder", hostDir: InstallerPaths.qoderDir,
             script: InstallerPaths.qoderScriptPath, helper: InstallerPaths.qoderHelperPath,
-            registered: hookRegistered))
+            registered: { QoderHookInstaller.isRegistered }))
         checks.append(contentsOf: hostIntegration(
             label: "OpenCode", hostDir: InstallerPaths.opencodePluginsDir,
             script: InstallerPaths.opencodePluginPath, helper: nil,
@@ -148,17 +148,6 @@ enum Doctor {
         }
         return DoctorCheck(ok: false, label: label, detail: "读不出来",
                            hint: "菜单 → 安装 Hook / Plugin…")
-    }
-
-    /// Qoder settings.json 的 PermissionRequest 是否登记了带我们标记的分组。
-    static func hookRegistered() -> Bool {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: InstallerPaths.qoderSettingsPath)),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let hooks = json["hooks"] as? [String: Any] else { return false }
-        let permission = hooks["PermissionRequest"] as? [[String: Any]] ?? []
-        return permission.contains {
-            ($0["_betterfocus_marker"] as? String) == InstallerPaths.marker
-        }
     }
 
     /// 检查应答目录是否可写：实际写一个探针文件再删除。

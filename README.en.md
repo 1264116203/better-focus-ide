@@ -195,7 +195,7 @@ The pin in the top-right of every card toggles **pinned ⇄ on demand**:
 - **Pinned (`pin.fill`, highlighted):** the card stays open. A turn-complete banner does not collapse on its own.
 - **On demand (`pin`, slanted):** the banner collapses after its dwell time (5 seconds by default).
 
-The default for a new card is **卡片默认固定展示** under Settings → **行为**. Flipping the pin on one card does not change that preference.
+Questions, permissions, notices, todos, and history share one switch: **卡片固定展示** under Settings → **行为**. Flipping the pin on any card writes that setting, and the choice stays when another card appears or the app reopens.
 
 ---
 
