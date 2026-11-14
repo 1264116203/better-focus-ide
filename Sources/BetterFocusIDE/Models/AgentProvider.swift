@@ -9,7 +9,8 @@ import SwiftUI
 /// provider 标识：
 /// - `qoder`：Qoder.app 桌面版（bundle `com.qoder.app`，或 `QODER_STANDALONE=1`）
 /// - `opencode`：OpenCode JS 插件
-/// - `jetbrains_plugin`：JetBrains IDE 内的 Qoder 插件
+/// - `jetbrains_plugin`：JetBrains IDE 内的 Qoder 插件。国内版是
+///   `jetbrains_cn_plugin`，由 `BETTERFOCUS_VARIANT=cn` 从同一条识别结果换过来
 /// - `qoder_ide`：Qoder IDE（通义灵码）
 /// - `qoder_cli`：终端 CLI 模式（无头脚本）
 /// - `cursor`：Cursor 用户级 hooks（`~/.cursor/hooks.json`）
@@ -27,6 +28,7 @@ enum AgentProvider: String, CaseIterable, Codable {
     case qoder
     case opencode
     case jetbrains_plugin
+    case jetbrains_cn_plugin
     case qoder_ide
     case qoder_cli
     case cursor
@@ -50,7 +52,7 @@ enum AgentProvider: String, CaseIterable, Codable {
         switch self {
         case .qoder: return "Qoder"
         case .opencode: return "OpenCode"
-        case .jetbrains_plugin: return ""  // 必须由 host.name 提供具体 IDE 名称
+        case .jetbrains_plugin, .jetbrains_cn_plugin: return ""  // 必须由 host.name 提供具体 IDE 名称
         case .qoder_ide: return "Qoder"
         case .qoder_cli: return "Qoder CLI"
         case .cursor: return "Cursor"
@@ -76,7 +78,7 @@ enum AgentProvider: String, CaseIterable, Codable {
         switch self {
         case .claude_code, .codex, .kimi, .copilot, .qoder_cli, .qoder_cn_cli:
             return true
-        case .qoder, .opencode, .jetbrains_plugin, .qoder_ide, .cursor,
+        case .qoder, .opencode, .jetbrains_plugin, .jetbrains_cn_plugin, .qoder_ide, .cursor,
              .workbuddy, .trae, .trae_cn, .qoder_cn, .qoder_cn_ide, .unknown:
             return false
         }
@@ -95,7 +97,7 @@ enum AgentProvider: String, CaseIterable, Codable {
     /// opencode_tint 的修改可实时生效。
     var tintRGB: (red: Double, green: Double, blue: Double) {
         switch self {
-        case .qoder, .jetbrains_plugin, .qoder_ide, .qoder_cli,
+        case .qoder, .jetbrains_plugin, .jetbrains_cn_plugin, .qoder_ide, .qoder_cli,
              .qoder_cn, .qoder_cn_ide, .qoder_cn_cli:
             // Qoder 系（含 CN 发行版）共用一个可配置主题色：同一个产品的
             // 两种发行版，没有理由让用户在设置里分别调两次。
@@ -135,7 +137,7 @@ enum AgentProvider: String, CaseIterable, Codable {
         case .copilot: return "copilot"
         case .claude_code: return "claude_code"
         case .codex: return "codex"
-        case .qoder, .jetbrains_plugin, .qoder_ide, .qoder_cli,
+        case .qoder, .jetbrains_plugin, .jetbrains_cn_plugin, .qoder_ide, .qoder_cli,
              .qoder_cn, .qoder_cn_ide, .qoder_cn_cli, .unknown:
             return "qoder"
         }
@@ -157,7 +159,7 @@ enum AgentProvider: String, CaseIterable, Codable {
             return displayName
         }
         // JetBrains 插件模式且 host.name 缺失：最终兜底
-        if provider == .jetbrains_plugin {
+        if provider == .jetbrains_plugin || provider == .jetbrains_cn_plugin {
             return "JetBrains"
         }
         return "Unknown"
@@ -197,6 +199,7 @@ enum AgentProvider: String, CaseIterable, Codable {
            let family = IDELauncher.group(for: bundle),
            family != provider.providerGroup,
            provider != .jetbrains_plugin,
+           provider != .jetbrains_cn_plugin,
            !provider.displayName.isEmpty {
             return provider.displayName
         }
@@ -225,6 +228,7 @@ enum AgentProvider: String, CaseIterable, Codable {
               let family = IDELauncher.group(for: bundle),
               family != provider.providerGroup,
               provider != .jetbrains_plugin,
+              provider != .jetbrains_cn_plugin,
               !provider.displayName.isEmpty else {
             return (hostName, bundleID)
         }

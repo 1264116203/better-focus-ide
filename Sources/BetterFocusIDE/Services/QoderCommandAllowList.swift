@@ -3,7 +3,7 @@
 
 import Foundation
 
-/// 把 Qoder IDE 卡片上的「始终允许」交给语言服务。
+/// 把 Qoder IDE 和 JetBrains 里 Qoder 插件卡片上的「始终允许」交给语言服务。
 ///
 /// 设置页改终端模式时调用 `config/updateGlobalTerminalRunMode`。正在生效的值是
 /// `terminalRunMode`，对应设置记录里的 `configChatTerminalRunMode`。
@@ -67,6 +67,7 @@ enum QoderCommandAllowList {
     }
 
     /// 按产品选择两份配置。Qoder CN 用自己的 Application Support 目录。
+    /// JetBrains 插件的设置页读语言服务，不读 IDE 的 `User/app.json`，所以这里返回 nil。
     static func locations(for provider: AgentProvider) -> (ui: URL, runtime: URL)? {
         if let locationsForTesting { return locationsForTesting(provider) }
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -107,8 +108,13 @@ enum QoderCommandAllowList {
 
     /// 语言服务现在能不能读到配置。读不到时「始终允许」应降级，不要先答应。
     static func canReadConfig(provider: AgentProvider) -> Bool {
-        guard locations(for: provider) != nil else { return false }
+        guard hasConfigStore(provider) else { return false }
         return call(method: "config/getGlobal", params: [:], provider: provider) != nil
+    }
+
+    /// IDE / CLI 有设置文件，JetBrains 插件只有自己的语言服务套接字。
+    private static func hasConfigStore(_ provider: AgentProvider) -> Bool {
+        locations(for: provider) != nil || socketPath(for: provider) != nil
     }
 
     /// 先让 hook 结束，再写配置。
@@ -134,7 +140,7 @@ enum QoderCommandAllowList {
 
     /// 只改 `toolName` 对应的那一项。语言服务没收下就放弃。
     static func remember(command: String, toolName: String = "", provider: AgentProvider) -> Outcome {
-        guard locations(for: provider) != nil else { return .downgraded }
+        guard hasConfigStore(provider) else { return .downgraded }
         let target = target(for: toolName)
         guard var current = call(method: "config/getGlobal", params: [:], provider: provider) else {
             Log.info("没有读到 Qoder 的自动执行配置，这次按允许处理", topic: "permission")
@@ -187,7 +193,7 @@ enum QoderCommandAllowList {
         return rpc(socketPath: path, method: method, params: params)
     }
 
-    private static func socketPath(for provider: AgentProvider) -> String? {
+    static func socketPath(for provider: AgentProvider) -> String? {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let support = home.appendingPathComponent("Library/Application Support")
         switch provider {
@@ -195,6 +201,12 @@ enum QoderCommandAllowList {
             return support.appendingPathComponent("Qoder/SharedClientCache/qoder.sock").path
         case .qoder_cn_ide, .qoder_cn_cli:
             return support.appendingPathComponent("QoderCN/SharedClientCache/qoder.sock").path
+        case .jetbrains_plugin:
+            // 插件进程是 `~/.qoder/shared_client/bin/…/Qoder start`，
+            // 和 Qoder IDE 的 SharedClientCache 不是同一个语言服务。
+            return home.appendingPathComponent(".qoder/shared_client/qoder.sock").path
+        case .jetbrains_cn_plugin:
+            return home.appendingPathComponent(".qoder-cn/shared_client/qodercn.sock").path
         default:
             return nil
         }

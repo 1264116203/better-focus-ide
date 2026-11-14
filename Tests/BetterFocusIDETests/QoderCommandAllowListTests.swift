@@ -269,6 +269,43 @@ final class QoderCommandAllowListTests: XCTestCase {
         XCTAssertTrue(body.contains("bypass_permissions"))
         XCTAssertTrue(body.contains("\"destination\": \"session\""))
         XCTAssertFalse(body.contains("persist_prefix_rule"))
+        XCTAssertTrue(body.contains("\"jetbrains_plugin\": \"jetbrains_cn_plugin\""))
+    }
+
+    /// JetBrains 插件的「始终允许」写插件自己的语言服务，不写 Qoder IDE 的设置文件。
+    func testJetBrainsAlwaysAllowUsesPluginServerAndSkipsIdeFiles() {
+        QoderCommandAllowList.locationsForTesting = nil
+        XCTAssertNil(QoderCommandAllowList.locations(for: .jetbrains_plugin))
+        XCTAssertNil(QoderCommandAllowList.locations(for: .jetbrains_cn_plugin))
+        XCTAssertTrue(QoderCommandAllowList.socketPath(for: .jetbrains_plugin)?
+            .hasSuffix("/.qoder/shared_client/qoder.sock") == true)
+        XCTAssertTrue(QoderCommandAllowList.socketPath(for: .jetbrains_cn_plugin)?
+            .hasSuffix("/.qoder-cn/shared_client/qodercn.sock") == true)
+        XCTAssertEqual(PermissionDecisionValue.allowAlways.buttonLabel(for: .jetbrains_plugin),
+                       "始终允许")
+        XCTAssertEqual(PermissionDecisionValue.allowAlways.buttonLabel(for: .jetbrains_cn_plugin),
+                       "始终允许")
+
+        QoderCommandAllowList.locationsForTesting = { provider in
+            if provider == .jetbrains_plugin || provider == .jetbrains_cn_plugin { return nil }
+            return (ui: self.directory.appendingPathComponent("settings.json"),
+                    runtime: self.directory.appendingPathComponent("app-config.json"))
+        }
+        installRPC()
+        let outcome = QoderCommandAllowList.remember(command: "git status",
+                                                     toolName: "Bash",
+                                                     provider: .jetbrains_plugin)
+        guard case .remembered = outcome else {
+            return XCTFail("expected remembered, got \(outcome)")
+        }
+        XCTAssertEqual(globalUpdates[0]["terminalRunMode"] as? String, "fullAccess")
+        XCTAssertEqual(globalUpdates[0]["webToolsExecutionMode"] as? String, "enabledAskEveryTime")
+        XCTAssertEqual(globalUpdates[0]["planModeRunConfig"] as? String, "askEveryTime")
+        XCTAssertEqual(updates[0]["terminalRunMode"] as? String, "fullAccess")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent("settings.json").path))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent("app.json").path))
     }
 
     // MARK: - 夹具

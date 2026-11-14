@@ -29,7 +29,8 @@ enum PermissionDecisionValue: String {
     func buttonLabel(for provider: AgentProvider) -> String {
         guard self == .allowAlways else { return label }
         switch provider {
-        case .qoder_ide, .qoder_cn_ide, .qoder_cli, .qoder_cn_cli:
+        case .qoder_ide, .qoder_cn_ide, .qoder_cli, .qoder_cn_cli,
+             .jetbrains_plugin, .jetbrains_cn_plugin:
             return "始终允许"
         default:
             return label

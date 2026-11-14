@@ -269,12 +269,14 @@ enum HelperTemplate {
         # CN 发行版（Qoder CN / 通义灵码）与英文版是同一套代码，只有产品名不同。
         # 安装器在启动器里 export BETTERFOCUS_VARIANT=cn，识别结果整体换到 _cn
         # 命名空间；这样 IDE 内置、CLI、插件三种形态依然各自可辨，不会因为
-        # 「一律改成 qoder_cn」而丢掉 IDE 与 CLI 的区别。
+        # 「一律改成 qoder_cn」而丢掉 IDE 与 CLI 的区别。插件换成
+        # jetbrains_cn_plugin，因为英文版和国内版可以同时装在同一个 IDE 里。
         _VARIANT = os.environ.get("BETTERFOCUS_VARIANT") or ""
         _CN_PRODUCT_MAP = {
             "qoder": "qoder_cn",
             "qoder_ide": "qoder_cn_ide",
             "qoder_cli": "qoder_cn_cli",
+            "jetbrains_plugin": "jetbrains_cn_plugin",
         }
 
 

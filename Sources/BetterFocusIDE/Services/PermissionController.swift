@@ -149,7 +149,7 @@ final class PermissionController: ObservableObject {
 
     /// 做出决策：下发应答文件，记录 choice，给一次反馈，短暂停留后收起。
     ///
-    /// Qoder IDE 的「始终允许」只改这张卡对应的那一项设置。
+    /// Qoder IDE 和 JetBrains 里 Qoder 插件的「始终允许」只改这张卡对应的那一项设置。
     /// 读不到语言服务时降级成「允许」。读得到就先把允许交回 hook，
     /// 再写配置：hook 还占着这次调用时，配置更新会一直等到超时，设置页不会变。
     /// Qoder.app 没有能改这条规则的设置页，写进配置会永久作用于整个应用，
