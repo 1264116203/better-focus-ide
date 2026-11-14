@@ -96,7 +96,7 @@ A few hosts differ from a plain reading of the table:
 - **WorkBuddy** questions are not answered on the island. The host's own form appears first; the island only shows a notice, and a click jumps back so you can answer there. Permissions are notice-only as well. `settings.json` does not hot-reload — reopen the current session.
 - **Trae / Trae CN** has no session-end event. The todo tool is visible in the chat, but hooks never receive it, so there is no progress card.
 - **ChatGPT** (formerly Codex) has no `AskUserQuestion` tool name and no matching todo event, so those two cards never appear. After install, trust the hook once inside ChatGPT. Trust it again after the script changes.
-- **OpenCode** has no permission notices and no session end.
+- **OpenCode** has no permission notices and no session end. On v2, the progress card needs `experimental.todo` turned on in `opencode.json`. v1 ships `todowrite` and does not need that flag.
 
 Some hosts also show extra banners: a subtask finished, a document or browser page waiting for review, context about to be compacted or already compacted, a turn that did not finish, or a quota / sign-in failure. A click still jumps back to the original window. Failed tool calls are not announced.
 

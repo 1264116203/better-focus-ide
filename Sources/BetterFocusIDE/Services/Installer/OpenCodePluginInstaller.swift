@@ -60,9 +60,11 @@ enum PluginTemplate {
         //    no reply method, or the island is down, the hook writes nothing.
         // 2. Turn finished: V2 watches the event stream; V1 uses the event hook
         //    for session.idle and session.status { type: idle }.
-        // 3. Todo progress: V2 wraps the todo tool when it still exists. V1
-        //    forwards tool.execute.after for the same names. A removed tool
-        //    simply never enters the hook.
+        // 3. Todo progress. V2's built-in todowrite (experimental.todo) is
+        //    registered by a post plugin, after user plugins, so tool.transform
+        //    never sees it. The completed call arrives as message.part.updated.
+        //    V1 still uses tool.execute.after. Wrapping execute stays as a
+        //    fallback for a tool registered earlier than this plugin.
         //
         // Permission cards are intentionally not implemented on either entry.
         //
@@ -132,7 +134,7 @@ enum PluginTemplate {
           }));
         }
 
-        // 待办整表：OpenCode 的工具名是 todowrite（v2 已移除，wrap 不到就自然跳过）。
+        // 待办整表：v1 与 v2 实验开关（experimental.todo）的工具名都是 todowrite。
         // 字段是 content + status，但这里仍按各家的别名兜一遍，避免版本差异导致丢项。
         function normaliseTodos(input) {
           const args = input && typeof input === 'object' ? input : {};
@@ -215,7 +217,43 @@ enum PluginTemplate {
         // 避免同一轮弹出两张卡。
         let entryClaimed = false;
 
-        const TODO_TOOL_NAMES = new Set(['todowrite', 'todo_write', 'TodoWrite', 'SetTodoList']);
+        // 工具名大小写不统一。v2 实验开关注册的是 todowrite；有的插件叫 todolist。
+        const TODO_TOOL_NAMES = new Set(['todowrite', 'todo_write', 'settodolist', 'todolist']);
+        const sentTodoKeys = new Set();
+
+        function isTodoTool(name) {
+          return TODO_TOOL_NAMES.has(String(name || '').toLowerCase());
+        }
+
+        function claimTodoSend(sessionID, todos) {
+          const key = String(sessionID || '') + '|' + JSON.stringify(todos);
+          if (sentTodoKeys.has(key)) return false;
+          if (sentTodoKeys.size > 128) sentTodoKeys.clear();
+          sentTodoKeys.add(key);
+          return true;
+        }
+
+        async function emitTodoUpdated(sessionID, todos) {
+          if (!todos.length || !claimTodoSend(sessionID, todos)) return;
+          const ok = await sendToIsland({
+            provider: 'opencode', event: 'todo_updated',
+            session_id: sessionID || 'unknown', timestamp: new Date().toISOString(),
+            payload: { todos }
+          });
+          if (!ok) sentTodoKeys.delete(String(sessionID || '') + '|' + JSON.stringify(todos));
+        }
+
+        // v2：内置 todowrite 在用户插件之后才注册，包 execute 是空操作。
+        // 完成态的 part.state.input 才是整表；进行中的更新还没有稳定列表。
+        async function forwardTodoPart(data) {
+          const part = data && data.part;
+          if (!part || part.type !== 'tool' || !isTodoTool(part.name)) return;
+          const state = part.state || {};
+          if (state.status !== 'completed') return;
+          let todos = normaliseTodos(state.input);
+          if (!todos.length) todos = normaliseTodos(state.metadata);
+          await emitTodoUpdated(data.sessionID || data.session_id, todos);
+        }
         const V1_TURN_DEBOUNCE_MS = 2000;
         const v1LastTurnAt = new Map();
 
@@ -311,11 +349,10 @@ enum PluginTemplate {
               });
             });
 
-            // Todo progress: wrap the todo tool so every write forwards the full
-            // list. todowrite is overwrite-semantics (the whole table each time),
-            // which is exactly what the island's todo_updated expects.
+            // 早于本插件注册的 todo 工具（例如排在前面的第三方插件）仍包一层。
+            // 内置实验性 todowrite 不在这里，走上面的 message.part.updated。
             await ctx.tool.transform((tools) => {
-              for (const name of ['todowrite', 'todo_write', 'TodoWrite', 'SetTodoList']) {
+              for (const name of ['todowrite', 'todo_write', 'TodoWrite', 'SetTodoList', 'todolist']) {
                 const tool = tools.get(name);
                 if (!tool) continue;
                 const originalTodo = tool.execute;
@@ -323,15 +360,9 @@ enum PluginTemplate {
                   t.execute = async (input, context) => {
                     const result = await originalTodo(input, context);
                     try {
-                      const todos = normaliseTodos(input);
-                      if (todos.length) {
-                        await sendToIsland({
-                          provider: 'opencode', event: 'todo_updated',
-                          session_id: (context && context.sessionID) || 'unknown',
-                          timestamp: new Date().toISOString(),
-                          payload: { todos }
-                        });
-                      }
+                      await emitTodoUpdated(
+                        (context && context.sessionID) || 'unknown',
+                        normaliseTodos(input));
                     } catch { /* 待办只是过程可视化，绝不影响工具本身 */ }
                     return result;
                   };
@@ -383,6 +414,9 @@ enum PluginTemplate {
                       if (typeof text === 'string' && text) lastPrompt.set(sid, text);
                     }
                   }
+                  if (event.type === 'message.part.updated') {
+                    try { await forwardTodoPart(d); } catch { /* 待办转发失败不影响回合通知 */ }
+                  }
                   if (!TURN_EVENTS.has(event.type)) continue;
                   if (event.type === 'session.status' && (!d.status || d.status.type !== 'idle')) continue;
                   if (!alertsEnabled('turn')) continue;
@@ -421,15 +455,10 @@ enum PluginTemplate {
               "tool.execute.after": async (toolInput) => {
                 try {
                   const name = toolInput && toolInput.tool;
-                  if (!TODO_TOOL_NAMES.has(name)) return;
-                  const todos = normaliseTodos(toolInput && toolInput.args);
-                  if (!todos.length) return;
-                  await sendToIsland({
-                    provider: 'opencode', event: 'todo_updated',
-                    session_id: (toolInput && toolInput.sessionID) || 'unknown',
-                    timestamp: new Date().toISOString(),
-                    payload: { todos }
-                  });
+                  if (!isTodoTool(name)) return;
+                  await emitTodoUpdated(
+                    (toolInput && toolInput.sessionID) || 'unknown',
+                    normaliseTodos(toolInput && toolInput.args));
                 } catch { /* 待办只是过程可视化，绝不影响工具本身 */ }
               },
             };

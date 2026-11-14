@@ -45,6 +45,18 @@ final class OpenCodePluginTemplateTests: XCTestCase {
         XCTAssertTrue(body.contains("todowrite"))
     }
 
+    /// V2 实验开关 `experimental.todo` 注册的 `todowrite` 属于内置后置插件。
+    /// 用户插件的 `tool.transform` 在它之前执行，`tools.get('todowrite')` 永远是空，
+    /// 包 `execute` 不会跑。完成态的整表在 `message.part.updated` 的 `part.state.input` 里。
+    func testV2TodoReadsCompletedToolPart() {
+        XCTAssertTrue(body.contains("'message.part.updated'"),
+                      "必须订阅 message.part.updated，不能只包 todowrite.execute")
+        XCTAssertTrue(body.contains("state.status !== 'completed'"),
+                      "进行中的 part 还没有完整列表，只转发完成态")
+        XCTAssertTrue(body.contains("forwardTodoPart"),
+                      "事件循环里要有待办转发")
+    }
+
     /// 同一个进程如果把两个入口都调了，后进来的那个必须直接返回。
     func testSecondEntryReturnsEarly() {
         XCTAssertTrue(body.contains("entryClaimed"))

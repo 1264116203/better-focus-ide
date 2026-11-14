@@ -218,7 +218,7 @@ xattr -dr com.apple.quarantine /Applications/BetterFocusIDE.app  # 绕过 Gateke
 | 宿主 | 配置文件 | 事件方言 | 注册的事件 | 能力 |
 |------|----------|----------|------------|------|
 | **Qoder** | `~/.qoder/settings.json` | PascalCase | `PermissionRequest` / `PreToolUse` / `Stop` / `SessionEnd` | 提问卡、权限提醒、回合完成、会话结束 |
-| **OpenCode** | 无需配置（插件目录） | JS 事件流 | `session.idle` 等 | 回合完成、会话结束 |
+| **OpenCode** | `~/.config/opencode/plugins/` | JS 事件流 | `session.execution.succeeded`、`message.part.updated`；v1 另有 `tool.execute.after` | 提问卡、回合完成、待办（v2 要 `experimental.todo`）。无权限、无会话结束 |
 | **Cursor** | `~/.cursor/hooks.json` | camelCase | `beforeSubmitPrompt` / `stop` / `sessionEnd` / `subagentStop` / `preCompact` | 回合完成、会话结束，以及子任务 / 即将压缩（观测型，无权限卡） |
 | **WorkBuddy** | `~/.workbuddy/settings.json` 的 `hooks` | PascalCase | `PreToolUse` / `Notification` / `PermissionRequest` / `Stop` / `SessionEnd` | 提问卡、权限提醒、回合完成、会话结束 |
 
@@ -620,7 +620,7 @@ echo '{"provider":"qoder","product":"qoder_ide","event":"turn_finished","session
 | 宿主 | 配置 | 协议 | 能接管 |
 |---|---|---|---|
 | Qoder / Qoder CN | `~/.qoder{,-cn}/settings.json` | matcher 分组 | 提问、权限、回合、会话结束 |
-| OpenCode | `~/.config/opencode/plugins/*.js` | 插件 | 提问、回合 |
+| OpenCode | `~/.config/opencode/plugins/*.js` | 插件 | 提问、回合、待办（v2 要 `experimental.todo`，听 `message.part.updated`） |
 | Cursor | `~/.cursor/hooks.json` | camelCase；不注册权限钩子 | 回合、会话结束、子任务、即将压缩 |
 | WorkBuddy | `~/.workbuddy/settings.json` | PascalCase | 全部 |
 | Claude Code | `~/.claude/settings.json` | PascalCase | 全部 |
